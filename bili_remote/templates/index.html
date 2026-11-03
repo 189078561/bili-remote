@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf }}">
+  <title>{{ app_name }}</title>
+  <link rel="stylesheet" href="/static/styles.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/workspace.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/media-tools.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/ui.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/assistant.css?v={{ asset_version }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <button id="nav-toggle" class="button ghost small" type="button" aria-label="切换导航" aria-expanded="false">☰</button>
+      <div class="brand">
+        <span class="brand-mark small" aria-hidden="true">▶</span>
+        <div>
+          <strong>{{ app_name }}</strong>
+          <span class="version">yt-dlp {{ ytdlp_version }}</span>
+        </div>
+      </div>
+      <div class="account-actions">
+        <span id="service-state" class="service-state"><span class="status-dot online"></span>服务在线</span>
+        <span class="muted">{{ username }}</span>
+        <button id="app-logout" class="button ghost" type="button">退出</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <nav class="app-tabs" aria-label="功能导航">
+        <button class="app-tab active" type="button" data-view="home"><span aria-hidden="true">⌂</span>首页</button>
+        <button class="app-tab" type="button" data-view="files"><span aria-hidden="true">▤</span>文件管理</button>
+        <button class="app-tab" type="button" data-view="publish"><span aria-hidden="true">✦</span>发种助手</button>
+        <button class="app-tab" type="button" data-view="download"><span aria-hidden="true">↓</span>B站下载</button>
+        <button id="settings-entry" class="app-tab settings-entry" type="button" aria-label="打开全局设置"><span aria-hidden="true">⚙</span>设置</button>
+      </nav>
+      <div class="app-sidebar-footer">
+        <span class="muted sidebar-note">媒体处理与发布辅助</span>
+      </div>
+    </aside>
+    <div class="app-main">
+
+  <main id="home-view" class="page app-view overview-page">
+    <section class="hero overview-hero">
+      <div>
+        <p class="eyebrow">BILI REMOTE WORKSPACE</p>
+        <h1>欢迎使用 Bili Remote</h1>
+        <p class="muted">从文件管理开始处理资源，或查看最近任务。</p>
+      </div>
+      <div class="button-row">
+        <button class="button primary home-open" type="button" data-target="download">新建下载</button>
+        <button class="button secondary home-open" type="button" data-target="files">浏览文件</button>
+      </div>
+    </section>
+    <section id="home-summary" class="overview-grid" aria-live="polite" hidden>
+      <article class="card overview-card"><p class="empty">正在读取运行概况…</p></article>
+    </section>
+    <section class="card">
+      <div class="card-heading">
+        <div><p class="eyebrow">WORKSPACES</p><h2>功能入口</h2></div>
+        <button id="home-refresh" class="button ghost small" type="button">刷新概况</button>
+      </div>
+      <div class="overview-links">
+        <button class="overview-link home-open" type="button" data-target="files"><strong>文件管理</strong><span>浏览、重命名、缩略图、报告与种子</span></button>
+        <button class="overview-link home-open" type="button" data-target="download"><strong>B站下载</strong><span>解析链接、选集和管理下载任务</span></button>
+        <button class="overview-link home-open" type="button" data-target="publish"><strong>发种助手</strong><span>选择文件、配置操作、即时查看生成结果</span></button>
+        <button class="overview-link" type="button" data-open-settings><strong>设置</strong><span>统一设置工具默认参数与服务连接</span></button>
+      </div>
+    </section>
+  </main>
+
+  <main id="download-view" class="page app-view hidden">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">REMOTE DOWNLOADER</p>
+        <h1>B站下载</h1>
+        <p class="muted">以账号现有权限下载 B 站内容，不转码，不提供文件分享。</p>
+      </div>
+      <div class="path-chip" title="{{ download_root }}">输出目录：{{ download_root }}</div>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="card account-card">
+        <div class="card-heading">
+          <div>
+            <p class="eyebrow">BILIBILI ACCOUNT</p>
+            <h2>账号状态</h2>
+          </div>
+          <span id="account-dot" class="status-dot"></span>
+        </div>
+        <div class="account-summary">
+          <div class="login-row">
+            <div>
+              <strong>Web 线路</strong>
+              <div id="web-account-status" class="muted">正在读取登录状态…</div>
+            </div>
+            <div class="button-row">
+              <button id="bili-login" class="button primary small" type="button">扫码登录</button>
+              <button id="bili-logout" class="button ghost small hidden" type="button">断开</button>
+            </div>
+          </div>
+          <div class="login-row">
+            <div>
+              <strong>TV 线路</strong>
+              <div id="tv-account-status" class="muted">用于无水印片源</div>
+            </div>
+            <div class="button-row">
+              <button id="tv-login" class="button secondary small" type="button">TV 扫码登录</button>
+              <button id="tv-logout" class="button ghost small hidden" type="button">断开 TV</button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="card download-card">
+        <div class="card-heading">
+          <div>
+            <p class="eyebrow">NEW DOWNLOAD</p>
+            <h2>新建下载</h2>
+          </div>
+        </div>
+        <form id="download-form" class="stack">
+          <label>
+            B 站链接
+            <span class="input-action">
+              <input id="video-url" type="url" placeholder="https://www.bilibili.com/video/BV..." required>
+              <button id="resolve-button" class="button secondary" type="button">解析</button>
+            </span>
+          </label>
+          <label>
+            解析线路
+            <select id="api-mode">
+              <option value="web">Web 线路（账号现有权限）</option>
+              <option value="tv">TV 线路（无水印片源，不解除地区限制）</option>
+            </select>
+          </label>
+          <div id="resolve-result" class="resolve-result hidden"></div>
+          <div id="episode-picker" class="episode-picker hidden">
+            <div class="episode-heading">
+              <strong>选择集数</strong>
+              <span id="episode-selected" class="muted">已选 0 集</span>
+            </div>
+            <div class="button-row">
+              <button id="select-main-episodes" class="button ghost small" type="button">全选正片</button>
+              <button id="clear-episodes" class="button ghost small" type="button">清空选择</button>
+              <label class="episode-sort-control">
+                排序
+                <select id="episode-sort">
+                  <option value="asc">正序</option>
+                  <option value="desc">倒序</option>
+                </select>
+              </label>
+              <span class="episode-scroll-hint">列表可滚动查看全部集数</span>
+            </div>
+            <div id="episode-groups" class="episode-groups" tabindex="0"></div>
+          </div>
+          <label>
+            下载格式
+            <select id="format-selector">
+              <option value="bv*+ba/b">最高可用视频 + 最佳音轨</option>
+            </select>
+          </label>
+          <div class="format-hint-row">
+            <p id="format-hint" class="format-hint" aria-live="polite"></p>
+            <button id="check-batch-formats" class="button ghost small hidden" type="button">检测所选集数</button>
+          </div>
+          <label id="all-parts-row" class="check-row">
+            <input id="all-parts" type="checkbox">
+            <span>下载全部分 P / 合集内容</span>
+          </label>
+          <label>
+            命名模板
+            <input id="job-template" value="{{ single_template }}" required>
+          </label>
+          <input id="single-template" type="hidden" value="{{ single_template }}">
+          <input id="playlist-template" type="hidden" value="{{ playlist_template }}">
+          <label>
+            保存子目录 <span class="muted">（可选，相对于下载根目录）</span>
+            <span class="input-action">
+              <input id="job-output-dir" placeholder="例如：Movies/收藏">
+              <button id="job-output-browse" class="button ghost" type="button">选择目录</button>
+            </span>
+          </label>
+          <p id="download-error" class="form-error" role="alert"></p>
+          <button class="button primary" type="submit">加入下载队列</button>
+        </form>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">QUEUE</p>
+          <h2>下载任务</h2>
+        </div>
+        <button id="refresh-jobs" class="button ghost" type="button">刷新</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>内容</th>
+              <th>状态</th>
+              <th>进度</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-body">
+            <tr><td colspan="5" class="empty">正在加载…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-heading">
+        <div>
+          <p class="eyebrow">PARSE HISTORY</p>
+          <h2>解析历史</h2>
+        </div>
+        <button id="clear-history" class="button ghost small" type="button">清空历史</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>内容</th>
+              <th>线路</th>
+              <th>最近解析</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="history-body">
+            <tr><td colspan="4" class="empty">正在加载…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <main id="files-view" class="page app-view files-page hidden">
+    <section class="files-header">
+      <div>
+        <p class="eyebrow">LOCAL MEDIA BROWSER</p>
+        <h1>文件管理</h1>
+        <p class="muted">选择资源后使用工具栏处理，所有默认参数在设置中管理。</p>
+      </div>
+      <div class="button-row files-header-actions">
+        <button id="screenshot-sessions-button" class="button secondary small" type="button">缩略图记录</button>
+        <details class="file-history-menu"><summary class="button ghost small">工具记录</summary><div class="file-history-items"><button class="button ghost small" type="button" data-file-tool="release-info">媒体报告</button><button class="button ghost small" type="button" data-file-tool="uploads">上传记录</button><button class="button ghost small" type="button" data-file-tool="torrents">种子与 qBittorrent</button></div></details>
+        <button id="file-refresh-button" class="button ghost small" type="button">刷新当前目录</button>
+      </div>
+    </section>
+
+    <div id="file-browser-host" aria-live="polite"></div>
+  </main>
+
+  <div id="file-tool-dock" hidden>
+  <main id="screenshots-view" class="file-tool-content hidden"></main>
+
+  <main id="uploads-view" class="file-tool-content hidden">
+    <section class="files-header">
+      <div>
+        <p class="eyebrow">IMAGE HOST</p>
+        <h2>上传图片</h2>
+        <p class="muted">从统一文件浏览器选择图片，真实上传后保存远程链接、状态和错误，可生成 BBCode、HTML 与 Markdown。</p>
+      </div>
+      <div class="button-row">
+        <button id="uploads-select" class="button primary small" type="button">选择图片上传</button>
+        <button id="uploads-refresh" class="button ghost small" type="button">刷新记录</button>
+      </div>
+    </section>
+    <section class="card">
+      <div class="module-status-row">
+        <div><strong>默认图床</strong><span id="uploads-provider-status" class="muted">正在读取…</span></div>
+        <span id="uploads-status-badge" class="status-badge">未配置</span>
+      </div>
+      <p id="uploads-message" class="form-error" role="status" aria-live="polite"></p>
+    </section>
+    <section class="card"><label hidden>本次图床<select id="uploads-provider"><option value="">使用设置中的默认值</option><option value="pixhost">Pixhost</option><option value="catbox">Catbox</option><option value="imgbb">ImgBB</option></select></label><div id="uploads-job" class="tool-task"></div></section>
+    <section class="card">
+      <div class="card-heading">
+        <div><p class="eyebrow">UPLOAD HISTORY</p><h2>上传记录</h2></div>
+        <div class="button-row">
+          <select id="uploads-link-variant" aria-label="链接版本"><option value="original">原图链接</option><option value="thumbnail">缩略图链接</option></select><button id="uploads-copy-bbcode" class="button ghost small" type="button">复制 BBCode</button>
+          <button id="uploads-copy-html" class="button ghost small" type="button">复制 HTML</button>
+          <button id="uploads-copy-markdown" class="button ghost small" type="button">复制 Markdown</button>
+        </div>
+      </div>
+      <div id="uploads-list" class="module-list" aria-live="polite"><p class="empty">正在读取…</p></div>
+      <div id="uploads-format-output" class="output-preview hidden">
+        <pre></pre>
+        <button class="button secondary small uploads-copy-output" type="button">复制生成内容</button>
+      </div>
+    </section>
+  </main>
+
+  <main id="release-info-view" class="file-tool-content hidden">
+    <section class="files-header">
+      <div>
+        <p class="eyebrow">RELEASE INFORMATION</p>
+        <h2>媒体报告</h2>
+        <p class="muted">从实际媒体探测结果生成媒体信息和文件清单；可编辑、保存并复制发布描述。</p>
+      </div>
+      <div class="button-row">
+        <button id="release-source-select" class="button secondary small" type="button">选择视频或目录</button>
+        <button hidden id="release-output-select" class="button ghost small" type="button">选择输出目录</button>
+      </div>
+    </section>
+    <div id="release-metadata" hidden></div>
+    <section class="card module-form-card tool-stage">
+      
+      <label>源文件或目录<input id="release-source" type="text" readonly placeholder="尚未选择"></label><p id="release-defaults" class="muted"></p><button hidden id="release-reset-defaults" type="button" class="button ghost small">恢复设置中的默认参数</button><div id="release-optical"></div>
+      <details class="tool-advanced"><summary>报告导出与代表文件</summary><div class="module-form-grid">
+        
+        <label>标题<input id="release-title" type="text" maxlength="240" placeholder="留空使用源名称"></label>
+        <label>格式<select id="release-format"><option value="markdown">Markdown</option><option value="bbcode">BBCode</option><option value="text">纯文本</option></select></label>
+        <label>输出子目录<input id="release-output" type="text" placeholder="留空表示发布信息目录根目录"></label>
+        <label>文件名<input id="release-filename" type="text" placeholder="自动生成"></label>
+        <label class="check-row"><input id="release-overwrite" type="checkbox">允许覆盖同名文件</label>
+      </div>
+      <label>代表文件（可选，每行一个相对路径；不同质量分别保留）<textarea id="release-representatives" rows="2"></textarea></label></details>
+      <div class="button-row">
+        <button id="release-analyze" class="button secondary" type="button">生成完整媒体报告</button>
+        <button id="release-save" class="button primary" type="button" disabled>保存报告描述</button>
+        <button id="release-copy" class="button ghost" type="button" disabled>复制报告描述</button>
+      </div>
+      <p id="release-message" class="form-error" role="status" aria-live="polite"></p>
+      <div id="release-job" class="tool-task"></div><div id="release-reports"></div>
+      <div id="release-analysis" class="release-analysis hidden"></div>
+      <label class="release-editor-label">发布描述<textarea id="release-editor" rows="18" placeholder="读取媒体信息后可编辑发布描述"></textarea></label>
+    </section>
+    <section class="card">
+      <div class="card-heading"><div><p class="eyebrow">SAVED</p><h2>报告记录</h2></div><button id="release-refresh" class="button ghost small" type="button">刷新</button></div>
+      <div id="release-list" class="module-list"><p class="empty">正在读取…</p></div>
+    </section>
+  </main>
+
+  <main id="torrents-view" class="file-tool-content hidden">
+    <section class="files-header">
+      <div>
+        <p class="eyebrow">TORRENT TOOLS</p>
+        <h2>种子与 qBittorrent</h2>
+        <p class="muted">本地真实生成 .torrent 文件，并与 qBittorrent 添加操作明确区分。</p>
+      </div>
+      <div class="button-row">
+        <button id="torrent-source-select" class="button secondary small" type="button">选择文件或目录</button>
+        <button hidden id="torrent-output-select" class="button ghost small" type="button">选择种子目录</button>
+      </div>
+    </section>
+    <section class="card module-form-card tool-stage">
+      
+      <label>源文件或目录<input id="torrent-source" type="text" readonly placeholder="尚未选择"></label><p id="torrents-defaults" class="muted"></p><button hidden id="torrents-reset-defaults" type="button" class="button ghost small">恢复设置中的默认参数</button><details class="tool-advanced"><summary>种子文件命名</summary><div class="module-form-grid">
+        
+        <label>种子名称<input id="torrent-name" type="text" placeholder="留空使用源名称"></label>
+        <label>文件名<input id="torrent-filename" type="text" placeholder="自动生成 .torrent"></label>
+        <label hidden>输出子目录<input id="torrent-output" type="text" placeholder="留空表示种子目录根目录"></label>
+        <label hidden>Piece 大小<input id="torrent-piece" type="text" value="" placeholder="auto / 256K / 1M"></label>
+        <label hidden>source 标记<input id="torrent-source-tag" type="text" placeholder="可选"></label>
+      </div>
+      <label hidden>Tracker（每行一个）<textarea id="torrent-trackers" rows="4" placeholder="https://tracker.example/announce"></textarea></label>
+      </details><div id="torrents-job" class="tool-task"></div>
+      <div class="button-row">
+        <label hidden class="check-row"><input id="torrent-private" type="checkbox" checked>私有种子</label>
+        <label class="check-row"><input id="torrent-overwrite" type="checkbox">允许覆盖同名种子</label>
+        <button id="torrent-create" class="button primary" type="button">生成种子文件</button>
+      </div>
+      <p id="torrent-message" class="form-error" role="status" aria-live="polite"></p>
+    </section>
+    <section class="card">
+      <div class="card-heading">
+        <div><p class="eyebrow">QBITTORRENT</p><h2>qBittorrent 连接</h2></div>
+        <div class="button-row">
+          <button id="qbit-test" class="button secondary small" type="button">测试连接</button>
+          <button id="qbit-refresh" class="button ghost small" type="button">读取任务</button>
+        </div>
+      </div>
+      <div id="qbit-status" class="module-status-row"><span class="muted">正在读取 qBittorrent 配置…</span></div>
+      <div id="qbit-message" class="form-error" role="status" aria-live="polite"></div>
+      <div id="qbit-list" class="module-list"></div>
+    </section>
+    <section class="card">
+      <div class="card-heading"><div><p class="eyebrow">BUILDS</p><h2>已生成种子</h2></div><button id="torrent-refresh" class="button ghost small" type="button">刷新</button></div>
+      <div id="torrent-list" class="module-list"><p class="empty">正在读取…</p></div>
+    </section>
+  </main>
+
+  </div>
+
+  <main id="publish-view" class="page app-view assistant-page hidden">
+    <nav class="assistant-steps" aria-label="发种步骤"><button type="button" data-step="files" class="active">1. 选择文件</button><button type="button" data-step="config">2. 配置操作</button><button type="button" data-step="results">3. 生成结果</button></nav>
+    <div class="assistant-grid" data-step="files">
+      <section class="assistant-column assistant-files" data-pane="files">
+        <header class="assistant-heading"><span class="step-icon">▰</span><div><h1>1. 选择文件</h1><p>浏览并选择要处理的文件或目录</p></div></header>
+        <div id="assistant-browser"></div>
+        <p id="assistant-selection" class="muted selection-note">选择视频后自动读取媒体信息；支持多选生成缩略图。</p>
+        <button type="button" class="button primary mobile-next" data-step="config">配置操作 →</button>
+      </section>
+      <section class="assistant-column assistant-config" data-pane="config">
+        <header class="assistant-heading"><span class="step-icon">▣</span><div><h2>2. 配置与操作</h2><p>设置参数并选择需要执行的操作</p></div></header>
+        <details class="assistant-panel" open><summary>媒体信息</summary><div class="panel-body"><div id="assistant-media" class="media-summary"><p class="muted">尚未选择视频或目录</p></div><button id="assistant-report" type="button" class="button ghost small">生成完整媒体报告</button></div></details>
+        <details class="assistant-panel" open><summary>TMDB 搜索</summary><div class="panel-body"><form id="assistant-search" class="tmdb-search"><select id="assistant-type" aria-label="作品类型"><option value="tv">剧集</option><option value="movie">电影</option></select><input id="assistant-query" aria-label="电影或剧集名称" placeholder="电影或剧集名称" maxlength="200" required><button class="button primary" type="submit">搜索</button></form><div id="assistant-matches" class="tmdb-matches"></div><div id="assistant-metadata" class="tmdb-selected"></div><p id="assistant-search-error" class="form-error" role="status"></p></div></details>
+        <details class="assistant-panel" open><summary>截图与缩略图</summary><div class="panel-body">
+          <label class="assistant-field">生成类型<select id="assistant-mode"><option value="collage">多图拼接（联系图）</option><option value="single">单张缩略图</option></select></label>
+          <label class="assistant-field" data-grid-option>截图数量<input id="assistant-count" type="number" min="2" max="120" value="12"></label>
+          <label class="assistant-field" data-grid-option>缩略图布局<select id="assistant-layout"><option value="4">4 列（推荐）</option><option value="3">3 列</option><option value="2">2 列</option><option value="5">5 列</option><option value="6">6 列</option><option value="8">8 列</option><option value="10">10 列</option></select></label>
+          <label class="assistant-field">画面宽度<select id="assistant-width"><option value="480">480 px</option><option value="640">640 px</option><option value="960">960 px</option><option value="1280">1280 px</option><option value="1920">1920 px</option></select></label>
+          <label class="assistant-field" data-single-option hidden>截图时间<input id="assistant-time" placeholder="自动取中点 / 00:24:21"></label>
+          <details class="assistant-advanced"><summary>高级采样参数</summary><label class="assistant-field" data-grid-option>网格行数<input id="assistant-rows" type="number" min="1" max="12" value="3"></label><label class="assistant-field">采样方式<select id="assistant-sampling"><option value="uniform">均匀采样</option><option value="random">随机采样</option></select></label><label class="assistant-field">跳过片头（秒）<input id="assistant-start" type="number" min="0" max="86400" value="0"></label><label class="assistant-field">跳过片尾（秒）<input id="assistant-end" type="number" min="0" max="86400" value="0"></label><p class="muted">白底媒体信息栏 · 黑色时间条 · JPG 质量 95</p></details>
+        </div></details>
+        <details class="assistant-panel"><summary>图床上传</summary><div class="panel-body"><label class="assistant-field">使用图床<select id="assistant-provider"><option value="">设置中的默认图床</option><option value="pixhost">Pixhost</option><option value="catbox">Catbox</option><option value="imgbb">ImgBB</option></select></label><p class="muted">上传当前完整缩略图，结果中直接复制 URL 和 BBCode。</p><button type="button" class="button secondary" id="assistant-upload-selected">上传所选图片</button><button type="button" class="button ghost small" data-open-settings>图床设置</button></div></details>
+        <details class="assistant-panel"><summary>发布信息</summary><div class="panel-body"><p class="muted">结合媒体信息和 TMDB 生成内容；手动编辑的字段会保留。</p><button id="assistant-compose" type="button" class="button secondary">生成发布信息</button><button id="assistant-save" type="button" class="button ghost small">保存发布草稿</button><details class="assistant-advanced"><summary>其他发布工具</summary><div class="button-row"><button type="button" id="assistant-legacy-open" class="button ghost small">完整发布编辑器</button><button type="button" data-assistant-tool="release-info" class="button ghost small">MediaInfo / BDInfo</button><button type="button" data-assistant-tool="uploads" class="button ghost small">上传记录</button><button type="button" id="assistant-rename" class="button ghost small">批量重命名</button></div></details></div></details>
+        <details class="assistant-panel"><summary>种子制作</summary><div class="panel-body"><label>Tracker（每行一个）<textarea id="assistant-trackers" rows="2" placeholder="留空使用全局设置"></textarea></label><label class="inline-check"><input id="assistant-private" type="checkbox" checked>私有种子</label><button id="assistant-torrent" type="button" class="button secondary">制作种子</button><button type="button" data-assistant-tool="torrents" class="button ghost small">高级参数 / qBittorrent</button></div></details>
+        <details class="assistant-panel"><summary>组合执行</summary><div class="panel-body"><label class="inline-check"><input id="assistant-batch-report" type="checkbox">完整媒体报告</label><label class="inline-check"><input id="assistant-batch-thumbnail" type="checkbox" checked>生成缩略图</label><label class="inline-check"><input id="assistant-batch-upload" type="checkbox">上传缩略图</label><label class="inline-check"><input id="assistant-batch-publish" type="checkbox" checked>生成发布信息</label><label class="inline-check"><input id="assistant-batch-torrent" type="checkbox">制作种子</label><button id="assistant-run" type="button" class="button primary full-width">执行所选操作</button></div></details>
+          <button id="assistant-generate" type="button" class="button primary full-width">开始生成缩略图</button>
+        <div id="assistant-jobs" class="assistant-jobs" aria-live="polite"></div><p id="assistant-error" class="form-error" role="alert"></p>
+        <button type="button" class="button secondary mobile-next" data-step="results">查看结果 →</button>
+      </section>
+      <section class="assistant-column assistant-results" data-pane="results">
+        <header class="assistant-heading"><span class="step-icon">◎</span><div><h2>3. 生成结果</h2><p>实时预览，可直接下载或上传图床</p></div></header>
+        <nav class="assistant-result-tabs" aria-label="结果类型" role="tablist"><button type="button" data-result="preview" role="tab" aria-selected="true" class="active">发布预览</button><button type="button" data-result="thumbnail" role="tab" aria-selected="false">缩略图</button><button type="button" data-result="links" role="tab" aria-selected="false">图床链接</button><button type="button" data-result="torrent" role="tab" aria-selected="false">种子结果</button></nav>
+        <div data-result-pane="preview" class="assistant-result-pane" role="tabpanel">
+          <p id="assistant-edit-note" class="muted">生成后可直接编辑，修改自动保存在当前浏览器。</p>
+          <label class="result-label"><span>主标题<button type="button" class="button ghost small" data-copy="assistant-title">复制</button></span><textarea id="assistant-title" rows="2" maxlength="240" placeholder="根据文件与 TMDB 生成主标题"></textarea></label>
+          <label class="result-label"><span>副标题<button type="button" class="button ghost small" data-copy="assistant-subtitle">复制</button></span><textarea id="assistant-subtitle" rows="2" placeholder="中文片名、年份与类型"></textarea></label>
+          <label class="result-label"><span>简介<button type="button" class="button ghost small" data-copy="assistant-description">复制</button></span><textarea id="assistant-description" rows="10" placeholder="TMDB 剧情简介与真实媒体信息"></textarea></label>
+          <div id="assistant-report-output"></div><details class="assistant-advanced"><summary>即时排版预览</summary><div id="assistant-live-preview"></div></details>
+          <div class="button-row"><button id="assistant-regenerate" type="button" class="button secondary">重新生成</button><button id="assistant-copy-all" type="button" class="button ghost small">复制 BBCode</button></div>
+        </div>
+        <div data-result-pane="thumbnail" class="assistant-result-pane" role="tabpanel" hidden><div id="assistant-images"><div class="assistant-empty"><span>▧</span><p>选择视频，生成完整缩略图</p><small>单图与多图均支持直接下载和上传</small></div></div></div>
+        <div data-result-pane="links" class="assistant-result-pane" role="tabpanel" hidden><div id="assistant-links"><p class="empty">上传成功后在这里显示 URL 和 BBCode</p></div></div>
+        <div data-result-pane="torrent" class="assistant-result-pane" role="tabpanel" hidden><div id="assistant-torrents"><p class="empty">制作完成后可直接下载种子</p></div></div>
+      </section>
+    </div>
+    <section id="assistant-extra-tools" hidden><button id="assistant-tools-close" type="button" class="button secondary">← 返回发种助手</button><div id="assistant-tool-content"></div></section>
+    <section id="assistant-legacy" hidden><button id="assistant-legacy-close" type="button" class="button secondary">← 返回发种助手</button>
+    <section class="files-header">
+      <div>
+        <p class="eyebrow">PT PUBLISH HELPER</p>
+        <h1>发布资料</h1>
+        <p class="muted">选择资源与作品，汇总已有报告、截图和种子，编辑后复制发布内容。</p>
+      </div>
+      <div class="button-row"><button id="publish-source-select" class="button secondary small" type="button">选择资源</button><button id="publish-new" class="button ghost small" type="button">新建草稿</button><button id="publish-refresh" class="button ghost small" type="button">刷新资料</button></div>
+    </section>
+    <div class="publish-resource-bar"><strong id="publish-resource-label">尚未选择资源</strong><span id="publish-dirty" class="muted"></span><button id="publish-locate" class="button ghost small" type="button">在文件管理中查看</button></div>
+    <div class="publish-workspace"><div class="publish-edit-pane">
+    <section class="card"><h2 class="tool-step">作品资料 <span>查找或读取已保存资料</span></h2><div id="publish-metadata"></div></section>
+    <section class="card module-form-card tool-stage">
+      
+      <div class="module-form-grid">
+        <label>英文主标题<input id="publish-title" type="text" maxlength="240" placeholder="发布标题"></label>
+        <label>媒体报告<select id="publish-release-select"><option value="">不关联</option></select></label>
+        <label>种子<select id="publish-torrent-select"><option value="">不关联</option></select></label>
+      </div>
+      <details class="publish-attributes"><summary>资源参数与分类标签</summary><div class="module-form-grid">
+        <label>海报（已上传图片，可选）<select id="publish-poster_upload_id"><option value="">使用影视资料中的海报链接</option></select></label><label>中文副标题<input id="publish-subtitle"></label><label>搜索关键词<input id="publish-keywords"></label>
+        <label>季号<input id="publish-season"></label><label>分辨率<input id="publish-resolution"></label>
+        <label>片源<input id="publish-source" placeholder="WEB-DL / BluRay / DVD"></label><label>动态范围<input id="publish-hdr"></label>
+        <label>视频编码<input id="publish-video_codec" placeholder="H264 / H265 / AV1"></label><label>音频编码<input id="publish-audio_codec"></label>
+        <label>制作组<input id="publish-group"></label><label>资源类型<select id="publish-category"><option value="">请选择</option><option value="Movie">电影</option><option value="TV">电视剧</option><option value="Animation">动画</option><option value="Documentary">纪录片</option></select></label>
+        <label>质量<select id="publish-quality"><option value="">请选择</option><option value="WEB-DL">WEB-DL</option><option value="Encode">Encode</option><option value="Remux">Remux</option><option value="Blu-ray">Blu-ray 原盘</option><option value="DVD">DVD 原盘</option></select></label>
+        <label>地区<input id="publish-region"></label><label>字幕 / 配音标签<input id="publish-tags" placeholder="按实际轨道确认"></label>
+        <label>报告排版<select id="publish-report_wrapper"><option value="hide">hide=MediaInfo / BDInfo</option><option value="quote">quote</option></select></label>
+      </div>
+      <div class="button-row"><button id="publish-generate-title" class="button secondary" type="button">生成英文主标题与副标题</button><label class="check-row"><input id="publish-encoder_confirmed" type="checkbox">已确认 x264 / x265 编码器信息</label><label class="check-row"><input id="publish-classification_confirmed" type="checkbox">已核对类型、质量、地区及标签</label></div>
+      </details><details class="publish-artifacts"><summary>报告与截图 · 查看来源及调整选择</summary><h3>原始媒体报告</h3><div id="publish-reports"><p class="muted">选择发布信息记录后，可查看和勾选报告。</p></div>
+      </details><label>发布简介<textarea id="publish-description" rows="10" placeholder="可留空并自动使用所选发布信息"></textarea></label>
+      <details class="publish-artifacts"><summary>截图选择与顺序</summary><div class="publish-upload-picker">
+        <strong>所选资源的已上传图片</strong><label class="check-row"><input id="publish-show-all-images" type="checkbox">手动关联其他已有图片</label>
+        <div id="publish-upload-list" class="publish-upload-list"><span class="muted">正在读取…</span></div>
+      </div>
+      </details><div class="button-row">
+        <button id="publish-create" class="button primary" type="button">更新发布内容</button>
+        <button id="publish-update" class="button secondary" type="button">保存草稿</button>
+        <button id="publish-qbit" class="button ghost" type="button" disabled>添加到 qBittorrent</button>
+      </div>
+      <p id="publish-message" class="form-error" role="status" aria-live="polite"></p>
+    </section>
+    </div><div class="publish-preview-pane"><section id="publish-output-card" class="card">
+      <div class="card-heading">
+        <div><p class="eyebrow">READY TO COPY</p><h2 id="publish-output-title">发布内容</h2></div>
+        <div class="button-row">
+          <select id="publish-format-select" aria-label="发布内容格式"><option value="bbcode">BBCode</option><option value="html">HTML</option><option value="markdown">Markdown</option></select>
+          <button id="publish-copy" class="button primary small" type="button">复制当前格式</button>
+        </div>
+      </div>
+      <div id="publish-warnings" class="release-warnings"></div>
+      <textarea id="publish-output" rows="24" readonly placeholder="更新发布内容后在这里预览。资料缺失也可保存和复制草稿。"></textarea>
+    </section>
+    </div></div><section class="card">
+      <div class="card-heading"><div><h2>历史草稿</h2></div></div>
+      <div id="publish-list" class="module-list"><p class="empty">正在读取…</p></div>
+    </section>
+  </section>
+    <div id="assistant-notifications" class="assistant-notifications" aria-live="polite"></div>
+  </main>
+
+  <main id="settings-view" class="page app-view settings-page hidden" aria-labelledby="settings-title">
+    <header class="settings-page-header">
+      <div class="settings-title-block">
+        <button id="settings-back" class="button ghost small" type="button">← 返回</button>
+        <div>
+          <p class="eyebrow">GLOBAL SETTINGS</p>
+          <h1 id="settings-title">全局设置</h1>
+          <p class="muted">统一管理应用默认行为、目录、下载和剧集重命名。保存只影响后续操作。</p>
+        </div>
+      </div>
+      <div class="settings-header-status">
+        <span id="settings-dirty-indicator" class="settings-dirty-indicator">已保存</span>
+        <span id="settings-save-status" class="file-action-status" role="status" aria-live="polite"></span>
+      </div>
+    </header>
+
+    <div class="settings-layout">
+      <aside class="settings-sidebar">
+        <label class="settings-mobile-picker">
+          设置分类
+          <select id="settings-group-select"></select>
+        </label>
+        <nav id="settings-group-nav" class="settings-group-nav" aria-label="设置分类"></nav>
+        <p class="muted settings-sidebar-note">修改后点击底部“保存设置”。命名预设独立即时保存。</p>
+      </aside>
+      <section id="settings-content" class="settings-content" aria-live="polite">
+        <p class="empty">正在读取设置…</p>
+      </section>
+    </div>
+
+    <footer id="settings-savebar" class="settings-savebar">
+      <div>
+        <strong id="settings-savebar-title">设置已保存</strong>
+        <span id="settings-savebar-detail" class="muted">所有修改均已写入服务端。</span>
+      </div>
+      <div class="button-row">
+        <button id="settings-cancel" class="button ghost" type="button" disabled>取消修改</button>
+        <button id="settings-reset-group" class="button secondary" type="button">恢复本节默认值</button>
+        <button id="settings-save" class="button primary" type="button" disabled>保存设置</button>
+      </div>
+    </footer>
+  </main>
+
+    </div>
+  </div>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-panel">
+      <button id="modal-close" class="modal-close" type="button" aria-label="关闭">×</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v={{ asset_version }}"></script>
+  <script src="/static/file-browser.js?v={{ asset_version }}"></script>
+  <script src="/static/collage.js?v={{ asset_version }}"></script>
+  <script src="/static/settings-fields.js?v={{ asset_version }}"></script>
+  <script src="/static/settings-profiles.js?v={{ asset_version }}"></script>
+  <script src="/static/media-tools.js?v={{ asset_version }}"></script>
+  <script src="/static/modules.js?v={{ asset_version }}"></script>
+  <script src="/static/ui.js?v={{ asset_version }}"></script>
+  <script src="/static/workspace.js?v={{ asset_version }}"></script>
+  <script src="/static/settings.js?v={{ asset_version }}"></script>
+  <script src="/static/assistant.js?v={{ asset_version }}"></script>
+</body>
+</html>

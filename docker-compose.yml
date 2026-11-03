@@ -1,0 +1,45 @@
+services:
+  bili-remote:
+    build:
+      context: .
+    image: bili-remote:1.0.0
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /data
+      DOWNLOAD_ROOT_CONTAINER: /downloads
+      IMPORTS_ROOT: /imports
+      STAGING_ROOT: /staging
+      RELEASES_ROOT: /releases
+      TORRENTS_ROOT: /torrents
+      IMAGES_ROOT: /images
+      RELEASE_INFO_ROOT: /release-info
+      TZ: ${TZ:-Asia/Shanghai}
+      YTDLP_VERSION: "2026.8.19"
+      ARIA2_ENABLED: ${ARIA2_ENABLED:-true}
+      ARIA2_CONNECTIONS: ${ARIA2_CONNECTIONS:-16}
+      ARIA2_RESUME_RETRIES: ${ARIA2_RESUME_RETRIES:-2}
+      ARIA2_MIN_SPLIT_SIZE: ${ARIA2_MIN_SPLIT_SIZE:-20M}
+      ARIA2_PIECE_SIZE: ${ARIA2_PIECE_SIZE:-5M}
+      TV_CDN_PROBE: ${TV_CDN_PROBE:-true}
+      CDN_PROBE_TIMEOUT_SECONDS: ${CDN_PROBE_TIMEOUT_SECONDS:-3}
+      CDN_PROBE_SAMPLE_BYTES: ${CDN_PROBE_SAMPLE_BYTES:-524288}
+      CDN_PROBE_CONNECTIONS: ${CDN_PROBE_CONNECTIONS:-8}
+      LINE_COMPARE: ${LINE_COMPARE:-true}
+    ports:
+      - "8111:8080"
+    volumes:
+      - "${DATA_ROOT_HOST:-./data}:/data"
+      - "${DOWNLOAD_ROOT_HOST:-./downloads}:/downloads"
+      - "${IMPORTS_ROOT_HOST:-./imports}:/imports"
+      - "${STAGING_ROOT_HOST:-./staging}:/staging"
+      - "${RELEASES_ROOT_HOST:-./releases}:/releases"
+      - "${TORRENTS_ROOT_HOST:-./torrents}:/torrents"
+      - "${IMAGES_ROOT_HOST:-./images}:/images"
+      - "${RELEASE_INFO_ROOT_HOST:-./release-info}:/release-info"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 20s

@@ -1,0 +1,370 @@
+(function () {
+  "use strict";
+
+  const els = {
+    view: document.querySelector("#settings-view"),
+    content: document.querySelector("#settings-content"),
+    groupNav: document.querySelector("#settings-group-nav"),
+    groupSelect: document.querySelector("#settings-group-select"),
+    save: document.querySelector("#settings-save"),
+    cancel: document.querySelector("#settings-cancel"),
+    reset: document.querySelector("#settings-reset-group"),
+    dirty: document.querySelector("#settings-dirty-indicator"),
+    status: document.querySelector("#settings-save-status"),
+    savebarTitle: document.querySelector("#settings-savebar-title"),
+    savebarDetail: document.querySelector("#settings-savebar-detail"),
+    back: document.querySelector("#settings-back")
+  };
+
+  let schema = null;
+  let settings = null;
+  let savedValues = {};
+  let draftValues = {};
+  let savedDirectories = {};
+  let draftDirectories = {};
+  let activeGroup = null;
+  let loaded = false;
+  let loadingPromise = null;
+  let saving = false;
+
+  function clone(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function directoryMap(items) {
+    return Object.fromEntries((items || []).map(item => [item.key, {
+      mount_key: item.mount_key,
+      relative_path: item.relative_path
+    }]));
+  }
+
+  function fieldsForGroup(group) {
+    return group.sections.flatMap(section => section.fields || []);
+  }
+
+  function editableFields() {
+    return (schema?.groups || []).flatMap(fieldsForGroup).filter(
+      field => !field.read_only && field.control !== "directory"
+    );
+  }
+
+  function changedValues() {
+    const changed = {};
+    for (const field of editableFields()) {
+      const before = savedValues[field.key];
+      const after = draftValues[field.key];
+      if (JSON.stringify(before) !== JSON.stringify(after)) changed[field.key] = after;
+    }
+    return changed;
+  }
+
+  function changedDirectories() {
+    const changed = {};
+    for (const [key, value] of Object.entries(draftDirectories)) {
+      if (JSON.stringify(value) !== JSON.stringify(savedDirectories[key])) changed[key] = value;
+    }
+    return changed;
+  }
+
+  function dirtyCount() {
+    return Object.keys(changedValues()).length + Object.keys(changedDirectories()).length;
+  }
+
+  function setStatus(text, kind = "") {
+    els.status.textContent = text || "";
+    els.status.classList.toggle("error", kind === "error");
+    els.status.classList.toggle("success", kind === "success");
+  }
+
+  function updateDirtyState() {
+    const count = dirtyCount();
+    const dirty = count > 0;
+    els.dirty.textContent = dirty ? `${count} 项未保存` : "已保存";
+    els.dirty.classList.toggle("dirty", dirty);
+    els.save.disabled = !dirty || saving;
+    els.cancel.disabled = !dirty || saving;
+    els.savebarTitle.textContent = dirty ? "有未保存的设置" : "设置已保存";
+    els.savebarDetail.textContent = dirty
+      ? "保存后会更新服务端配置；运行中的解析或下载不会受影响。"
+      : "所有修改均已写入服务端。";
+  }
+
+  function markChanged() {
+    setStatus("");
+    updateDirtyState();
+  }
+
+  function renderNavigation() {
+    els.groupNav.replaceChildren();
+    els.groupSelect.replaceChildren();
+    for (const group of schema.groups) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "settings-group-button";
+      item.dataset.group = group.key;
+      item.textContent = group.title;
+      item.classList.toggle("active", group.key === activeGroup);
+      item.setAttribute("aria-current", group.key === activeGroup ? "page" : "false");
+      item.addEventListener("click", () => selectGroup(group.key));
+      els.groupNav.append(item);
+
+      const option = document.createElement("option");
+      option.value = group.key;
+      option.textContent = group.title;
+      els.groupSelect.append(option);
+    }
+    els.groupSelect.value = activeGroup;
+  }
+
+  function renderSection(group, section) {
+    const card = document.createElement("article");
+    card.className = "card settings-card settings-section";
+    card.dataset.section = section.key;
+    const heading = document.createElement("div");
+    heading.className = "card-heading";
+    const copy = document.createElement("div");
+    copy.append(element("h2", null, section.title));
+    if (section.description) copy.append(element("p", "muted", section.description));
+    heading.append(copy);
+    if (section.advanced) heading.append(element("span", "settings-badge", "高级"));
+    card.append(heading);
+
+    if (section.renderer === "naming-profiles") {
+      if (!window.NamingProfilesEditor) {
+        card.append(element("p", "form-error", "命名预设组件未加载"));
+      } else {
+        const host = element("div", "naming-profiles-editor");
+        card.append(host);
+        new window.NamingProfilesEditor(host);
+      }
+      return card;
+    }
+
+    if(group.key === "collage" && section.key === "layout") {
+      const presets=element("div","button-row layout-presets");
+      for(const [label,columns,rows] of [["九宫格 3×3",3,3],["5×4",5,4],["1×4",1,4],["自动排布",null,null]]) {
+        const preset=element("button","button secondary small",label);preset.type="button";
+        preset.addEventListener("click",()=>{
+          draftValues.collage_default_layout_mode=columns ? "grid" : "count";
+          if(columns){draftValues.collage_default_columns=columns;draftValues.collage_default_rows=rows;}
+          markChanged();renderGroup();
+        });presets.append(preset);
+      }
+      card.append(presets);
+    }
+    const grid = element("div", section.advanced ? "settings-field-grid advanced-grid" : "settings-field-grid");
+    for (const field of section.fields) {
+      const context = {
+        directories: draftDirectories,
+        mountRoots: settings?.mount_roots || [],
+        secretsConfigured: settings?.secrets_configured || {},
+        onChange: value => {
+          draftValues[field.key] = value;
+          markChanged();
+          updateMediaFields();
+        },
+        onDirectoryChange: (key, value) => {
+          draftDirectories[key] = value;
+          markChanged();
+        },
+        onError: message => setStatus(message, "error")
+      };
+      grid.append(window.SettingsFields.renderField(field, draftValues[field.key], context));
+    }
+    if (section.advanced) {
+      const details = document.createElement("details");
+      details.className = "settings-advanced";
+      const summary = document.createElement("summary");
+      summary.textContent = "展开高级参数";
+      details.append(summary, grid);
+      card.append(details);
+    } else {
+      card.append(grid);
+    }
+    return card;
+  }
+
+  function updateMediaFields() {
+    if(activeGroup !== "collage")return;
+    const collage=draftValues.screenshot_output_mode === "collage";
+    const grid=collage && draftValues.collage_default_layout_mode !== "count";
+    const timestamps=draftValues.screenshot_default_sampling === "timestamps";
+    const visibility={
+      collage_default_layout_mode:collage,collage_default_columns:collage,collage_default_rows:grid,
+      collage_default_width:collage,collage_default_gap:collage,collage_default_total:!grid && !timestamps,
+      screenshot_default_timestamps:timestamps,screenshot_default_style:!collage,
+      screenshot_upload_variant:!collage,
+    };
+    for(const [key,visible] of Object.entries(visibility)) {
+      const field=els.content.querySelector(`[data-setting-key="${key}"]`);
+      if(field)field.hidden=!visible;
+    }
+    els.content.querySelectorAll(".layout-presets").forEach(n=>n.hidden=!collage);
+  }
+  function renderGroup() {
+    const group = schema.groups.find(item => item.key === activeGroup) || schema.groups[0];
+    if (!group) return;
+    activeGroup = group.key;
+    els.content.replaceChildren();
+    const heading = element("div", "settings-group-heading");
+    heading.append(element("p", "eyebrow", "SETTINGS"), element("h2", null, group.title));
+    if (group.description) heading.append(element("p", "muted", group.description));
+    els.content.append(heading);
+    const sourceValues = element("datalist");
+    sourceValues.id = "settings-source-values";
+    const customSources = Array.isArray(draftValues.rename_custom_sources)
+      ? draftValues.rename_custom_sources
+      : [];
+    for (const source of [...new Set([...(schema.source_defaults || []), ...customSources])]) {
+      const option = document.createElement("option");
+      option.value = source;
+      sourceValues.append(option);
+    }
+    els.content.append(sourceValues);
+    for (const section of group.sections) els.content.append(renderSection(group, section));
+    updateMediaFields();
+    renderNavigation();
+    updateDirtyState();
+  }
+
+  function selectGroup(key) {
+    activeGroup = key;
+    renderGroup();
+    const url = new URL(window.location.href);
+    url.searchParams.set("group", key);
+    window.history.replaceState(window.history.state, "", url);
+  }
+
+  async function load() {
+    if (loaded) return;
+    if (loadingPromise) return loadingPromise;
+    loadingPromise = (async () => {
+      setStatus("正在读取设置…");
+      try {
+        const [nextSchema, nextSettings] = await Promise.all([
+          api("/api/settings/schema"),
+          api("/api/settings")
+        ]);
+        schema = nextSchema;
+        settings = nextSettings;
+        savedValues = {...nextSettings.values};
+        draftValues = clone(savedValues);
+        savedDirectories = directoryMap(nextSettings.directories);
+        draftDirectories = clone(savedDirectories);
+        const requestedGroup = new URL(window.location.href).searchParams.get("group");
+        activeGroup = schema.groups.some(group => group.key === requestedGroup)
+          ? requestedGroup
+          : schema.groups[0]?.key;
+        loaded = true;
+        renderGroup();
+        setStatus("设置已载入", "success");
+      } catch (error) {
+        els.content.replaceChildren(element("p", "form-error", `设置读取失败：${error.message}`));
+        setStatus("设置读取失败", "error");
+      } finally {
+        loadingPromise = null;
+      }
+    })();
+    return loadingPromise;
+  }
+
+  async function save() {
+    const values = changedValues();
+    const directories = changedDirectories();
+    if (!Object.keys(values).length && !Object.keys(directories).length) {
+      setStatus("没有需要保存的修改", "success");
+      return;
+    }
+    saving = true;
+    setStatus("正在保存设置…");
+    els.save.classList.add("is-busy");
+    els.save.setAttribute("aria-busy", "true");
+    updateDirtyState();
+    try {
+      const payload = {};
+      if (Object.keys(values).length) payload.values = values;
+      if (Object.keys(directories).length) payload.directories = directories;
+      settings = await api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+      savedValues = {...settings.values};
+      draftValues = clone(savedValues);
+      savedDirectories = directoryMap(settings.directories);
+      draftDirectories = clone(savedDirectories);
+      renderGroup();
+      setStatus("设置已保存，后续操作将使用新配置", "success");
+      document.dispatchEvent(new CustomEvent("settings-updated", {detail: settings}));
+      document.dispatchEvent(new CustomEvent("rename-settings-updated", {
+        detail: {
+          rename_default_season: settings.rename_default_season,
+          rename_default_source: settings.rename_default_source,
+          rename_custom_sources: settings.rename_custom_sources
+        }
+      }));
+    } catch (error) {
+      setStatus(error.message, "error");
+    } finally {
+      saving = false;
+      els.save.classList.remove("is-busy");
+      els.save.setAttribute("aria-busy", "false");
+      updateDirtyState();
+    }
+  }
+
+  function cancel() {
+    if (!dirtyCount()) return;
+    draftValues = clone(savedValues);
+    draftDirectories = clone(savedDirectories);
+    renderGroup();
+    setStatus("已取消未保存的修改");
+  }
+
+  function resetGroup() {
+    const group = schema.groups.find(item => item.key === activeGroup);
+    if (!group || !dirtyCount() || confirm(`恢复“${group.title}”的默认值？当前未保存的修改将被替换，仍需点击保存。`)) {
+      if (!group) return;
+      for (const field of fieldsForGroup(group)) {
+        if (field.read_only) continue;
+        if (field.control === "directory") {
+          const key = field.key.replace(/^directories\./, "");
+          draftDirectories[key] = clone(field.default);
+        } else {
+          draftValues[field.key] = clone(field.default);
+        }
+      }
+      renderGroup();
+      setStatus("已载入本节默认值，尚未保存");
+    }
+  }
+
+  function hasUnsavedChanges() {
+    return dirtyCount() > 0;
+  }
+
+  function confirmLeave() {
+    if (!hasUnsavedChanges()) return true;
+    return confirm("有未保存的设置，确定离开设置页面吗？");
+  }
+
+  els.save.addEventListener("click", save);
+  els.cancel.addEventListener("click", cancel);
+  els.reset.addEventListener("click", resetGroup);
+  els.groupSelect.addEventListener("change", () => selectGroup(els.groupSelect.value));
+  document.addEventListener("app:view", event => {
+    if (event.detail?.view === "settings") load();
+  });
+  window.addEventListener("beforeunload", event => {
+    if (!hasUnsavedChanges()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+  document.addEventListener("keydown", event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s" && !els.view.classList.contains("hidden")) {
+      event.preventDefault();
+      if (dirtyCount() && !saving) save();
+    }
+  });
+
+  window.SettingsPage = {load, hasUnsavedChanges, confirmLeave};
+})();
