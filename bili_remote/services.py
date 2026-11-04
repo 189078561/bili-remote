@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import asyncio
 from collections import defaultdict, deque
 from dataclasses import dataclass, replace
 
@@ -68,6 +69,7 @@ class Services:
     publishing: PublishService
     runtime_settings: RuntimeSettingsManager
     login_limiter: LoginRateLimiter
+    v2: object = None
 
     @classmethod
     def build(cls, settings: Settings) -> Services:
@@ -100,7 +102,7 @@ class Services:
         processing.tool_jobs = ToolJobs(database, release_info, torrents, image_hosts, screenshots)
         metadata = MetadataService(database, secret_box)
         runtime_settings = RuntimeSettingsManager(settings, database)
-        return cls(
+        result = cls(
             settings=settings,
             database=database,
             secrets=secret_box,
@@ -125,9 +127,17 @@ class Services:
             login_limiter=LoginRateLimiter(),
         )
 
+        from .v2.runtime import V2Runtime
+        result.v2 = V2Runtime(result)
+        processing.v2_runtime = result.v2
+        manager.completion_hook = result.v2.download_completed
+        return result
+
     async def startup(self) -> None:
         self.database.initialize()
         self.runtime_settings.load()
+        self.v2.configure()
+        await asyncio.to_thread(self.v2.recover)
         self.runner.refresh_aria2_executable()
         self.database.prepare_processing_tasks_on_startup()
         self.collage.cleanup_stale_temporary_directories()

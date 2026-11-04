@@ -416,6 +416,34 @@ MIGRATIONS: tuple[tuple[int, str, str], ...] = (
         );
         CREATE INDEX IF NOT EXISTS idx_media_metadata_source ON media_metadata(source_root_key,source_relative_path);
     """),
+    (5, "v2_resource_rules_and_audit", """
+        CREATE TABLE IF NOT EXISTS naming_memory (
+            id INTEGER PRIMARY KEY, scope TEXT NOT NULL CHECK(scope IN ('global','series','season')),
+            identity_key TEXT NOT NULL, season_key INTEGER NOT NULL DEFAULT -1,
+            rules_json TEXT NOT NULL DEFAULT '{}', revision INTEGER NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            UNIQUE(scope,identity_key,season_key)
+        );
+        CREATE TABLE IF NOT EXISTS download_resource_origins (
+            job_id INTEGER NOT NULL, root_key TEXT NOT NULL, relative_path TEXT NOT NULL,
+            fingerprint TEXT NOT NULL, kind TEXT NOT NULL, bvid TEXT, season_id TEXT, ep_id TEXT,
+            cid TEXT, original_title TEXT, episode_index INTEGER, api_mode TEXT NOT NULL,
+            created_at TEXT NOT NULL, UNIQUE(job_id,root_key,relative_path)
+        );
+        CREATE TABLE IF NOT EXISTS v2_rename_batches (
+            id TEXT PRIMARY KEY, owner TEXT NOT NULL, status TEXT NOT NULL, undo_of TEXT,
+            task_id INTEGER, error TEXT, created_at TEXT NOT NULL, finished_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS v2_rename_items (
+            batch_id TEXT NOT NULL REFERENCES v2_rename_batches(id), ordinal INTEGER NOT NULL,
+            root_key TEXT NOT NULL, source_path TEXT NOT NULL, kind TEXT NOT NULL,
+            temporary_path TEXT NOT NULL, target_path TEXT NOT NULL, before_fingerprint TEXT NOT NULL,
+            after_fingerprint TEXT, status TEXT NOT NULL, intent TEXT, error TEXT,
+            sidecar_json TEXT NOT NULL DEFAULT 'null', PRIMARY KEY(batch_id,ordinal)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_v2_task_idempotency
+            ON processing_tasks(task_type,idempotency_key) WHERE task_type LIKE 'v2_%';
+    """),
 )
 
 

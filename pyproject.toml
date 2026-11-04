@@ -30,7 +30,10 @@ test = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+pythonpath = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100
@@ -42,4 +45,4 @@ select = ["E", "F", "I", "UP"]
 include = ["bili_remote*"]
 
 [tool.setuptools.package-data]
-bili_remote = ["templates/*.html", "static/*"]
+bili_remote = ["templates/*.html", "templates/v2/**/*.html", "static/*", "static/v2/**/*"]

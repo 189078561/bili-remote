@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
+
+current_mutation_task = ContextVar("current_mutation_task", default=None)
+
 import ctypes
 import errno
 import hashlib
@@ -540,6 +544,8 @@ class FileService:
 
     def _dependency_snapshot(self, *, exclude_task_id: int | None = None) -> MutationSnapshot:
         """Read task dependencies once so directory scans stay database-constant."""
+        if exclude_task_id is None:
+            exclude_task_id = current_mutation_task.get()
         values = self._stored_settings()
         exact_paths: set[Path] = set()
         tree_paths: set[Path] = set()
@@ -626,6 +632,16 @@ class FileService:
                     root = workspace_roots.get(str(payload.get("root_key") or ""))
                     if root:
                         add_dependency(root, str(payload.get("relative_path") or ""))
+                if task.get("task_type", "").startswith("v2_"):
+                    refs = list(payload.get("resources", []))
+                    if payload.get("resource"):
+                        refs.append(payload["resource"])
+                    if payload.get("batch_id"):
+                        for operation in self.database.fetch_all("SELECT root_key,source_path,temporary_path,target_path FROM v2_rename_items WHERE batch_id=?", (payload["batch_id"],)):
+                            refs.extend({"root_key": operation["root_key"], "relative_path": operation[key]} for key in ("source_path", "temporary_path", "target_path"))
+                    for ref in refs:
+                        if ref.get("root_key") in BROWSE_ROOTS:
+                            add_dependency(self.category_root(ref["root_key"], values).path, ref["relative_path"])
                 if task.get("task_type") != "file_operation":
                     continue
                 for item in payload.get("items") or []:

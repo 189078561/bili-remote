@@ -1,5 +1,6 @@
 """Browser checks distinguish synthetic V2 contract responses from real legacy tools."""
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -123,17 +124,20 @@ def test_contract_edit_copy_formats_responsive_and_no_draft(live_server):
         playwright.stop()
 
 
-def test_real_browser_unavailable_services_are_honest(live_server):
+def test_real_browser_unconfigured_metadata_is_honest(live_server):
     base_url, _ = live_server
     playwright, browser, page, errors = browser_session(base_url)
     try:
         mount(page)
         page.locator('.file-row[data-path="Media"]').click()
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
-        expect(page.locator('[data-wb="issues"]')).to_contain_text('尚未接入')
-        assert page.locator('[data-edit="release_title"]').input_value() == ''
-        assert page.locator('[data-action="naming"]').is_disabled()
-        expect(page.locator('[data-wb="task-status"]')).to_contain_text('现有工具队列')
+        expect(page.locator('[data-wb="issues"]')).to_contain_text('未配置 TMDB')
+        assert page.evaluate('wb.context.identity') is None
+        assert page.locator('[data-action="naming"]').is_enabled()
+        page.locator('[data-action="naming"]').click()
+        expect(page.locator('[data-wb="rename-warning"]')).to_contain_text('缺少')
+        assert page.locator('[data-action="apply"]').is_disabled()
+        expect(page.locator('[data-wb="task-status"]')).to_contain_text('刷新仅恢复任务')
         assert not errors, errors
     finally:
         browser.close()
@@ -163,6 +167,12 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         mount(page)
         page.locator('.file-row[data-path="Media"]').click()
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
+        expect(page.locator('[data-wb="context-summary"]')).to_contain_text('1 个媒体文件')
+        page.locator('.wb-adjust > summary',has_text='调整识别与规则').click()
+        page.locator('[data-wb="selected-title"]').fill('Synthetic Tool Flow')
+        page.locator('[data-action="overrides"]').click()
+        expect(page.locator('[data-edit="release_title"]')).to_have_value(re.compile('Synthetic Tool Flow'))
+        page.locator('[data-edit="overview"]').fill('Synthetic overview for complete publishing flow')
         page.locator('[data-tab="images"]').click()
         for mode, total in [('single', '1'), ('collage', '4')]:
             page.locator('[data-wb="image-mode"]').select_option(mode)
@@ -195,6 +205,11 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         page.get_by_role('button', name='添加到 qBittorrent', exact=True).click()
         expect(page.locator('[data-wb="notices"]')).to_contain_text('种子已提交到 qBittorrent')
         assert '/api/v2/torrents/add' in qbit_calls
+        page.locator('[data-tab="content"]').click()
+        expect(page.locator('[data-wb="output"]')).to_contain_text('Synthetic Tool Flow')
+        expect(page.locator('[data-wb="output"]')).to_contain_text('Synthetic overview')
+        expect(page.locator('[data-wb="output"]')).to_contain_text('https://images.example/')
+        expect(page.locator('[data-wb="output"]')).to_contain_text('MediaInfo')
         page.goto(base_url + '/static/v2/workbench/index.html')
         expect(page.locator('[data-workbench]')).to_be_visible()
         assert page.locator('[data-edit="release_title"]').input_value() == ''
@@ -247,7 +262,7 @@ def test_slow_responses_and_rename_confirmation(live_server):
         held.clear()
         page.route('**/api/v2/naming/preview', lambda route: held.append(route))
         page.locator('[data-action="naming"]').click()
-        page.locator('.wb-adjust > summary').click()
+        page.locator('.wb-adjust > summary', has_text='调整识别与规则').click()
         page.locator('[data-wb="selected-title"]').fill('新的选名')
         assert held
         held.pop().fulfill(json={"preview_token": "stale", "expires_at": "2099-01-01T00:00:00Z", "context_revision": rev, "can_apply": True, "operations": [], "conflicts": []})
@@ -333,7 +348,7 @@ def test_real_standalone_entry_authentication_search_and_no_storage(live_server)
             page.set_viewport_size({'width': width, 'height': 1000})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         page.locator('.file-row[data-path="Media"] .file-check').check()
-        expect(page.locator('[data-wb="issues"]')).to_contain_text('尚未接入')
+        expect(page.locator('[data-wb="issues"]')).to_contain_text('未配置 TMDB')
         assert page.evaluate('workbench.resources[0].kind') == 'directory'
         assert page.locator('[data-wb="scope"]').input_value() == 'season'
         assert not errors, errors

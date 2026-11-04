@@ -3,7 +3,7 @@
 
   const stylesheet = document.createElement("link");
   stylesheet.rel = "stylesheet";
-  stylesheet.href = new URL("v2/filebrowser/filebrowser.css", document.currentScript.src).href;
+  stylesheet.href = new URL("v2/filebrowser/filebrowser.css", document.currentScript?.src || new URL("/static/file-browser.js", location.href).href).href;
   document.head.append(stylesheet);
 
   const DEFAULT_SORTS = [

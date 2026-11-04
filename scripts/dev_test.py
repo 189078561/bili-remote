@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 GROUPS = {
+    "integration": [],
     "naming": ["tests/test_naming.py", "tests/test_rename_media.py"],
     "subtitle": ["tests/test_assistant_api.py"],
     "workbench": ["tests/test_assistant_api.py", "tests/test_release_tools.py"],
@@ -33,7 +34,7 @@ def main() -> int:
         k: v
         for k, v in os.environ.items()
         if not (
-            k.startswith(("APP_", "ADMIN_", "MINFO_", "PTGEN_", "DOWNLOAD_", "ARIA2_", "CDN_"))
+            k.startswith(("APP_", "ADMIN_", "MINFO_", "PTGEN_", "DOWNLOAD_", "ARIA2_", "CDN_", "V2_", "TMDB_", "BANGUMI_"))
             or k in {"PYTHONPATH", "PYTEST_ADDOPTS", "PYTEST_PLUGINS"}
         )
     }
@@ -70,6 +71,8 @@ def main() -> int:
                 for module in modules
                 if (root / "tests/v2" / module).is_dir()
             )
+        report = root / '.dev' / f'test-results-{args.group}.xml'
+        report.parent.mkdir(parents=True, exist_ok=True)
         return subprocess.run(
             [
                 interpreter,
@@ -77,6 +80,7 @@ def main() -> int:
                 "pytest",
                 "-q",
                 "-ra",
+                f"--junitxml={report}",
                 "--basetemp",
                 str(base / "pytest"),
                 *targets,

@@ -1138,7 +1138,7 @@
       else if (view === "torrents") {
         loadTorrentBuilds();
         loadQbittorrentStatus();
-      } else if (view === "publish") {
+      } else if (view === "publish" && !window.BILI_V2) {
         loadPublishSources();
         loadPublishSessions();
         if(!state.publishRestored) {
@@ -1192,6 +1192,7 @@
   }
 
   function wirePublish() {
+    if (window.BILI_V2) return;
     byId("publish-refresh")?.addEventListener("click", loadPublishSources);
     byId("publish-source-select")?.addEventListener("click",()=>selectPublishSource().catch(error=>message("publish-message",error.message)));
     byId("publish-show-all-images")?.addEventListener("change",()=>loadPublishSources());

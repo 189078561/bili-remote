@@ -91,8 +91,9 @@ def asset_version() -> str:
         APP_DIR / "static" / "workspace.js",
         APP_DIR / "static" / "workspace.css",
     )
+    paths += tuple((APP_DIR / "static" / "v2").rglob("*.js")) + tuple((APP_DIR / "static" / "v2").rglob("*.css"))
     try:
-        return str(max(int(path.stat().st_mtime) for path in paths))
+        return str(max(path.stat().st_mtime_ns for path in paths))
     except OSError:
         return "1"
 
@@ -703,6 +704,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.services = services
+    from .v2.router import register as register_v2
+    register_v2(app, services)
     app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 
     def get_services(request: Request) -> Services:
@@ -779,6 +782,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/legacy", response_class=HTMLResponse)
     @app.get("/", response_class=HTMLResponse)
     @app.get("/settings", response_class=HTMLResponse)
     async def index(
@@ -804,6 +808,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             name="index.html",
             context={
                 "app_name": app_settings.app_name,
+                "v2_enabled": request.url.path != "/legacy" and request.query_params.get("legacy") != "1",
                 "csrf": session.csrf,
                 "username": session.username,
                 "ytdlp_version": app_settings.ytdlp_version,
@@ -2804,6 +2809,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             service_container.runtime_settings.apply(previous_runtime)
             raise
+        if set(updates) & {"tmdb_api_key", "ptgen_url", "ptgen_api_key", "v2_bangumi_enabled", "v2_bangumi_api_key"}:
+            service_container.v2.configure()
         if runtime_parsed:
             service_container.runner.refresh_aria2_executable()
         return settings_payload(service_container)

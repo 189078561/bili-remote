@@ -115,7 +115,7 @@ def normalize_rule(rule: Mapping | None = None) -> dict:
     custom_template = rule.get("custom_template")
     if custom_template is not None and not isinstance(custom_template, str):
         raise SubtitleRuleError("custom_template must be text or null", fields=["custom_template"])
-    if template_id == "custom":
+    if template_id == "custom" or custom_template is not None:
         if custom_template is None or not custom_template or len(custom_template) > 500:
             raise SubtitleRuleError("custom template must contain 1 to 500 characters", fields=["custom_template"])
         if any(ord(ch) < 32 and ch not in "\t\n" for ch in custom_template):

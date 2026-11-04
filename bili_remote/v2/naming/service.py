@@ -86,6 +86,16 @@ class NamingService:
             raise NamingError("invalid_context", "上下文或人工覆盖必须为对象")
         if origins is not None and (not isinstance(origins, list) or len(origins) > 1000 or any(not isinstance(x, dict) for x in origins)):
             raise NamingError("invalid_origins", "下载来源列表无效")
+        from ...file_service import _quick_fingerprint
+        if isinstance(resources, list):
+            canonical = []
+            for ref in resources:
+                path = self.files.path(ref)
+                actual = self.files.reference(ref["root_key"], ref["relative_path"])
+                if ref.get("fingerprint") and ref["fingerprint"] not in {actual["fingerprint"], _quick_fingerprint(path)}:
+                    raise NamingError("stale_resource", "源文件已变化，请重新选择", status=409)
+                canonical.append(actual)
+            resources = canonical
         expanded = await asyncio.to_thread(self.files.expand, resources)
         prior = self._context(context) if context is not None else None
         result = deepcopy(prior) if prior else {
@@ -139,7 +149,20 @@ class NamingService:
             proposal = resolved.get("proposal") or {}
             if proposal.get("episodes") is not None:
                 self.episode_evidence[result["context_id"]] = deepcopy(proposal["episodes"])
+        episode_override = (manual_overrides or {}).get("episode")
+        if episode_override is not None:
+            if not isinstance(episode_override, dict) or set(episode_override) - {"season", "episode", "scope"}:
+                raise NamingError("invalid_episode", "人工季集字段无效")
+            for key in ("season", "episode"):
+                if key in episode_override:
+                    number = episode_override[key]
+                    if type(number) is not int or number < (0 if key == "season" else 1):
+                        raise NamingError("invalid_episode", "人工季集号无效")
+            if episode_override.get("scope", "single") not in {"single", "season"}:
+                raise NamingError("invalid_episode", "范围无效")
         for name, value in (manual_overrides or {}).items():
+            if name == "episode":
+                continue
             value = _value(value)
             if value is not None and (not isinstance(value, (str, int)) or isinstance(value, bool) or len(str(value)) > 500):
                 raise NamingError("invalid_manual_value", "人工名称或年份无效", fields=[name])
@@ -167,7 +190,12 @@ class NamingService:
             if isinstance(effective.get(name), str):
                 source = "manual" if name in self.manual_rules.get(result["context_id"], {}) or name in (rules or {}) else "memory"
                 effective[name] = {**manual_field(effective[name]), "source": source, "manual": source == "manual"}
-        result["effective_rules"] = effective
+        result["effective_rules"] = {
+            "naming_rule": {k: v for k, v in effective.items() if k != "episode_rules"},
+            "episode_rules": effective.get("episode_rules", {}),
+            "subtitle_rule": remembered.get("effective", {}).get("subtitle_rule", {}) if self.memory else {},
+            "sources": remembered.get("effective", {}).get("sources", {}) if self.memory else {},
+        }
         old_files = {(x["ref"]["root_key"], x["ref"]["relative_path"]): x for x in result.get("files", [])}
         result["files"] = []
         semaphore = asyncio.Semaphore(4)
@@ -187,6 +215,11 @@ class NamingService:
             episode = resolve_episode(ref["relative_path"], origin=origin, identity=result.get("identity"),
                 mappings=result.get("episode_mappings", []), tmdb_episodes=self.episode_evidence.get(result["context_id"], []),
                 previous=old.get("episode") if old else None, rules=effective, index=index)
+            if episode_override:
+                for key in ("season", "episode"):
+                    if key in episode_override:
+                        episode["episode"][key] = manual_field(episode_override[key])
+                episode["episode"]["scope"] = episode_override.get("scope", "single")
             result["files"].append({"ref": ref, "probe": probe, "episode": episode["episode"], "sidecars": self.files.sidecars(ref)})
             if episode.get("mapping") and episode["mapping"] not in result["episode_mappings"]:
                 result["episode_mappings"].append(episode["mapping"])
@@ -195,6 +228,14 @@ class NamingService:
             raise NamingError("no_video", "所选资源中没有支持的视频")
         if prior and self.contexts.get(prior["context_id"], {}).get("revision") != prior["revision"]:
             raise NamingError("stale_context", "识别期间上下文已改变，请重试", status=409)
+        result["episode"] = {**result.get("episode", {}), **deepcopy(result["files"][0]["episode"])}
+        if episode_override:
+            result["episode"]["scope"] = episode_override.get("scope", "single")
+        elif any(ref.get("kind") == "directory" for ref in resources) or len(result["files"]) > 1:
+            result["episode"]["scope"] = "season"
+        media_type = (result.get("identity") or {}).get("media_type")
+        default_template = "movie" if media_type == "movie" else "anime" if media_type == "anime" else "tv_season" if result["episode"].get("scope") == "season" else "tv_episode"
+        result["effective_rules"]["subtitle_rule"].setdefault("template_id", default_template)
         self._remember_context(result)
         self.last_changes, self.last_capabilities = changes, capabilities
         return deepcopy(result)
@@ -229,7 +270,7 @@ class NamingService:
                     raise NamingError("invalid_manual_value", "人工名称无效")
             if "sidecars" in overrides and (not isinstance(overrides["sidecars"], list) or len(overrides["sidecars"]) > 1000):
                 raise NamingError("invalid_sidecar", "关联列表无效")
-            chosen_rules = {**current.get("effective_rules", {}), **deepcopy(rules or {})}
+            chosen_rules = {**{**current.get("effective_rules", {}).get("naming_rule", {}), "episode_rules": current.get("effective_rules", {}).get("episode_rules", {})}, **deepcopy(rules or {})}
             from .memory import validate_naming_rule
             validate_naming_rule(rules or {})
             validate_naming_rule({k: v for k, v in chosen_rules.items() if k != "episode_rules"})
@@ -239,7 +280,7 @@ class NamingService:
                 current["metadata"]["year"] = manual_field(years[0])
             signature = json.dumps({"rules": chosen_rules, "overrides": overrides}, sort_keys=True)
             previous_signature = self.plan_signatures.get(current["context_id"])
-            plan_changed = previous_signature != signature and (previous_signature is not None or chosen_rules != current.get("effective_rules", {}) or any(overrides.values()))
+            plan_changed = previous_signature != signature and (previous_signature is not None or chosen_rules != {**current.get("effective_rules", {}).get("naming_rule", {}), "episode_rules": current.get("effective_rules", {}).get("episode_rules", {})} or any(overrides.values()))
             if chosen_rules.get("template_id") == "season":
                 result = self._season_preview(current, overrides, chosen_rules, signature, plan_changed)
                 self.manual_rules.setdefault(current["context_id"], {}).update(deepcopy(rules or {}))
@@ -325,10 +366,11 @@ class NamingService:
     def _accept_plan(self, current, rules, signature, changed):
         if changed:
             current["revision"] += 1
-        current["effective_rules"] = deepcopy(rules)
+        current["effective_rules"]["naming_rule"] = {k: deepcopy(v) for k, v in rules.items() if k != "episode_rules"}
+        current["effective_rules"]["episode_rules"] = deepcopy(rules.get("episode_rules", {}))
         for key in ("source", "group"):
-            if isinstance(current["effective_rules"].get(key), str):
-                current["effective_rules"][key] = manual_field(rules[key])
+            if isinstance(current["effective_rules"]["naming_rule"].get(key), str):
+                current["effective_rules"]["naming_rule"][key] = manual_field(rules[key])
         selected = rules.get("custom_title")
         if rules.get("selected_title_id"):
             selected = next((x["text"] for x in current["titles"] if x["id"] == rules["selected_title_id"]), None)
@@ -449,7 +491,7 @@ class NamingService:
             raise NamingError("invalid_fingerprints", "预期指纹列表无效")
         refs = self.files.expand(resources)
         for ref in refs:
-            expected = expected_fingerprints.get(ref["relative_path"])
+            expected = expected_fingerprints.get(ref["root_key"] + "/" + ref["relative_path"], expected_fingerprints.get(ref["relative_path"]))
             if expected and expected != ref["fingerprint"]:
                 raise NamingError("stale_resource", "探测前源文件已变化", status=409)
         if not self.tasks:
@@ -463,7 +505,7 @@ class NamingService:
         for ref in refs:
             if should_cancel():
                 raise NamingError("cancelled", "探测已取消", status=409)
-            expected = expected_fingerprints.get(ref["relative_path"])
+            expected = expected_fingerprints.get(ref["root_key"] + "/" + ref["relative_path"], expected_fingerprints.get(ref["relative_path"]))
             if expected and expected != ref["fingerprint"]:
                 raise NamingError("stale_resource", "源文件已变化，请重新探测", status=409)
             probe = await self.probe.probe(self.files.path(ref), source_ref=ref)

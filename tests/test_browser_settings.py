@@ -165,6 +165,8 @@ def test_file_checkbox_selection_enables_available_actions(live_server) -> None:
         page.locator("#password").fill("test-password")
         page.locator("#login-form button[type=submit]").click()
         page.wait_for_url(f"{base_url}/")
+        page.locator('.app-tabs').wait_for(state='visible')
+        page.goto(f"{base_url}/legacy")
         page.locator(".file-row.directory").filter(has_text="Media").wait_for(state="visible")
         page.locator(".file-row.directory").filter(has_text="Media").click()
         file_row = page.locator(".file-row.file").filter(has_text="episode01.mp4")

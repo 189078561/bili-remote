@@ -179,8 +179,8 @@
     async applyRules() {
       if (!this.context) return;
       const naming = this.readRule("naming-rule"), subtitle = this.readRule("subtitle-rule"); this.readRule("title-rule");
-      this.context = {...this.context, revision: this.context.revision + 1, effective_rules: {...this.context.effective_rules, naming_rule: naming, subtitle_rule: subtitle}};
-      this.invalidateRename(); this.invalidateContent(); await this.generateAll();
+      this.context = {...this.context, effective_rules: {...this.context.effective_rules, naming_rule: naming, subtitle_rule: subtitle}};
+      this.invalidateRename(); this.invalidateContent(); await this.naming(); await this.generateAll();
     }
     async search() {
       const query = this.el("query").value.trim(); if (!query) throw new Error("请输入作品名称"); const current = this.stamp("search"), text = query;
@@ -235,7 +235,9 @@
     async naming() {
       const current = this.stamp("naming"), revision = this.context.revision;
       const preview = await this.api.naming(this.context, this.readRule("naming-rule", this.context.effective_rules?.naming_rule || {}));
-      if (!current() || this.context?.revision !== revision || preview.context_revision !== revision) return;
+      if (!current() || this.context?.revision !== revision || preview.context_revision < revision) return;
+      this.context = {...this.context, revision: preview.context_revision};
+      this.invalidateContent(); this.scheduleCompose();
       this.preview = preview; this.applyKey = global.crypto.randomUUID(); this.el("rename-list").replaceChildren();
       preview.operations.forEach(op => { const row = node("div", null, "wb-rename-row"); row.append(node("span", op.source.relative_path), node("strong", `→ ${op.target_relative_path}`)); this.el("rename-list").append(row); });
       this.el("rename-warning").textContent = (preview.conflicts || []).map(x => x.message).join("；") || "请核对全部目标路径。确认后由服务端复核指纹与冲突，再执行原地改名。";
@@ -261,18 +263,10 @@
       this.track(result.task, {type: "screenshot", session: result.session_id, epoch});
     }
     async report() {
-      const current = this.stamp("report"), source = this.resources[0];
-      this.el("reports").textContent = "正在后台读取报告，可继续编辑其他区域…";
-      try {
-        const result = await this.api.request("/api/release-info/analyze", {root_key: source.root_key, relative_path: source.relative_path, format: "text"});
-        if (!current()) return;
-        this.el("reports").replaceChildren();
-        for (const report of result.reports || []) {
-          const section = node("article", null, "wb-report"), copy = node("button", "复制报告"); copy.type = "button"; copy.disabled = !report.text; copy.onclick = () => this.copyValue(report.text);
-          section.append(node("h3", `${report.kind} · ${report.source || ""}${report.valid ? "" : " · 非完整报告"}`), copy, node("pre", report.text || "报告工具未返回完整内容")); this.el("reports").append(section);
-        }
-        this.el("reports").append(node("p", (result.warnings || []).join("；"), "wb-note")); this.notice("媒体报告读取完成");
-      } catch (error) { if (current()) this.el("reports").textContent = error.message; throw error; }
+      const epoch=this.epoch, source=this.resources[0];
+      const result=await this.api.request('/api/v2/reports',source);
+      this.el('reports').textContent='正在后台生成媒体报告…';
+      this.track(result.task,{type:'report',epoch});
     }
     async torrent() {
       const source = this.resources[0], epoch = this.epoch;
@@ -305,7 +299,7 @@
           const id = key(task), previous = this.tasks.get(id); this.tasks.set(id, task);
           if (terminal(task)) {
             const notification = `${id}:${task.status}:${task.finished_at || ""}`;
-            if (!initial && !this.notified.has(notification) && (this.jobs.has(id) || (previous && !terminal(previous)))) { this.notice(`${task.task_type}：${{completed: "已完成", failed: "失败", cancelled: "已取消"}[task.status]}${task.error ? ` · ${task.error}` : ""}`, task.status === "failed"); }
+            if (!global.AppTaskCenter && !initial && !this.notified.has(notification) && (this.jobs.has(id) || (previous && !terminal(previous)))) { this.notice(`${task.task_type}：${{completed: "已完成", failed: "失败", cancelled: "已取消"}[task.status]}${task.error ? ` · ${task.error}` : ""}`, task.status === "failed"); }
             this.notified.add(notification);
             if (task.status === "completed" && this.jobs.has(id) && !this.applied.has(id)) { try { await this.applyTask(task, this.jobs.get(id)); this.applied.add(id); } catch (error) { this.notice(`产物读取失败：${error.message}`, true); } }
           }
@@ -334,7 +328,11 @@
           this.resources = resources; this.probedResources = null;
           this.el("resource").textContent = `${resources.length} 项资源 · ${resources[0].relative_path.split("/").at(-1)}`;
           await this.browser?.loadDirectory({clearSelection: true});
-          if (current()) await this.resolve();
+          if (current()) {
+            await this.resolve();
+            this.host.dispatchEvent(new CustomEvent('v2:renamed'));
+            document.dispatchEvent(new CustomEvent('app:files-refresh'));
+          }
         } catch (error) {
           if (current()) { this.el("issues").textContent = `重命名已完成，重新识别未完成：${error.message}。可重新选择资源后继续。`; this.notice(this.el("issues").textContent, true); }
         }
@@ -367,7 +365,21 @@
         this.links = [...new Set([...this.links, ...references.filter(artifact => artifact.kind === "upload" && artifact.url).map(artifact => artifact.url)])];
         this.renderUploadLinks();
       }
-      if (job.type === "torrent" && detail.result?.record) this.renderTorrent(detail.result.record);
+      if (job.type === "report") {
+        this.el('reports').replaceChildren();
+        for (const artifact of detail.artifact_refs || []) {
+          if (artifact.kind !== 'report' || !artifact.resource) continue;
+          const report=await this.api.request('/api/files/text?'+new URLSearchParams({root_key:artifact.resource.root_key,path:artifact.resource.relative_path}));
+          if (job.epoch !== this.epoch) return;
+          const text=report.content || report.text || '', copy=node('button','复制报告');
+          copy.type='button'; copy.onclick=()=>this.copyValue(text);
+          this.el('reports').append(copy,node('pre',text));
+        }
+      }
+      if (job.type === "torrent") {
+        if (detail.result?.record) this.renderTorrent(detail.result.record);
+        else for (const artifact of detail.artifact_refs || []) if (artifact.kind === 'torrent') this.renderTorrent({id:artifact.id});
+      }
       this.editVersion++; this.scheduleCompose(); this.controls();
     }
     renderUploadLinks() {
@@ -409,7 +421,7 @@
         logs.onclick = () => this.withButton(logs, async () => {
           const result = await this.api.request(task.kind === "download" ? `/api/jobs/${task.id}/log?lines=100` : `/api/tasks/${task.id}/logs?lines=100`);
           let pre = card.querySelector("pre"); if (!pre) { pre = node("pre"); card.append(pre); }
-          const lines = result.lines || result.logs || result.log || "暂无日志"; pre.textContent = Array.isArray(lines) ? lines.map(x => typeof x === "string" ? x : x.message || JSON.stringify(x)).join("\n") : String(lines);
+          const lines = result.content || result.lines || result.logs || result.log || "暂无日志"; pre.textContent = Array.isArray(lines) ? lines.map(x => typeof x === "string" ? x : x.message || JSON.stringify(x)).join("\n") : String(lines);
         }); actions.append(logs); card.append(actions); this.el("tasks").append(card);
       });
     }
@@ -436,7 +448,7 @@
       }
       for (const artifact of detail.artifact_refs || []) {
         const url = artifact.url && safeURL(artifact.url);
-        if (url) { const link = node("a", `${artifact.kind} · ${artifact.id}`); link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer"; output.append(link); }
+        if (url) { const link = node("a", ({torrent:"下载种子",report:"下载报告",screenshot:"下载截图",collage:"下载缩略图",upload:"图床链接"})[artifact.kind] || `${artifact.kind} · ${artifact.id}`); link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer"; output.append(link); }
       }
       if (!output.childNodes.length) output.textContent = "服务尚未提供可读取的产物引用，请查看任务日志。";
       card.append(output);

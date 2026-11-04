@@ -57,6 +57,8 @@ class Provider:
                               "warnings": [{"code": "not_verified", "message": "尚未执行真实开发接口核验"}]}
 
     async def request(self, method, url, *, params=None, headers=None, body=None):
+        if not self.configured:
+            raise ProviderError("unconfigured", "资料源尚未启用或配置开发凭据")
         own = self.client is None
         client = self.client or httpx.AsyncClient(timeout=self.timeout, follow_redirects=False)
         try:

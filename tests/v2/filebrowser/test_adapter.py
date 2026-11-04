@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from playwright.sync_api import expect
 from test_browser_modules import browser_session, live_server  # noqa: F401
-from test_interactions import mount
+from tests.v2.filebrowser.test_interactions import mount
 
 
 def test_adapter_rejects_stale_sources_and_late_context(live_server):
@@ -21,6 +21,7 @@ def test_adapter_rejects_stale_sources_and_late_context(live_server):
             setContext: value => context = value,
             request: async (url, options) => {
               if (url.startsWith('/api/files/meta')) return {...item};
+              if (url === '/api/v2/resources/reference') return JSON.parse(options.body);
               const refs = JSON.parse(options.body).resources;
               return new Promise(resolve => release = () => resolve({context: {
                 schema_version: 1, context_id: 'late', revision: 1, resources: refs}}));

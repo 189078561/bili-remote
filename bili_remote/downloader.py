@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import json
 import os
 import re
@@ -111,6 +112,9 @@ class YtDlpRunner:
     ) -> None:
         self.settings = settings
         self.auth_service = auth_service
+        self.completion_origins: dict[int, dict[str, Any]] = {}
+        self.completion_paths: dict[int, list[str]] = {}
+        self.completion_item_origins: dict[int, dict[str, dict]] = {}
         self.current_process: asyncio.subprocess.Process | None = None
         self.cancel_requested = False
         self._active_operations = 0
@@ -123,6 +127,24 @@ class YtDlpRunner:
             if self.settings.aria2_enabled and self.settings.aria2c_command
             else None
         )
+
+    def remember_completion_item(self, job_id: int, payload: str) -> None:
+        """Keep only structured extractor provenance, never download URLs or cookies."""
+        try:
+            data = json.loads(payload)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(data, dict) or not isinstance(data.get('filepath'), str):
+            return
+        def identifier(name):
+            value = data.get(name)
+            return str(value) if isinstance(value, (str, int)) and not isinstance(value, bool) and value != '' else None
+        index = data.get('episode_number') or data.get('playlist_index')
+        title = data.get('series') or data.get('title')
+        origin = {'bvid':identifier('bvid'), 'cid':identifier('cid'), 'season_id':identifier('season_id'),
+                  'ep_id':identifier('episode_id'), 'original_title':title if isinstance(title,str) else None,
+                  'episode_index':index if type(index) is int else None}
+        self.completion_item_origins.setdefault(job_id,{})[data['filepath']] = origin
 
     def has_active_operation(self) -> bool:
         return self._active_operations > 0
@@ -513,7 +535,16 @@ class YtDlpRunner:
             formats = await self._prepare_tv_formats(formats)
             if not formats:
                 raise DownloadFailure(TV_CDN_BLOCKED_MESSAGE)
+            origin = {"bvid": None, "season_id": None, "ep_id": None, "cid": str(cid), "original_title": None, "episode_index": None}
+            if self._is_bangumi_url(url):
+                origin.update(bvid=target.get("bvid"), season_id=str(season["season_id"]) if season.get("season_id") else None,
+                    ep_id=str(target.get("ep_id") or target.get("id")) if target.get("ep_id") or target.get("id") else None,
+                    original_title=season.get("title"),
+                    episode_index=next((i for i, item in enumerate(season.get("episodes", []), 1) if item.get("cid") == cid), None))
+            else:
+                origin.update(bvid=view.get("bvid"), original_title=view.get("title"), episode_index=page.get("page"))
             return {
+                "_v2_origin": origin,
                 "_type": "video",
                 "id": item_identifier,
                 "title": title,
@@ -637,6 +668,20 @@ class YtDlpRunner:
             drop_unavailable=False,
             max_items=12,
         )
+        origin = {"bvid": payload.get("bvid"), "cid": str(cid) if cid else None,
+                  "season_id": str(payload["season_id"]) if payload.get("season_id") else None,
+                  "ep_id": str(payload["episode_id"]) if payload.get("episode_id") else None,
+                  "original_title": payload.get("series") or payload.get("title"),
+                  "episode_index": payload.get("episode_number") or payload.get("playlist_index")}
+        if "target" in locals():
+            origin.update(bvid=target.get("bvid"), season_id=str(season["season_id"]) if season.get("season_id") else None,
+                ep_id=str(target.get("ep_id") or target.get("id")) if target.get("ep_id") or target.get("id") else None,
+                original_title=season.get("title"),
+                episode_index=next((i for i, item in enumerate(season.get("episodes", []), 1) if item.get("cid") == cid), None))
+        elif "view" in locals():
+            origin.update(bvid=view.get("bvid"), original_title=view.get("title"),
+                episode_index=next((item.get("page") for item in view.get("pages", []) if item.get("cid") == cid), None))
+        payload["_v2_origin"] = origin
         return payload
 
     @staticmethod
@@ -1335,6 +1380,11 @@ class YtDlpRunner:
         self._begin_operation()
         try:
             return await self._download(job, output_root, log_path, progress_callback)
+        except BaseException:
+            self.completion_paths.pop(job['id'], None)
+            self.completion_origins.pop(job['id'], None)
+            self.completion_item_origins.pop(job['id'], None)
+            raise
         finally:
             self._end_operation()
 
@@ -1376,6 +1426,12 @@ class YtDlpRunner:
         else:
             raise DownloadFailure("下载线路无效")
 
+        self.completion_paths[job["id"]] = []
+        self.completion_item_origins[job["id"]] = {}
+        self.completion_origins.pop(job["id"], None)
+        if info_payload and info_payload.get("_v2_origin"):
+            self.completion_origins[job["id"]] = info_payload["_v2_origin"]
+
         def build_command(selector: str, use_aria2: bool) -> list[str]:
             command = [
                 *self.settings.ytdlp_command,
@@ -1415,6 +1471,8 @@ class YtDlpRunner:
                 "--no-quiet",
                 "--print",
                 "after_move:__RESULT__%(filepath)s",
+                "--print",
+                "after_move:__V2_ORIGIN__%(.{filepath,bvid,cid,season_id,episode_id,series,title,episode_number,playlist_index})j",
             ]
             if use_aria2:
                 command.extend(
@@ -1591,9 +1649,15 @@ class YtDlpRunner:
                                 if uploader and uploader != "NA":
                                     await progress_callback({"uploader": uploader})
                                 continue
+                            if line.startswith("__V2_ORIGIN__"):
+                                self.remember_completion_item(job['id'], line.removeprefix('__V2_ORIGIN__'))
+                                continue
                             if line.startswith("__RESULT__"):
                                 result_path = line.removeprefix("__RESULT__").strip()
                                 if result_path:
+                                    paths = self.completion_paths[job["id"]]
+                                    if result_path not in paths:
+                                        paths.append(result_path)
                                     await progress_callback(
                                         {"result_path": result_path}
                                     )
@@ -1928,6 +1992,7 @@ class DownloadManager:
         self.settings = settings
         self.database = database
         self.runner = runner
+        self.completion_hook = None
         self.current_job_id: int | None = None
         self._wake = asyncio.Event()
         self._stopping = False
@@ -2051,6 +2116,13 @@ class DownloadManager:
             result_path=result,
             finished_at=utc_now(),
         )
+        if self.completion_hook:
+            try:
+                await asyncio.wait_for(self.completion_hook(self.database.get_job(job["id"])), timeout=30)
+            except Exception:
+                # Recognition is optional; the completed download remains completed.
+                logging.getLogger(__name__).warning("V2 recognition unavailable for completed download %s", job["id"])
+
 
 
 class MaintenanceScheduler:

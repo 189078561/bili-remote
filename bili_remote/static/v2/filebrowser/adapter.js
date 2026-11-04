@@ -23,7 +23,7 @@
         const fresh = await this.request(`/api/files/meta?${query}`);
         if (!fresh.allowed || fresh.is_symlink || !fresh.fingerprint) throw new Error("资源不可访问，请刷新目录");
         if (item.fingerprint && item.fingerprint !== fresh.fingerprint) throw new Error("资源已变化，请刷新目录后重新选择");
-        return {root_key: key, relative_path: fresh.relative_path, kind: fresh.is_dir ? "directory" : "file", fingerprint: fresh.fingerprint};
+        return await this.request('/api/v2/resources/reference', {method:'POST',body:JSON.stringify({root_key: key, relative_path: fresh.relative_path, kind: fresh.is_dir ? "directory" : "file", fingerprint: fresh.fingerprint})});
       }));
     }
 
@@ -34,13 +34,15 @@
       const refs = await this.select(items, rootKey);
       let context = previous;
       if (!context || signature(context.resources || []) !== signature(refs)) {
+        const locations = values => JSON.stringify(values.map(x => [x.root_key,x.relative_path,x.kind]).sort());
+        const sameResources = previous && locations(previous.resources || []) === locations(refs);
         const result = await this.request("/api/v2/resources/resolve", {
           method: "POST",
-          body: JSON.stringify({resources: refs, origins: [], selection: null, context: previous, manual_overrides: {}})
+          body: JSON.stringify({resources: refs, origins: sameResources ? previous.origins || [] : [], selection: null, context: sameResources ? previous : null, manual_overrides: {}})
         });
         context = result.context;
         if (!context || context.schema_version !== 1 || !Number.isInteger(context.revision) ||
-            !context.context_id || signature(context.resources || []) !== signature(refs)) {
+            !context.context_id || JSON.stringify((context.resources || []).map(x => [x.root_key,x.relative_path,x.kind])) !== JSON.stringify(refs.map(x => [x.root_key,x.relative_path,x.kind]))) {
           throw new Error("识别服务返回的资源上下文不匹配");
         }
       }

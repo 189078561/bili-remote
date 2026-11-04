@@ -163,7 +163,9 @@ export function mount(container, { request, selectResources, onContextChange = (
     if (!preview?.can_apply) return;
     const route = preview.undo ? "/api/v2/naming/undo/apply" : "/api/v2/naming/apply";
     const result = await api(route, "POST", { preview_token: preview.preview_token, expected_revision: preview.context_revision, confirm: true, idempotency_key: preview.key });
-    lastBatch = result.batch_id; onTask(result.task); apply.disabled = true;
+    lastBatch = result.batch_id;
+    onTask(result.task, {operations: structuredClone(preview.operations), resources: preview.operations.map(item => structuredClone(item.source))});
+    apply.disabled = true;
     status.textContent = "已交后台任务执行，请查看任务结果。完成后可预览撤销。";
   }, actions); apply.disabled = true;
   button("预览撤销", async () => {

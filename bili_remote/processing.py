@@ -23,6 +23,7 @@ from .screenshots import ScreenshotService
 from .workspace import ScanSummary, WorkspaceError, resolve_workspace_path, scan_project
 
 TASK_TYPES = {
+    "v2_rename_apply", "v2_rename_undo", "v2_media_probe", "v2_media_report",
     "torrent_build",
     "release_report",
     "image_upload",
@@ -49,6 +50,7 @@ class ProcessingTaskManager:
         screenshots: ScreenshotService | None = None,
     ) -> None:
         self.tool_jobs = None
+        self.v2_runtime = None
         self.settings = settings
         self.database = database
         self.previews = previews
@@ -93,6 +95,9 @@ class ProcessingTaskManager:
         key = idempotency_key or f"{task_type}:{secrets.token_hex(12)}"
         if idempotency_key:
             active = self.database.find_active_processing_task(task_type, idempotency_key)
+            if task_type.startswith("v2_"):
+                row = self.database.fetch_one("SELECT * FROM processing_tasks WHERE task_type=? AND idempotency_key=?", (task_type, idempotency_key))
+                active = self.database._decode_task(row) if row else None
             if active:
                 return active, False
         log_path = self.settings.logs_dir / (
@@ -133,6 +138,8 @@ class ProcessingTaskManager:
 
     def retry(self, task_id: int) -> bool:
         task = self.database.get_processing_task(task_id)
+        if task and task["task_type"] in {"v2_rename_apply", "v2_rename_undo", "file_operation", "rename_apply", "rename_rollback"}:
+            return False
         if not task or not self.database.retry_processing_task(task_id):
             return False
         if task.get("project_id"):
@@ -290,6 +297,10 @@ class ProcessingTaskManager:
     ) -> dict[str, Any]:
         task_type = task["task_type"]
         data = task.get("input") or {}
+        if task_type.startswith("v2_"):
+            if self.v2_runtime is None:
+                raise ValueError("V2 服务未装配")
+            return await self.v2_runtime.dispatch(task, should_cancel)
         project_id = int(task["project_id"]) if task.get("project_id") else None
         if task_type in {"torrent_build", "release_report", "image_upload"}:
             return await asyncio.to_thread(self.tool_jobs.run, task, log, should_cancel)

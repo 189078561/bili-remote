@@ -99,7 +99,7 @@
     queues[kind] = tasks;
     loaded.add(kind);
     errors.delete(kind);
-    if (kind === "processing") tasks.forEach(task => cache.set(task.id, {task, at: Date.now()}));
+    if (kind === "processing") tasks.filter(task => !task.kind).forEach(task => cache.set(task.id, {task, at: Date.now()}));
     render();
     document.dispatchEvent(new CustomEvent("app:tasks", {detail: {kind, items: tasks}}));
   }
@@ -109,15 +109,20 @@
   }
   async function refreshProcessing() {
     if (processingRequest) return processingRequest;
-    processingRequest = api("/api/tasks?limit=500")
-      .then(tasks => receive("processing", tasks))
+    processingRequest = api(window.BILI_V2 ? "/api/v2/tasks?limit=500" : "/api/tasks?limit=500")
+      .then(result => {
+        if (window.BILI_V2) {
+          receive("processing", result.items.filter(task => task.kind === "processing"));
+          receive("download", result.items.filter(task => task.kind === "download"));
+        } else receive("processing", result);
+      })
       .catch(error => failed("processing", error))
       .finally(() => { processingRequest = null; });
     return processingRequest;
   }
   async function readProcessing(id) {
     const recent = cache.get(id);
-    if (recent && Date.now() - recent.at < 900) return recent.task;
+    if (recent && !terminal(recent.task.status) && Date.now() - recent.at < 900) return recent.task;
     if (pending.has(id)) return pending.get(id);
     const request = api(`/api/tasks/${id}`).then(task => {
       cache.set(id, {task, at: Date.now()});
@@ -158,12 +163,12 @@
     const actions = node("div", null, "button-row");
     const base = kind === "download" ? `/api/jobs/${task.id}` : `/api/tasks/${task.id}`;
     const mutate = async action => {
-      await api(`${base}/${action}`, {method: "POST"});
+      await api(`${window.BILI_V2 ? `/api/v2/tasks/${kind}/${task.id}` : base}/${action}`, {method: "POST"});
       cache.delete(task.id);
       await refresh();
     };
     if (["running", "queued"].includes(task.status)) actions.append(button("取消", () => mutate("cancel")));
-    if (["failed", "cancelled", "auth_required"].includes(task.status) && (kind === "download" || task.task_type !== "file_operation")) actions.append(button("重试", () => mutate("retry")));
+    if (["failed", "cancelled", "auth_required"].includes(task.status) && (window.BILI_V2 ? task.retry_allowed : (kind === "download" || !["file_operation","v2_rename_apply","v2_rename_undo"].includes(task.task_type)))) actions.append(button("重试", () => mutate("retry")));
     if (kind === "processing" && task.task_type === "file_operation" && ["failed", "cancelled"].includes(task.status)) actions.append(button("重新检查文件", () => { setDrawer(false); openBusinessView("files"); }));
     actions.append(button("日志", async () => {
       const result = await api(`${base}/${kind === "download" ? "log" : "logs"}`);

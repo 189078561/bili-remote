@@ -145,7 +145,7 @@ function switchAppView(name) {
 function openBusinessView(name, {push = true} = {}) {
   if (!BUSINESS_VIEWS.has(name)) return;
   if (currentView === "settings" && window.SettingsPage && !window.SettingsPage.confirmLeave()) return;
-  if (push) window.history.pushState({view: name}, "", "/");
+  if (push) window.history.pushState({view: name}, "", window.BILI_V2 ? "/" : "/legacy");
   switchAppView(name);
 }
 
@@ -156,7 +156,7 @@ function openSettingsPage() {
     window.history.pushState(
       {view: "settings", returnView: settingsReturnView, fromApp: true},
       "",
-      "/settings"
+      window.BILI_V2 ? "/settings" : "/settings?legacy=1"
     );
   }
   switchAppView("settings");
@@ -174,7 +174,7 @@ function leaveSettingsPage() {
     window.history.back();
     return;
   }
-  window.history.replaceState({view: fallback}, "", "/");
+  window.history.replaceState({view: fallback}, "", window.BILI_V2 ? "/" : "/legacy");
   switchAppView(fallback);
 }
 
@@ -1307,7 +1307,7 @@ window.addEventListener("popstate", event => {
     window.history.pushState(
       {view: "settings", returnView: settingsReturnView, fromApp: true},
       "",
-      "/settings"
+      window.BILI_V2 ? "/settings" : "/settings?legacy=1"
     );
     switchAppView("settings");
     return;
@@ -1334,7 +1334,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     window.history.replaceState(
       {view: "settings", returnView: settingsReturnView},
       "",
-      "/settings"
+      window.BILI_V2 ? "/settings" : "/settings?legacy=1"
     );
     switchAppView("settings");
   } else {
@@ -1342,7 +1342,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       window.history.state?.view || appSettings?.app_default_view,
       "files"
     );
-    window.history.replaceState({view: initial}, "", "/");
+    window.history.replaceState({view: initial}, "", window.BILI_V2 ? "/" : "/legacy");
     switchAppView(initial);
   }
 });

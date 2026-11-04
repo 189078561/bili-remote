@@ -58,7 +58,7 @@ def live_server(settings) -> Iterator[tuple[str, object]]:
         thread.join(timeout=5)
 
 
-def browser_session(base_url):
+def browser_session(base_url, *, legacy=True):
     playwright_api = pytest.importorskip("playwright.sync_api")
     playwright = playwright_api.sync_playwright().start()
     try:
@@ -69,11 +69,20 @@ def browser_session(base_url):
     page = browser.new_page(viewport={"width": 1440, "height": 1000})
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
-    page.goto(base_url)
-    page.locator("#password").fill("test-password")
-    page.locator("#login-form button[type=submit]").click()
-    page.wait_for_url(base_url + "/")
-    page.locator(".app-tabs [data-view=files]").wait_for()
+    try:
+        page.goto(base_url)
+        page.locator("#password").fill("test-password")
+        page.locator("#login-form button[type=submit]").click()
+        # The login page and destination have the same URL. Wait for the new
+        # authenticated DOM before navigating to the compatibility entry.
+        page.locator(".app-tabs [data-view=files]").wait_for()
+        if legacy:
+            page.goto(base_url + "/legacy")
+            page.locator(".app-tabs [data-view=files]").wait_for()
+    except Exception:
+        browser.close()
+        playwright.stop()
+        raise
     return playwright, browser, page, errors
 
 
@@ -90,7 +99,7 @@ def test_new_module_workspaces_navigation_and_responsive_layout(live_server):
     try:
         assert page.locator(".app-tabs [data-view]").count() == 4
         page.locator('[data-view="home"]').click()
-        page.get_by_role("heading", name="欢迎使用 Bili Remote").wait_for()
+        page.get_by_role("heading", name="首页", exact=True).wait_for()
         from pathlib import Path
 
         artifacts = Path("/tmp/bili-ui-validation")

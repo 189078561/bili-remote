@@ -848,7 +848,7 @@ async function initFileBrowser() {
   }
 }
 
-initFileBrowser();
+if (!window.BILI_V2) initFileBrowser();
 
 document.querySelector("#screenshot-sessions-button")?.addEventListener("click", () => {
   if (window.CollageTool) window.CollageTool.openRecent();

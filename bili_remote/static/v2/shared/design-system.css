@@ -36,7 +36,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .skip-link { position: fixed; top: -100px; left: 12px; z-index: 300; background: var(--surface); padding: 12px; }
 .skip-link:focus { top: 8px; }
 .topbar, .topbar-inner { height: var(--header-height); min-height: var(--header-height); }
-.topbar { background: var(--surface); z-index: 60; }
+.topbar { width: 100%; background: var(--surface); z-index: 60; }
+.account-actions { position: static; }
 .topbar-inner { max-width: none; padding: 0 var(--space-5); gap: var(--space-4); }
 .brand { flex-shrink: 0; }
 .brand strong { font-size: 15px; }

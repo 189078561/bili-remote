@@ -9,7 +9,7 @@ from playwright.sync_api import sync_playwright, expect
 from bili_remote.database import Database
 from bili_remote.file_service import FileService
 from bili_remote.v2.naming import NamingService, create_router
-from test_service_api import Audit, Tasks, Probe
+from tests.v2.naming.test_service_api import Audit, Tasks, Probe
 
 
 def test_naming_browser_preview_confirm_undo_responsive_no_storage(settings):

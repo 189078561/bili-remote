@@ -79,6 +79,10 @@ class ScreenshotError(FileServiceError):
     pass
 
 
+class FrameUnavailable(ScreenshotError):
+    """A valid seek produced no frame; an earlier candidate may still succeed."""
+
+
 class ScreenshotNotFoundError(ScreenshotError):
     pass
 
@@ -1721,9 +1725,21 @@ class ScreenshotService:
         if lower_bound > upper_bound:
             raise ScreenshotError("截图时间范围无效")
         offsets = (0.0, 0.005, -0.005, 0.012, -0.012)
+        candidates = [target_time + effective * offset for offset in offsets]
+        # Near EOF, duration includes the final frame's display interval. Small
+        # percentage offsets may all seek beyond its timestamp, especially at
+        # low frame rates. Add frame-sized backward retries, within user bounds.
+        fps = media.get("fps")
+        try:
+            frame_interval = 1 / float(fps)
+            if not math.isfinite(frame_interval) or frame_interval <= 0:
+                raise ValueError
+        except (TypeError, ValueError, ZeroDivisionError):
+            frame_interval = 1.0
+        candidates.extend(target_time - frame_interval * frames for frames in (1, 2))
         seen: set[float] = set()
-        for offset in offsets:
-            candidate = min(upper_bound, max(lower_bound, target_time + effective * offset))
+        for candidate in candidates:
+            candidate = min(upper_bound, max(lower_bound, candidate))
             candidate = round(candidate, 3)
             if candidate in seen:
                 continue
@@ -1758,6 +1774,8 @@ class ScreenshotService:
             ]
             try:
                 self._run_ffmpeg(command, should_cancel)
+            except FrameUnavailable:
+                continue
             except ScreenshotError:
                 if (
                     media.get("color_requested") != "auto"
@@ -1839,6 +1857,8 @@ class ScreenshotService:
         _, stderr = process.communicate()
         if process.returncode != 0:
             message = stderr.decode("utf-8", errors="replace").strip()
+            if "Nothing was written into output file" in message and "received no packets" in message:
+                raise FrameUnavailable("该时间点没有可输出的视频帧")
             raise ScreenshotError(message.splitlines()[-1][:300] if message else "ffmpeg 截图失败")
 
     @staticmethod

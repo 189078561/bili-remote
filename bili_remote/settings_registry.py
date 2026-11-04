@@ -1184,6 +1184,8 @@ RELEASE_GROUP = replace(
             "TMDB 与 PT-Gen",
             "搜索并确认作品后采用资料；重新获取不会自动覆盖手工内容。",
             fields=(
+                SettingDefinition("v2_bangumi_enabled", "启用 Bangumi 资料补充", "switch", False),
+                SettingDefinition("v2_bangumi_api_key", "Bangumi Access Token（可选）", "password", "", validator=_optional_secret, sensitive=True),
                 SettingDefinition(
                     "tmdb_api_key",
                     "TMDB API Key 或 Read Access Token",

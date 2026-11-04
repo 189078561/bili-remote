@@ -110,39 +110,11 @@ def validate_memory_rules(rules):
     if "naming_rule" in rules:
         validate_naming_rule(rules["naming_rule"])
     if "subtitle_rule" in rules:
-        subtitle = rules["subtitle_rule"]
-        _strict(subtitle, SUBTITLE_FIELDS, "subtitle_rule")
-        list_fields = {"field_order", "visible_fields", "cast_order", "name_order"}
-        subtitle_names = {"zh", "zh_hant", "ja", "original", "en"}
-        visible = {"title", "names", "season", "episode", "season_episode_count", "year", "genres", "cast", "voice_cast", "director", "directors"}
-        for key, item in subtitle.items():
-            if key in list_fields:
-                if not isinstance(item, list) or len(item) > 1000 or any(not isinstance(x, str) or len(x) > 200 for x in item):
-                    raise NamingError("invalid_memory_rule", "副标题排序无效")
-                if key == "name_order" and set(item) - subtitle_names or key in {"field_order", "visible_fields"} and set(item) - visible:
-                    raise NamingError("invalid_memory_rule", "副标题字段不受支持")
-            elif key == "labels":
-                _strict(item, {"genres", "cast", "voice_cast", "director"}, key)
-                for text in item.values():
-                    _text(text, key, 100)
-            elif key == "cast_limit":
-                if item not in {3, 5, 8, "all"}:
-                    raise NamingError("invalid_memory_rule", "演员数量无效")
-            elif key == "show_director":
-                if type(item) is not bool:
-                    raise NamingError("invalid_memory_rule", "导演开关无效")
-            elif item is not None:
-                _text(item, key, 500)
-        if subtitle.get("custom_template"):
-            # Field names must belong to the subtitle module's vocabulary;
-            # formatting/attributes/conversions are forbidden.
-            from string import Formatter
-            try:
-                for _, name, spec, conversion in Formatter().parse(subtitle["custom_template"]):
-                    if name is not None and (name not in visible | subtitle_names or spec or conversion):
-                        raise ValueError
-            except ValueError as exc:
-                raise NamingError("invalid_memory_rule", "自定义副标题含不支持变量") from exc
+        from ..subtitle.rules import normalize_rule, SubtitleRuleError
+        try:
+            normalize_rule(rules["subtitle_rule"])
+        except SubtitleRuleError as exc:
+            raise NamingError("invalid_memory_rule", str(exc), fields=["subtitle_rule"]) from exc
     if "episode_rules" in rules:
         episodes = rules["episode_rules"]
         _strict(episodes, EPISODE_FIELDS, "episode_rules")

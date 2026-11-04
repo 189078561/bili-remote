@@ -81,7 +81,7 @@ class DownloadCompletionAdapter:
                 context=None,
                 rules=None,
             )
-            context = result.get("context") if isinstance(result, dict) else result
+            context = result.get("context", result) if isinstance(result, dict) else result
             result_warnings = result.get("warnings", []) if isinstance(result, dict) else []
             warnings.extend(_safe_warnings(result_warnings))
             return RecognitionProposal(

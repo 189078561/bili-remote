@@ -311,7 +311,7 @@ def test_processing_handlers_receive_minimal_inputs_and_return_real_results(setu
 
 def test_memory_routes_revision_conflict_and_generated_content_rejection(setup):
     from bili_remote.v2.naming.memory import NamingMemoryService
-    from test_memory import Repository
+    from tests.v2.naming.test_memory import Repository
     service, _, _ = setup
     service.memory = NamingMemoryService(Repository())
     client = client_for(service)

@@ -11,6 +11,11 @@
   <link rel="stylesheet" href="/static/ui.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/assistant.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/v2/shared/design-system.css?v={{ asset_version }}">
+  <script>window.BILI_V2 = {{ 'true' if v2_enabled else 'false' }};</script>
+  {% if v2_enabled %}
+  <link rel="stylesheet" href="/static/v2/workbench/workbench.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/v2/download/workbench.css?v={{ asset_version }}">
+  {% endif %}
 </head>
 <body>
   <a class="skip-link" href="#app-content">跳转到内容</a>
@@ -79,7 +84,7 @@
     </section>
   </main>
 
-  <main id="download-view" class="page app-view hidden">
+  <main id="{{ 'legacy-download-view' if v2_enabled else 'download-view' }}" class="page app-view hidden">
     <section class="hero">
       <div>
         <p class="eyebrow">REMOTE DOWNLOADER</p>
@@ -399,7 +404,7 @@
 
   </div>
 
-  <main id="publish-view" class="page app-view assistant-page hidden">
+  <main id="{{ 'legacy-publish-view' if v2_enabled else 'publish-view' }}" class="page app-view assistant-page hidden">
     <header class="files-header"><div><p class="eyebrow">WORKBENCH</p><h1>发种工作台</h1><p class="muted">选择真实文件，编辑发布内容，预览并导出工具结果。</p></div><button type="button" class="button ghost" data-open-task-center>查看后台任务</button></header>
     <nav class="assistant-steps" aria-label="发种步骤"><button type="button" data-step="files" class="active">1. 选择文件</button><button type="button" data-step="config">2. 配置操作</button><button type="button" data-step="results">3. 生成结果</button></nav>
     <div class="assistant-grid" data-step="files">
@@ -553,6 +558,10 @@
     </footer>
   </main>
 
+  {% if v2_enabled %}
+  <main id="publish-view" class="page app-view hidden">{% include "v2/workbench/workbench.html" %}<a href="/legacy">打开旧版兼容界面</a></main>
+  <main id="download-view" class="page app-view hidden">{% include "v2/download/workbench.html" %}</main>
+  {% endif %}
     </div>
   </div>
 
@@ -582,6 +591,14 @@
   <script src="/static/ui.js?v={{ asset_version }}"></script>
   <script src="/static/workspace.js?v={{ asset_version }}"></script>
   <script src="/static/settings.js?v={{ asset_version }}"></script>
-  <script src="/static/assistant.js?v={{ asset_version }}"></script>
+  {% if not v2_enabled %}<script src="/static/assistant.js?v={{ asset_version }}"></script>{% endif %}
+  {% if v2_enabled %}
+  <script src="/static/v2/filebrowser/adapter.js?v={{ asset_version }}"></script>
+  <script src="/static/v2/workbench/api.js?v={{ asset_version }}"></script>
+  <script src="/static/v2/workbench/preview.js?v={{ asset_version }}"></script>
+  <script src="/static/v2/workbench/workbench.js?v={{ asset_version }}"></script>
+  <script src="/static/v2/download/workbench.js?v={{ asset_version }}"></script>
+  <script src="/static/v2/shared/integration.js?v={{ asset_version }}"></script>
+  {% endif %}
 </body>
 </html>
