@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_download_workbench_browser_interactions_and_responsive_widths():
+    playwright_api = pytest.importorskip("playwright.sync_api")
+    playwright = playwright_api.sync_playwright().start()
+    try:
+        try:
+            browser = playwright.chromium.launch()
+        except playwright_api.Error as exc:
+            pytest.skip(str(exc))
+        page = browser.new_page(viewport={"width": 1440, "height": 1100})
+        page_errors = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        fragment = (ROOT / "bili_remote/templates/v2/download/workbench.html").read_text()
+        css = (ROOT / "bili_remote/static/v2/download/workbench.css").read_text()
+        js = ROOT / "bili_remote/static/v2/download/workbench.js"
+        page.set_content(f'<meta name="csrf-token" content="test"><main id="mount">{fragment}</main>')
+        page.add_style_tag(content=css)
+        page.add_script_tag(path=str(js))
+        page.evaluate("""() => {
+          window.calls = [];
+          window.jobs = [{id: 9, title: '合成剧集', api_mode: 'web', status: 'queued', progress: 0, speed: null, eta: null}];
+          window.loginState = {web:true, tv:false};
+          window.BiliDownloadV2.mount(document.querySelector('#mount'), {
+            pollInterval: 60000,
+            outputTemplate: '{title}.{id}.mp4',
+            onChooseDirectory: async () => 'Series/Season 1',
+            onLogin: mode => { window.loginModes = [...(window.loginModes || []), mode]; },
+            api: async (url, options={}) => {
+              window.calls.push({url, options});
+              if (url === '/api/bili/status') return {logged_in: window.loginState.web, tv_logged_in: window.loginState.tv};
+              if (url === '/api/bili/logout') { window.loginState.web = false; return {ok:true}; }
+              if (url === '/api/bili/tv/logout') { window.loginState.tv = false; return {ok:true}; }
+              if (url === '/api/jobs?limit=500') return window.jobs;
+              if (url === '/api/history?limit=200') return [];
+              if (url === '/api/resolve') return {
+                title: '合成剧集', uploader: '测试账号', api_mode: 'web', webpage_url: 'https://www.bilibili.com/bangumi/play/ss42',
+                episodes: [
+                  {id: 'ep-a', title: '第一集', group: '正片', group_index: 1},
+                  {id: 'ep-b', title: '第二集', group: '正片', group_index: 2},
+                  {id: 'ep-c', title: '花絮', group: '预告', group_index: 3}
+                ], default_episode_id: 'ep-a',
+                formats: [{selector:'137+30280',format_id:'137',height:1080,width:1920,fps:60,vcodec:'avc1',acodec:'none',tbr:5000,dynamic_range:'SDR'}]
+              };
+              if (url === '/api/episodes/formats') return {formats: [{selector:'137+30280',format_id:'137',height:1080,width:1920,fps:60,vcodec:'avc1',acodec:'none',tbr:5000,dynamic_range:'SDR'}]};
+              if (url === '/api/episodes/formats/batch') return {selected_count:2,checked:2,sampled:false,failed:0,profiles:[{height:1080,fps_high:true,vcodec:'avc',dynamic_range:'SDR',coverage:2,sample:{width:1920,height:1080,fps:60,vcodec:'avc1'}}]};
+              if (url === '/api/jobs/batch') return {count: 2, ids: [10, 11]};
+              if (url.endsWith('/cancel')) { window.jobs[0].status = 'cancelled'; return {ok:true}; }
+              if (url.endsWith('/retry')) { window.jobs[0].status = 'queued'; return {ok:true}; }
+              if (url.includes('/log?')) return {content:'synthetic log line'};
+              throw new Error('unexpected test request: ' + url);
+            }
+          });
+        }""")
+        page.locator("[data-account-status]", has_text="Web 已登录").wait_for()
+        assert page.get_by_role("button", name="断开 Web").is_visible()
+        assert page.get_by_role("button", name="断开 TV").is_hidden()
+        page.get_by_role("button", name="断开 Web").click()
+        page.locator("[data-account-status]", has_text="Web 未登录").wait_for()
+        page.get_by_role("button", name="Web 登录").click()
+        page.get_by_role("button", name="TV 登录").click()
+        assert page.evaluate("window.loginModes") == ["web", "tv"]
+        page.locator("#dv2-url").fill("https://www.bilibili.com/bangumi/play/ss42")
+        page.get_by_role("button", name="解析链接").click()
+        page.locator("[data-title]", has_text="合成剧集").wait_for()
+        assert page.locator(".dv2-episode").count() == 3
+        page.get_by_role("button", name="全选正片").click()
+        assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
+        page.get_by_role("button", name="反选").click()
+        assert page.locator("[data-selected-count]").inner_text() == "已选 1 集"
+        page.get_by_role("button", name="全选正片").click()
+        page.get_by_role("button", name="检测所选画质").click()
+        page.wait_for_function("window.calls.some(call => call.url === '/api/episodes/formats/batch')")
+        page.locator("[data-format]").select_option("profile:0")
+        page.get_by_role("button", name="浏览").click()
+        assert page.locator("[data-output]").input_value() == "Series/Season 1"
+        page.locator("[data-download-form] button[type=submit]").click()
+        page.wait_for_function("window.calls.some(call => call.url === '/api/jobs/batch')")
+        payload = page.evaluate("JSON.parse(window.calls.find(call => call.url === '/api/jobs/batch').options.body)")
+        assert payload["episode_ids"] == ["ep-a", "ep-b"]
+        assert payload["format_profile"] == {"height": 1080, "fps_high": True, "vcodec": "avc", "dynamic_range": "SDR"}
+        assert payload["api_mode"] == "web"
+        assert page.locator(".dv2-job").count() == 1
+        page.get_by_role("button", name="取消").click()
+        page.locator(".dv2-badge", has_text="已取消").wait_for()
+        page.get_by_role("button", name="重试").click()
+        page.locator(".dv2-badge", has_text="排队中").wait_for()
+        page.get_by_role("button", name="查看日志").click()
+        assert page.locator("[data-log-content]").inner_text() == "synthetic log line"
+        for width in (390, 768, 1440):
+            page.set_viewport_size({"width": width, "height": 1000})
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), width
+        assert not page_errors, page_errors
+        browser.close()
+    finally:
+        playwright.stop()
