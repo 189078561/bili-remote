@@ -324,7 +324,8 @@ async function openQrLogin(mode) {
     showModal(box);
     qrTimer = setInterval(pollQr, 1800);
   } catch (error) {
-    alert(error.message);
+    if (window.AppNotice) AppNotice.show(error.message, true);
+    else alert(error.message);
   }
 }
 
@@ -965,6 +966,7 @@ async function createJob(event) {
 async function loadJobs() {
   try {
     const jobs = await api("/api/jobs?limit=500");
+    window.AppTaskCenter?.receive("download", jobs);
     jobsBody.replaceChildren();
     if (!jobs.length) {
       const row = element("tr");
@@ -976,6 +978,7 @@ async function loadJobs() {
     }
     for (const job of jobs) jobsBody.append(renderJob(job));
   } catch (error) {
+    window.AppTaskCenter?.failed("download", error);
     jobsBody.replaceChildren();
     const row = element("tr");
     const cell = element("td", "empty", error.message);
@@ -1064,7 +1067,8 @@ async function cancelJob(id) {
     await api(`/api/jobs/${id}/cancel`, {method: "POST"});
     await loadJobs();
   } catch (error) {
-    alert(error.message);
+    if (window.AppNotice) AppNotice.show(error.message, true);
+    else alert(error.message);
   }
 }
 
@@ -1073,7 +1077,8 @@ async function retryJob(id) {
     await api(`/api/jobs/${id}/retry`, {method: "POST"});
     await loadJobs();
   } catch (error) {
-    alert(error.message);
+    if (window.AppNotice) AppNotice.show(error.message, true);
+    else alert(error.message);
   }
 }
 
@@ -1083,7 +1088,8 @@ async function deleteJob(id) {
     await api(`/api/jobs/${id}`, {method: "DELETE"});
     await loadJobs();
   } catch (error) {
-    alert(error.message);
+    if (window.AppNotice) AppNotice.show(error.message, true);
+    else alert(error.message);
   }
 }
 
@@ -1174,7 +1180,8 @@ async function useHistory(id) {
       record.is_playlist && !record.episodes?.length
     );
   } catch (error) {
-    alert(error.message);
+    if (window.AppNotice) AppNotice.show(error.message, true);
+    else alert(error.message);
   }
 }
 
@@ -1190,7 +1197,8 @@ async function deleteHistory(id) {
     await api(`/api/history/${id}`, {method: "DELETE"});
     await loadHistory();
   } catch (error) {
-    alert(error.message);
+    if (window.AppNotice) AppNotice.show(error.message, true);
+    else alert(error.message);
   }
 }
 
@@ -1200,7 +1208,8 @@ async function clearHistory() {
     await api("/api/history", {method: "DELETE"});
     await loadHistory();
   } catch (error) {
-    alert(error.message);
+    if (window.AppNotice) AppNotice.show(error.message, true);
+    else alert(error.message);
   }
 }
 
@@ -1219,7 +1228,8 @@ async function logoutBili() {
     await api("/api/bili/logout", {method: "POST"});
     await loadAccount();
   } catch (error) {
-    alert(error.message);
+    if (window.AppNotice) AppNotice.show(error.message, true);
+    else alert(error.message);
   }
 }
 
@@ -1229,7 +1239,8 @@ async function logoutTv() {
     await api("/api/bili/tv/logout", {method: "POST"});
     await loadAccount();
   } catch (error) {
-    alert(error.message);
+    if (window.AppNotice) AppNotice.show(error.message, true);
+    else alert(error.message);
   }
 }
 

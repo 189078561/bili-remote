@@ -10,11 +10,13 @@
   <link rel="stylesheet" href="/static/media-tools.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/ui.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/assistant.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/v2/shared/design-system.css?v={{ asset_version }}">
 </head>
 <body>
+  <a class="skip-link" href="#app-content">跳转到内容</a>
   <header class="topbar">
     <div class="topbar-inner">
-      <button id="nav-toggle" class="button ghost small" type="button" aria-label="切换导航" aria-expanded="false">☰</button>
+      <button id="nav-toggle" class="button ghost small" type="button" aria-label="切换导航" aria-controls="app-navigation" aria-expanded="false">☰</button>
       <div class="brand">
         <span class="brand-mark small" aria-hidden="true">▶</span>
         <div>
@@ -22,7 +24,9 @@
           <span class="version">yt-dlp {{ ytdlp_version }}</span>
         </div>
       </div>
+      <div id="app-page-label" class="app-page-label" aria-live="polite">文件管理</div>
       <div class="account-actions">
+        <button id="task-center-toggle" class="button secondary" type="button" aria-controls="task-center" aria-expanded="false">任务与通知 <span id="task-center-count" class="count-badge">…</span></button>
         <span id="service-state" class="service-state"><span class="status-dot online"></span>服务在线</span>
         <span class="muted">{{ username }}</span>
         <button id="app-logout" class="button ghost" type="button">退出</button>
@@ -31,11 +35,12 @@
   </header>
 
   <div class="app-shell">
-    <aside class="app-sidebar">
+    <button id="nav-backdrop" type="button" aria-label="关闭导航" tabindex="-1" hidden></button>
+    <aside id="app-navigation" class="app-sidebar">
       <nav class="app-tabs" aria-label="功能导航">
         <button class="app-tab active" type="button" data-view="home"><span aria-hidden="true">⌂</span>首页</button>
         <button class="app-tab" type="button" data-view="files"><span aria-hidden="true">▤</span>文件管理</button>
-        <button class="app-tab" type="button" data-view="publish"><span aria-hidden="true">✦</span>发种助手</button>
+        <button class="app-tab" type="button" data-view="publish"><span aria-hidden="true">✦</span>发种工作台</button>
         <button class="app-tab" type="button" data-view="download"><span aria-hidden="true">↓</span>B站下载</button>
         <button id="settings-entry" class="app-tab settings-entry" type="button" aria-label="打开全局设置"><span aria-hidden="true">⚙</span>设置</button>
       </nav>
@@ -43,13 +48,13 @@
         <span class="muted sidebar-note">媒体处理与发布辅助</span>
       </div>
     </aside>
-    <div class="app-main">
+    <div id="app-content" class="app-main" tabindex="-1">
 
   <main id="home-view" class="page app-view overview-page">
     <section class="hero overview-hero">
       <div>
         <p class="eyebrow">BILI REMOTE WORKSPACE</p>
-        <h1>欢迎使用 Bili Remote</h1>
+        <h1>首页</h1>
         <p class="muted">从文件管理开始处理资源，或查看最近任务。</p>
       </div>
       <div class="button-row">
@@ -57,7 +62,7 @@
         <button class="button secondary home-open" type="button" data-target="files">浏览文件</button>
       </div>
     </section>
-    <section id="home-summary" class="overview-grid" aria-live="polite" hidden>
+    <section id="home-summary" class="overview-grid" aria-live="polite">
       <article class="card overview-card"><p class="empty">正在读取运行概况…</p></article>
     </section>
     <section class="card">
@@ -68,7 +73,7 @@
       <div class="overview-links">
         <button class="overview-link home-open" type="button" data-target="files"><strong>文件管理</strong><span>浏览、重命名、缩略图、报告与种子</span></button>
         <button class="overview-link home-open" type="button" data-target="download"><strong>B站下载</strong><span>解析链接、选集和管理下载任务</span></button>
-        <button class="overview-link home-open" type="button" data-target="publish"><strong>发种助手</strong><span>选择文件、配置操作、即时查看生成结果</span></button>
+        <button class="overview-link home-open" type="button" data-target="publish"><strong>发种工作台</strong><span>选择文件、配置操作、即时查看生成结果</span></button>
         <button class="overview-link" type="button" data-open-settings><strong>设置</strong><span>统一设置工具默认参数与服务连接</span></button>
       </div>
     </section>
@@ -395,6 +400,7 @@
   </div>
 
   <main id="publish-view" class="page app-view assistant-page hidden">
+    <header class="files-header"><div><p class="eyebrow">WORKBENCH</p><h1>发种工作台</h1><p class="muted">选择真实文件，编辑发布内容，预览并导出工具结果。</p></div><button type="button" class="button ghost" data-open-task-center>查看后台任务</button></header>
     <nav class="assistant-steps" aria-label="发种步骤"><button type="button" data-step="files" class="active">1. 选择文件</button><button type="button" data-step="config">2. 配置操作</button><button type="button" data-step="results">3. 生成结果</button></nav>
     <div class="assistant-grid" data-step="files">
       <section class="assistant-column assistant-files" data-pane="files">
@@ -403,6 +409,7 @@
         <p id="assistant-selection" class="muted selection-note">选择视频后自动读取媒体信息；支持多选生成缩略图。</p>
         <button type="button" class="button primary mobile-next" data-step="config">配置操作 →</button>
       </section>
+      <div class="workbench-area">
       <section class="assistant-column assistant-config" data-pane="config">
         <header class="assistant-heading"><span class="step-icon">▣</span><div><h2>2. 配置与操作</h2><p>设置参数并选择需要执行的操作</p></div></header>
         <details class="assistant-panel" open><summary>媒体信息</summary><div class="panel-body"><div id="assistant-media" class="media-summary"><p class="muted">尚未选择视频或目录</p></div><button id="assistant-report" type="button" class="button ghost small">生成完整媒体报告</button></div></details>
@@ -425,22 +432,23 @@
       </section>
       <section class="assistant-column assistant-results" data-pane="results">
         <header class="assistant-heading"><span class="step-icon">◎</span><div><h2>3. 生成结果</h2><p>实时预览，可直接下载或上传图床</p></div></header>
-        <nav class="assistant-result-tabs" aria-label="结果类型" role="tablist"><button type="button" data-result="preview" role="tab" aria-selected="true" class="active">发布预览</button><button type="button" data-result="thumbnail" role="tab" aria-selected="false">缩略图</button><button type="button" data-result="links" role="tab" aria-selected="false">图床链接</button><button type="button" data-result="torrent" role="tab" aria-selected="false">种子结果</button></nav>
+        <nav class="assistant-result-tabs" aria-label="结果类型" role="tablist"><button type="button" data-result="preview" role="tab" aria-selected="true" class="active">发布内容</button><button type="button" data-result="thumbnail" role="tab" aria-selected="false">缩略图</button><button type="button" data-result="report" role="tab" aria-selected="false">媒体报告</button><button type="button" data-result="torrent" role="tab" aria-selected="false">种子制作</button></nav>
         <div data-result-pane="preview" class="assistant-result-pane" role="tabpanel">
           <p id="assistant-edit-note" class="muted">生成后可直接编辑，修改自动保存在当前浏览器。</p>
           <label class="result-label"><span>主标题<button type="button" class="button ghost small" data-copy="assistant-title">复制</button></span><textarea id="assistant-title" rows="2" maxlength="240" placeholder="根据文件与 TMDB 生成主标题"></textarea></label>
           <label class="result-label"><span>副标题<button type="button" class="button ghost small" data-copy="assistant-subtitle">复制</button></span><textarea id="assistant-subtitle" rows="2" placeholder="中文片名、年份与类型"></textarea></label>
           <label class="result-label"><span>简介<button type="button" class="button ghost small" data-copy="assistant-description">复制</button></span><textarea id="assistant-description" rows="10" placeholder="TMDB 剧情简介与真实媒体信息"></textarea></label>
-          <div id="assistant-report-output"></div><details class="assistant-advanced"><summary>即时排版预览</summary><div id="assistant-live-preview"></div></details>
+          <details class="assistant-advanced"><summary>即时排版预览</summary><div id="assistant-live-preview"></div></details>
           <div class="button-row"><button id="assistant-regenerate" type="button" class="button secondary">重新生成</button><button id="assistant-copy-all" type="button" class="button ghost small">复制 BBCode</button></div>
         </div>
-        <div data-result-pane="thumbnail" class="assistant-result-pane" role="tabpanel" hidden><div id="assistant-images"><div class="assistant-empty"><span>▧</span><p>选择视频，生成完整缩略图</p><small>单图与多图均支持直接下载和上传</small></div></div></div>
-        <div data-result-pane="links" class="assistant-result-pane" role="tabpanel" hidden><div id="assistant-links"><p class="empty">上传成功后在这里显示 URL 和 BBCode</p></div></div>
+        <div data-result-pane="thumbnail" class="assistant-result-pane" role="tabpanel" hidden><div id="assistant-images"><div class="assistant-empty"><span>▧</span><p>选择视频，生成完整缩略图</p><small>单图与多图均支持直接下载和上传</small></div></div><details class="assistant-advanced"><summary>图床链接</summary><div id="assistant-links"><p class="empty">上传成功后在这里显示 URL 和 BBCode</p></div></details></div>
+        <div data-result-pane="report" class="assistant-result-pane" role="tabpanel" hidden><div id="assistant-report-output"><p class="empty">选择文件后生成完整媒体报告。</p></div></div>
         <div data-result-pane="torrent" class="assistant-result-pane" role="tabpanel" hidden><div id="assistant-torrents"><p class="empty">制作完成后可直接下载种子</p></div></div>
       </section>
     </div>
-    <section id="assistant-extra-tools" hidden><button id="assistant-tools-close" type="button" class="button secondary">← 返回发种助手</button><div id="assistant-tool-content"></div></section>
-    <section id="assistant-legacy" hidden><button id="assistant-legacy-close" type="button" class="button secondary">← 返回发种助手</button>
+    </div>
+    <section id="assistant-extra-tools" hidden><button id="assistant-tools-close" type="button" class="button secondary">← 返回发种工作台</button><div id="assistant-tool-content"></div></section>
+    <section id="assistant-legacy" hidden><button id="assistant-legacy-close" type="button" class="button secondary">← 返回发种工作台</button>
     <section class="files-header">
       <div>
         <p class="eyebrow">PT PUBLISH HELPER</p>
@@ -555,7 +563,16 @@
     </div>
   </div>
 
+  <aside id="task-center" class="task-center" aria-labelledby="task-center-title" hidden>
+    <header class="card-heading"><div><h2 id="task-center-title">任务与通知</h2><p class="muted">下载与媒体工具 · 最近 500 条 / 类</p></div><button id="task-center-close" class="button ghost" type="button" aria-label="关闭任务中心">关闭</button></header>
+    <div class="task-filters"><label>显示<select id="task-center-filter"><option value="all">全部任务</option><option value="active">进行中</option><option value="failed">需要处理</option><option value="completed">已完成</option></select></label><button id="task-center-refresh" class="button secondary" type="button">刷新</button></div>
+    <p id="task-center-error" class="form-error" role="status"></p>
+    <div id="task-center-list"><p class="empty">正在读取任务…</p></div>
+    <details class="task-notices"><summary>本次通知</summary><div id="task-center-notices"><p class="empty">暂无新通知</p></div></details>
+  </aside>
+  <div id="app-notifications" class="app-notifications" aria-live="polite" aria-relevant="additions"></div>
   <script src="/static/app.js?v={{ asset_version }}"></script>
+  <script src="/static/v2/shared/shell.js?v={{ asset_version }}"></script>
   <script src="/static/file-browser.js?v={{ asset_version }}"></script>
   <script src="/static/collage.js?v={{ asset_version }}"></script>
   <script src="/static/settings-fields.js?v={{ asset_version }}"></script>

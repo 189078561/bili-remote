@@ -426,7 +426,7 @@
     const host = inlineHost || taskPanel(scope);
     while (active.get(scope) === id) {
       try {
-        const task = await api(`/api/tasks/${id}`);
+        const task = await window.AppTaskCenter.readProcessing(id);
         if (!host) return;
         const labels = {
           queued: "排队中",

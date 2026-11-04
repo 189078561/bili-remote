@@ -85,18 +85,7 @@
       ...(download ? { download: "true" } : {}),
     });
   function notify(text, error = false) {
-    const toast = node(
-      "div",
-      text,
-      "assistant-toast" + (error ? " error" : ""),
-    );
-    const close = node("button", "×");
-    close.type = "button";
-    close.setAttribute("aria-label", "关闭通知");
-    close.onclick = () => toast.remove();
-    toast.prepend(close);
-    $("assistant-notifications").append(toast);
-    setTimeout(() => toast.remove(), 6500);
+    window.AppNotice.show(text, error);
   }
   function action(text, fn, cls = "button secondary small") {
     const b = node("button", text, cls);
@@ -146,6 +135,7 @@
     persist();
   }
   function setTab(tab) {
+    if (tab === "links") tab = "thumbnail";
     state.tab = tab;
     root.querySelectorAll("[data-result]").forEach((b) => {
       b.classList.toggle("active", b.dataset.result === tab);
@@ -642,7 +632,7 @@
       while (true) {
         let task;
         try {
-          task = await api(`/api/tasks/${job.id}`);
+          task = await window.AppTaskCenter.readProcessing(job.id);
           job.networkError = "";
         } catch (e) {
           if (e.status === 404) {
@@ -678,7 +668,7 @@
           }
           persist();
           renderJobs();
-          notify(`${labels[job.kind]}已完成`);
+          // Completion notification is emitted once by the shared task projection.
           return task;
         }
         persist();
@@ -1246,9 +1236,7 @@
       persist();
       await runPipeline();
     });
-  document.addEventListener("app:notice", (event) =>
-    notify(event.detail.text, event.detail.error),
-  );
+
   document.addEventListener("app:view", (event) => {
     if (event.detail.view === "publish") initBrowser();
   });
@@ -1262,8 +1250,7 @@
   livePreview();
   setStep(state.step);
   setTab(state.tab);
-  // Toasts remain visible when navigating away from the assistant.
-  document.body.append($("assistant-notifications"));
+
   for (const job of state.jobs)
     if (!terminal(job.status) && job.id !== state.pipeline?.active)
       watchJob(job).catch((e) => notify(e.message, true));
