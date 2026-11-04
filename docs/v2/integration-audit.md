@@ -154,3 +154,7 @@ A	tests/v2/workbench/transport.test.cjs
 ## 审计后交接
 
 合并 FileBrowser 前出现 shared/shell.js、design-system.css 未跟踪文件。用户明确确认其他会话已暂停，由本整合会话统一接手；文件完整保留。五个模块合并均无冲突；Naming 102、Subtitle 36、Download 40、FileBrowser 30 项专项测试通过，Workbench 验证中。
+
+## 最终复核
+
+五个原模块 worktree 的分支、HEAD 和干净状态再次核实，均保持上表状态。公共集成依赖已落地，Python 3.11 与隔离 Python 3.12 全量各 376 项通过；最后的页面挂载修复后，两种环境各补跑 17 项集成测试通过。外部凭据受阻项、迁移及发布回滚说明见 integration-report.md，机器结果见 integration-test-results.json。原始模块 handoff 是合并前历史交付记录，不代表最终集成状态。

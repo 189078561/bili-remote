@@ -1,0 +1,100 @@
+{
+  "application_sha256_full_suite": "f22ccd6bf160e8e7ab610ee51f364de3c68bc0a01ff7cda5bafa0979affd5037",
+  "application_sha256_after_layout_followup": "461fc271bb41e2268f5185514fff7b2257c4d0094a325b2a829c107adf44cc1f",
+  "scope_note": "After both full runs, only index.html mounting position and its layout assertion changed; both environments reran all 17 integration checks. No backend or JavaScript changed afterward.",
+  "runs": [
+    {
+      "environment": "host",
+      "python": "3.11.2",
+      "command": "python3 scripts/dev_test.py all",
+      "tests": 376,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_seconds": 235.814,
+      "timestamp": "2026-11-04T21:47:44.047807+08:00",
+      "groups": {
+        "legacy": 210,
+        "tests.v2.download": 7,
+        "tests.v2.filebrowser": 15,
+        "tests.v2.integration": 17,
+        "tests.v2.metadata": 12,
+        "tests.v2.naming": 70,
+        "tests.v2.subtitle": 34,
+        "tests.v2.workbench": 11
+      },
+      "junit": ".dev/test-results-all.xml"
+    },
+    {
+      "environment": "host",
+      "python": "3.11.2",
+      "command": "python3 scripts/dev_test.py integration",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_seconds": 20.525,
+      "timestamp": "2026-11-04T21:51:50.215432+08:00",
+      "groups": {
+        "tests.v2.integration": 17
+      },
+      "junit": ".dev/test-results-integration.xml"
+    },
+    {
+      "environment": "isolated",
+      "python": "3.12.15",
+      "command": "python3 scripts/dev_test_container.py all",
+      "tests": 376,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_seconds": 251.619,
+      "timestamp": "2026-11-04T13:47:35.766668+00:00",
+      "groups": {
+        "legacy": 210,
+        "tests.v2.download": 7,
+        "tests.v2.filebrowser": 15,
+        "tests.v2.integration": 17,
+        "tests.v2.metadata": 12,
+        "tests.v2.naming": 70,
+        "tests.v2.subtitle": 34,
+        "tests.v2.workbench": 11
+      },
+      "junit": ".dev/py312-src/.dev/test-results-all.xml"
+    },
+    {
+      "environment": "isolated",
+      "python": "3.12.15",
+      "command": "python3 scripts/dev_test_container.py integration",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_seconds": 24.896,
+      "timestamp": "2026-11-04T13:52:17.987137+00:00",
+      "groups": {
+        "tests.v2.integration": 17
+      },
+      "junit": ".dev/py312-src/.dev/test-results-integration.xml"
+    }
+  ],
+  "frontend": {
+    "native_build": "passed",
+    "javascript_files_checked": 20,
+    "wheel_resource_check": "passed"
+  },
+  "python312_tools": {
+    "pytest": "9.2.0",
+    "playwright": "1.64.1",
+    "ffmpeg": "7.1.5",
+    "node": "20.19.2"
+  },
+  "external": {
+    "bangumi_public_read_only": "verified",
+    "tmdb": "blocked_missing_development_credentials",
+    "ptgen": "blocked_missing_development_endpoint_and_credentials",
+    "bilibili_login_download": "blocked_missing_independent_test_account",
+    "image_host_qbittorrent": "transport_substitutes_only"
+  },
+  "implementation_commit": "7dd711e58ba416ddef77dfcc820217b813789391"
+}
