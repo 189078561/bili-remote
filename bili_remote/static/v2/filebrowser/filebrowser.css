@@ -1,0 +1,32 @@
+/* All layout rules are scoped to the shared component or its own dialogs. */
+.fb-v2, .fb-v2 * {box-sizing: border-box;}
+.fb-v2 {min-width: 0; max-width: 100%;}
+.fb-v2 .file-browser-shell, .fb-v2 .file-list-pane, .fb-v2 .file-toolbar-actions {min-width: 0;}
+.fb-v2 .file-toolbar-actions {flex-wrap: wrap;}
+.fb-v2 .file-breadcrumbs {flex-wrap: wrap; overflow-wrap: anywhere;}
+.fb-v2 .crumb {max-width: 100%; white-space: normal; overflow-wrap: anywhere;}
+.fb-v2 .fb-tree-toggle {display: none;}
+.fb-v2 .file-row:focus-visible {outline: 2px solid var(--brand, #167baa); outline-offset: -2px;}
+.fb-v2 .file-search-input {max-width: 100%; min-width: 0;}
+.fb-media-info {max-width: 100%; overflow-wrap: anywhere;}
+.fb-media-info dl {display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 16px;}
+.fb-media-info dd {margin: 0; white-space: pre-wrap;}
+@media (max-width: 768px) {
+  .fb-v2 .file-browser-shell {display: grid; grid-template-columns: minmax(0, 1fr);}
+  .fb-v2 .fb-tree-toggle {display: inline-flex;}
+  .fb-v2 .file-tree-pane {display: none;}
+  .fb-v2.fb-tree-open .file-tree-pane {display: block; max-height: 40vh; overflow: auto;}
+  .fb-v2 .file-list-toolbar {display: grid; grid-template-columns: minmax(0, 1fr);}
+  .fb-v2 .file-toolbar-actions {width: 100%; justify-content: flex-start;}
+  .fb-v2 .root-shortcuts {display: grid; grid-template-columns: minmax(0, 1fr);}
+  .fb-v2 .root-shortcut {width: 100%; min-width: 0;}
+  .fb-v2 .root-text {min-width: 0;}
+  .fb-v2 .root-text small {max-width: 100%; overflow-wrap: anywhere;}
+  .fb-v2 .file-list-head {display: none;}
+  .fb-v2 .file-row {grid-template-columns: 32px 36px minmax(0, 1fr); min-width: 0; gap: 6px; padding: 8px;}
+  .fb-v2 .file-row .file-date, .fb-v2 .file-row .file-size {display: none;}
+  .fb-v2 .file-name {white-space: normal; overflow-wrap: anywhere;}
+  .fb-v2 button, .fb-v2 summary, .fb-v2 .inline-check {min-height: 44px;}
+  .fb-v2 .file-check {width: 22px; height: 22px;}
+  .fb-v2 .file-pager {flex-wrap: wrap;}
+}
