@@ -150,3 +150,7 @@ A	tests/v2/workbench/transport.test.cjs
 ## 整合决策
 
 代码和交付状态已核实。按用户指定 Naming → Subtitle → Download → FileBrowser → Workbench 合并，每次前后查状态并跑模块测试。未解决集成依赖不冒充已完成；测试失败先定位记录，公共修复后重新验收。其他 worktree 保持原状，不推送、不部署。
+
+## 审计后交接
+
+合并 FileBrowser 前出现 shared/shell.js、design-system.css 未跟踪文件。用户明确确认其他会话已暂停，由本整合会话统一接手；文件完整保留。五个模块合并均无冲突；Naming 102、Subtitle 36、Download 40、FileBrowser 30 项专项测试通过，Workbench 验证中。
