@@ -1,0 +1,541 @@
+{
+  "verification_kind": "real_read_only_http",
+  "service_version": "not_exposed",
+  "providers": {
+    "tmdb": {
+      "capabilities": {
+        "provider": "tmdb",
+        "state": "unconfigured",
+        "checked_at": "2026-11-04T12:47:46.731312+00:00",
+        "authentication": "unconfigured",
+        "supported_features": [],
+        "sample_schema_hash": null,
+        "warnings": [
+          {
+            "code": "unconfigured",
+            "message": "未配置 TMDB 开发凭据"
+          }
+        ]
+      },
+      "sample_schema": null
+    },
+    "bangumi": {
+      "capabilities": {
+        "provider": "bangumi",
+        "state": "verified",
+        "checked_at": "2026-11-04T12:47:47.405638+00:00",
+        "authentication": "unconfigured",
+        "supported_features": [
+          "search",
+          "subject",
+          "title_aliases",
+          "voice_cast",
+          "directors",
+          "related_subjects"
+        ],
+        "sample_schema_hash": "4c812662ced56c41a200667abc057423652d164027c9e5cf4dc6c7cb0b4fcf9e",
+        "warnings": []
+      },
+      "sample_schema": {
+        "normalized": {
+          "detail": {
+            "episodes": [],
+            "identity": {
+              "bangumi_id": "str",
+              "confidence": "null",
+              "confirmed": "bool",
+              "media_type": "str",
+              "selected_by": "str",
+              "tmdb_id": "null"
+            },
+            "metadata": {
+              "cast": [],
+              "directors": [
+                {
+                  "character": "null",
+                  "name": {
+                    "confidence": "null",
+                    "confirmed": "bool",
+                    "manual": "bool",
+                    "source": "str",
+                    "source_ref": "str",
+                    "updated_at": "str",
+                    "value": "str"
+                  },
+                  "person_id": "str",
+                  "provider_order": "int",
+                  "role": "str"
+                }
+              ],
+              "genres": {
+                "confidence": "null",
+                "confirmed": "bool",
+                "manual": "bool",
+                "source": "str",
+                "source_ref": "str",
+                "updated_at": "str",
+                "value": "null"
+              },
+              "links": {
+                "bangumi": "str",
+                "bangumi_related_0": "str",
+                "bangumi_related_1": "str",
+                "bangumi_related_10": "str",
+                "bangumi_related_11": "str",
+                "bangumi_related_12": "str",
+                "bangumi_related_13": "str",
+                "bangumi_related_14": "str",
+                "bangumi_related_15": "str",
+                "bangumi_related_16": "str",
+                "bangumi_related_17": "str",
+                "bangumi_related_18": "str",
+                "bangumi_related_19": "str",
+                "bangumi_related_2": "str",
+                "bangumi_related_20": "str",
+                "bangumi_related_21": "str",
+                "bangumi_related_22": "str",
+                "bangumi_related_23": "str",
+                "bangumi_related_24": "str",
+                "bangumi_related_25": "str",
+                "bangumi_related_26": "str",
+                "bangumi_related_27": "str",
+                "bangumi_related_28": "str",
+                "bangumi_related_29": "str",
+                "bangumi_related_3": "str",
+                "bangumi_related_30": "str",
+                "bangumi_related_31": "str",
+                "bangumi_related_32": "str",
+                "bangumi_related_33": "str",
+                "bangumi_related_34": "str",
+                "bangumi_related_35": "str",
+                "bangumi_related_36": "str",
+                "bangumi_related_37": "str",
+                "bangumi_related_38": "str",
+                "bangumi_related_39": "str",
+                "bangumi_related_4": "str",
+                "bangumi_related_40": "str",
+                "bangumi_related_41": "str",
+                "bangumi_related_42": "str",
+                "bangumi_related_43": "str",
+                "bangumi_related_44": "str",
+                "bangumi_related_45": "str",
+                "bangumi_related_46": "str",
+                "bangumi_related_47": "str",
+                "bangumi_related_48": "str",
+                "bangumi_related_49": "str",
+                "bangumi_related_5": "str",
+                "bangumi_related_50": "str",
+                "bangumi_related_51": "str",
+                "bangumi_related_52": "str",
+                "bangumi_related_53": "str",
+                "bangumi_related_54": "str",
+                "bangumi_related_6": "str",
+                "bangumi_related_7": "str",
+                "bangumi_related_8": "str",
+                "bangumi_related_9": "str"
+              },
+              "original_title": {
+                "confidence": "null",
+                "confirmed": "bool",
+                "manual": "bool",
+                "source": "str",
+                "source_ref": "str",
+                "updated_at": "str",
+                "value": "str"
+              },
+              "overview": {
+                "confidence": "null",
+                "confirmed": "bool",
+                "manual": "bool",
+                "source": "str",
+                "source_ref": "str",
+                "updated_at": "str",
+                "value": "str"
+              },
+              "poster_url": {
+                "confidence": "null",
+                "confirmed": "bool",
+                "manual": "bool",
+                "source": "str",
+                "source_ref": "str",
+                "updated_at": "str",
+                "value": "str"
+              },
+              "title_ja": {
+                "confidence": "null",
+                "confirmed": "bool",
+                "manual": "bool",
+                "source": "str",
+                "source_ref": "str",
+                "updated_at": "str",
+                "value": "str"
+              },
+              "title_zh": {
+                "confidence": "null",
+                "confirmed": "bool",
+                "manual": "bool",
+                "source": "str",
+                "source_ref": "str",
+                "updated_at": "str",
+                "value": "str"
+              },
+              "title_zh_hant": {
+                "confidence": "null",
+                "confirmed": "bool",
+                "manual": "bool",
+                "source": "str",
+                "source_ref": "str",
+                "updated_at": "str",
+                "value": "null"
+              },
+              "voice_cast": [
+                {
+                  "character": "str",
+                  "name": {
+                    "confidence": "null",
+                    "confirmed": "bool",
+                    "manual": "bool",
+                    "source": "str",
+                    "source_ref": "str",
+                    "updated_at": "str",
+                    "value": "str"
+                  },
+                  "person_id": "str",
+                  "provider_order": "int",
+                  "role": "str"
+                }
+              ],
+              "year": {
+                "confidence": "null",
+                "confirmed": "bool",
+                "manual": "bool",
+                "source": "str",
+                "source_ref": "str",
+                "updated_at": "str",
+                "value": "str"
+              }
+            },
+            "season": "null",
+            "supported_features": [
+              "str"
+            ],
+            "titles": [
+              {
+                "id": "str",
+                "kind": "str",
+                "language": "str",
+                "selected": "bool",
+                "source": "str",
+                "source_ref": "str",
+                "text": "str"
+              }
+            ],
+            "warnings": []
+          },
+          "page": {
+            "items": [
+              {
+                "id": "str",
+                "media_type": "str",
+                "original_title": "str",
+                "provider": "str",
+                "title": "str",
+                "year": "str"
+              }
+            ],
+            "page": "int",
+            "total_pages": "int",
+            "warnings": []
+          }
+        },
+        "http": [
+          {
+            "method": "POST",
+            "status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "data": [
+                {
+                  "collection": {
+                    "collect": "int",
+                    "doing": "int",
+                    "dropped": "int",
+                    "on_hold": "int",
+                    "wish": "int"
+                  },
+                  "date": "str",
+                  "eps": "int",
+                  "id": "int",
+                  "image": "str",
+                  "images": {
+                    "common": "str",
+                    "grid": "str",
+                    "large": "str",
+                    "medium": "str",
+                    "small": "str"
+                  },
+                  "infobox": [
+                    {
+                      "key": "str",
+                      "value": "str"
+                    },
+                    {
+                      "key": "str",
+                      "value": [
+                        {
+                          "v": "str"
+                        }
+                      ]
+                    }
+                  ],
+                  "locked": "bool",
+                  "meta_tags": [
+                    "str"
+                  ],
+                  "name": "str",
+                  "name_cn": "str",
+                  "nsfw": "bool",
+                  "platform": "str",
+                  "rating": {
+                    "count": {
+                      "1": "int",
+                      "10": "int",
+                      "2": "int",
+                      "3": "int",
+                      "4": "int",
+                      "5": "int",
+                      "6": "int",
+                      "7": "int",
+                      "8": "int",
+                      "9": "int"
+                    },
+                    "rank": "int",
+                    "score": "float",
+                    "total": "int"
+                  },
+                  "series": "bool",
+                  "summary": "str",
+                  "tags": [
+                    {
+                      "count": "int",
+                      "name": "str",
+                      "total_count": "int"
+                    }
+                  ],
+                  "total_episodes": "int",
+                  "type": "int",
+                  "volumes": "int"
+                }
+              ],
+              "limit": "int",
+              "offset": "int",
+              "total": "int"
+            }
+          },
+          {
+            "method": "GET",
+            "status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "collection": {
+                "collect": "int",
+                "doing": "int",
+                "dropped": "int",
+                "on_hold": "int",
+                "wish": "int"
+              },
+              "date": "str",
+              "eps": "int",
+              "id": "int",
+              "images": {
+                "common": "str",
+                "grid": "str",
+                "large": "str",
+                "medium": "str",
+                "small": "str"
+              },
+              "infobox": [
+                {
+                  "key": "str",
+                  "value": "str"
+                },
+                {
+                  "key": "str",
+                  "value": [
+                    {
+                      "v": "str"
+                    }
+                  ]
+                }
+              ],
+              "locked": "bool",
+              "meta_tags": [
+                "str"
+              ],
+              "name": "str",
+              "name_cn": "str",
+              "nsfw": "bool",
+              "platform": "str",
+              "rating": {
+                "count": {
+                  "1": "int",
+                  "10": "int",
+                  "2": "int",
+                  "3": "int",
+                  "4": "int",
+                  "5": "int",
+                  "6": "int",
+                  "7": "int",
+                  "8": "int",
+                  "9": "int"
+                },
+                "rank": "int",
+                "score": "float",
+                "total": "int"
+              },
+              "series": "bool",
+              "summary": "str",
+              "tags": [
+                {
+                  "count": "int",
+                  "name": "str",
+                  "total_count": "int"
+                }
+              ],
+              "total_episodes": "int",
+              "type": "int",
+              "volumes": "int"
+            }
+          },
+          {
+            "method": "GET",
+            "status": 200,
+            "content_type": "application/json",
+            "schema": [
+              {
+                "id": "int",
+                "images": {
+                  "common": "str",
+                  "grid": "str",
+                  "large": "str",
+                  "medium": "str",
+                  "small": "str"
+                },
+                "name": "str",
+                "name_cn": "str",
+                "relation": "str",
+                "type": "int"
+              }
+            ]
+          },
+          {
+            "method": "GET",
+            "status": 200,
+            "content_type": "application/json",
+            "schema": [
+              {
+                "career": [
+                  "str"
+                ],
+                "eps": "str",
+                "id": "int",
+                "images": {
+                  "grid": "str",
+                  "large": "str",
+                  "medium": "str",
+                  "small": "str"
+                },
+                "name": "str",
+                "relation": "str",
+                "type": "int"
+              },
+              {
+                "career": [],
+                "eps": "str",
+                "id": "int",
+                "images": {
+                  "grid": "str",
+                  "large": "str",
+                  "medium": "str",
+                  "small": "str"
+                },
+                "name": "str",
+                "relation": "str",
+                "type": "int"
+              }
+            ]
+          },
+          {
+            "method": "GET",
+            "status": 200,
+            "content_type": "application/json",
+            "schema": [
+              {
+                "actors": [],
+                "id": "int",
+                "images": {
+                  "grid": "str",
+                  "large": "str",
+                  "medium": "str",
+                  "small": "str"
+                },
+                "name": "str",
+                "relation": "str",
+                "summary": "str",
+                "type": "int"
+              },
+              {
+                "actors": [
+                  {
+                    "career": [
+                      "str"
+                    ],
+                    "id": "int",
+                    "images": {
+                      "grid": "str",
+                      "large": "str",
+                      "medium": "str",
+                      "small": "str"
+                    },
+                    "locked": "bool",
+                    "name": "str",
+                    "short_summary": "str",
+                    "type": "int"
+                  }
+                ],
+                "id": "int",
+                "images": {
+                  "grid": "str",
+                  "large": "str",
+                  "medium": "str",
+                  "small": "str"
+                },
+                "name": "str",
+                "relation": "str",
+                "summary": "str",
+                "type": "int"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "ptgen": {
+      "capabilities": {
+        "provider": "ptgen",
+        "state": "unconfigured",
+        "checked_at": "2026-11-04T12:47:47.405890+00:00",
+        "authentication": "unconfigured",
+        "supported_features": [],
+        "sample_schema_hash": null,
+        "warnings": [
+          {
+            "code": "unconfigured",
+            "message": "未配置 PT-Gen 开发接口"
+          }
+        ]
+      },
+      "sample_schema": null
+    }
+  }
+}

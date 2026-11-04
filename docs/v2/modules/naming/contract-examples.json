@@ -1,0 +1,265 @@
+{
+  "note": "Synthetic documentation examples only. IDs, fingerprints, token, timestamps and media facts below are illustrative, not live verification or persisted application data. Canonical field types remain owned by v2/contracts integration.",
+  "preview": {
+    "method": "POST",
+    "path": "/api/v2/naming/preview",
+    "headers": {
+      "X-CSRF-Token": "<current-session-token>"
+    },
+    "request": {
+      "context": {
+        "schema_version": 1,
+        "context_id": "illustrative-context",
+        "revision": 1,
+        "resources": [
+          {
+            "root_key": "downloads",
+            "relative_path": "Show/EP01.mkv",
+            "kind": "file",
+            "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ],
+        "origins": [],
+        "identity": {
+          "media_type": "series",
+          "tmdb_id": "100",
+          "bangumi_id": null,
+          "selected_by": "manual",
+          "confidence": null,
+          "confirmed": true
+        },
+        "identity_candidates": [],
+        "titles": [],
+        "selected_title": {
+          "value": "Show",
+          "source": "manual",
+          "source_ref": null,
+          "manual": true,
+          "confirmed": true,
+          "confidence": null,
+          "updated_at": "2026-11-04T00:00:00+00:00"
+        },
+        "metadata": {
+          "year": {
+            "value": 2023,
+            "source": "manual",
+            "source_ref": null,
+            "manual": true,
+            "confirmed": true,
+            "confidence": null,
+            "updated_at": "2026-11-04T00:00:00+00:00"
+          }
+        },
+        "episode": {},
+        "episode_mappings": [],
+        "files": [
+          {
+            "ref": {
+              "root_key": "downloads",
+              "relative_path": "Show/EP01.mkv",
+              "kind": "file",
+              "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "episode": {
+              "season": {
+                "value": 1,
+                "source": "manual",
+                "source_ref": null,
+                "manual": true,
+                "confirmed": true,
+                "confidence": null,
+                "updated_at": "2026-11-04T00:00:00+00:00"
+              },
+              "episode": {
+                "value": 1,
+                "source": "manual",
+                "source_ref": null,
+                "manual": true,
+                "confirmed": true,
+                "confidence": null,
+                "updated_at": "2026-11-04T00:00:00+00:00"
+              },
+              "season_episode_count": {
+                "value": null,
+                "source": "tmdb",
+                "source_ref": null,
+                "manual": false,
+                "confirmed": false,
+                "confidence": null,
+                "updated_at": "2026-11-04T00:00:00+00:00"
+              },
+              "scope": "single",
+              "mapping_key": "file:Show/EP01.mkv"
+            },
+            "probe": {
+              "resolution": {
+                "value": "1080p",
+                "source": "ffprobe",
+                "source_ref": null,
+                "manual": false,
+                "confirmed": false,
+                "confidence": null,
+                "updated_at": "2026-11-04T00:00:00+00:00"
+              },
+              "video_codec": {
+                "value": "H.265",
+                "source": "ffprobe",
+                "source_ref": null,
+                "manual": false,
+                "confirmed": false,
+                "confidence": null,
+                "updated_at": "2026-11-04T00:00:00+00:00"
+              },
+              "audio_codec": {
+                "value": "AAC",
+                "source": "ffprobe",
+                "source_ref": null,
+                "manual": false,
+                "confirmed": false,
+                "confidence": null,
+                "updated_at": "2026-11-04T00:00:00+00:00"
+              },
+              "probe_tool": "ffprobe",
+              "probe_version": null,
+              "probe_error": null
+            },
+            "sidecars": []
+          }
+        ],
+        "effective_rules": {},
+        "warnings": [],
+        "conflicts": []
+      },
+      "overrides": {
+        "file_values": {},
+        "episode_overrides": {},
+        "manual_names": {}
+      },
+      "rules": {
+        "template_id": "series",
+        "source": {
+          "value": "WEB-DL",
+          "source": "default",
+          "source_ref": null,
+          "manual": false,
+          "confirmed": false,
+          "confidence": null,
+          "updated_at": "2026-11-04T00:00:00+00:00"
+        },
+        "group": {
+          "value": "HDVWEB",
+          "source": "default",
+          "source_ref": null,
+          "manual": false,
+          "confirmed": false,
+          "confidence": null,
+          "updated_at": "2026-11-04T00:00:00+00:00"
+        },
+        "season_default": 1
+      }
+    },
+    "response": {
+      "preview_token": "illustrative-token-not-valid",
+      "expires_at": "2026-11-04T00:30:00+00:00",
+      "context_revision": 1,
+      "operations": [
+        {
+          "source": {
+            "root_key": "downloads",
+            "relative_path": "Show/EP01.mkv",
+            "kind": "file",
+            "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "target_relative_path": "Show/Show.2023.S01E01.1080p.WEB-DL.H.265.AAC-HDVWEB.mkv",
+          "temporary_required": true,
+          "sidecar_of": null,
+          "source_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "warnings": []
+        }
+      ],
+      "conflicts": [],
+      "can_apply": true
+    }
+  },
+  "apply": {
+    "method": "POST",
+    "path": "/api/v2/naming/apply",
+    "request": {
+      "preview_token": "illustrative-token-not-valid",
+      "expected_revision": 1,
+      "confirm": true,
+      "idempotency_key": "example-action-key"
+    },
+    "status": 202,
+    "response_keys": [
+      "task",
+      "batch_id"
+    ]
+  },
+  "resolve": {
+    "method": "POST",
+    "path": "/api/v2/resources/resolve",
+    "request": {
+      "resources": [
+        {
+          "root_key": "downloads",
+          "relative_path": "Show/EP01.mkv",
+          "kind": "file",
+          "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "origins": [],
+      "selection": {
+        "provider": "tmdb",
+        "id": "100",
+        "media_type": "series"
+      },
+      "context": null,
+      "manual_overrides": {
+        "selected_title": "Show"
+      }
+    },
+    "response_keys": [
+      "context",
+      "changes",
+      "capabilities"
+    ]
+  },
+  "conflict": {
+    "status": 409,
+    "response": {
+      "detail": {
+        "code": "stale_resource",
+        "message": "源文件已变化，请重新预览",
+        "fields": []
+      }
+    }
+  },
+  "integration_missing": {
+    "status": 503,
+    "response": {
+      "detail": {
+        "code": "integration_unavailable",
+        "message": "持久化审计及公共执行器尚未接入",
+        "fields": []
+      }
+    }
+  },
+  "memory_write": {
+    "method": "PUT",
+    "path": "/api/v2/naming/memory",
+    "request": {
+      "scope": "season",
+      "identity_key": "tmdb:tv:100",
+      "season_key": 2,
+      "expected_revision": 0,
+      "selected_title": "Show",
+      "naming_rule": {
+        "episode_mode": "offset"
+      },
+      "episode_rules": {
+        "offset": 3
+      }
+    }
+  }
+}

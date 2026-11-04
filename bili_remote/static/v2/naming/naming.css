@@ -1,0 +1,12 @@
+.v2-naming { display: grid; gap: 1rem; min-width: 0; }
+.v2-naming fieldset { display: flex; flex-wrap: wrap; align-items: start; gap: .75rem; min-width: 0; border: 1px solid #9ca3af; border-radius: .5rem; padding: .75rem; }
+.v2-naming label { display: grid; gap: .25rem; flex: 1 1 12rem; min-width: 0; }
+.v2-naming input, .v2-naming select, .v2-naming textarea { box-sizing: border-box; max-width: 100%; min-width: 0; padding: .5rem; font: inherit; }
+.v2-naming button { min-height: 44px; padding: .5rem .75rem; cursor: pointer; font: inherit; }
+.v2-naming button:disabled { cursor: default; opacity: .55; }
+.v2-naming__toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
+.v2-naming__files, .v2-naming__preview { display: grid; gap: .75rem; min-width: 0; }
+.v2-naming__preview p, .v2-naming legend { overflow-wrap: anywhere; }
+.v2-naming__preview small { display: block; }
+.v2-naming__error { color: #b91c1c; }
+@media (max-width: 600px) { .v2-naming label { flex-basis: 100%; } .v2-naming__toolbar button { flex: 1 1 auto; } }
