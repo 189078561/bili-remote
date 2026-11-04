@@ -1,0 +1,10 @@
+{
+  "description": "合成契约样例，fingerprint 为占位值；实际请求必须由 /api/files/meta 返回，不能自行生成",
+  "resolve_request": {
+    "resources": [{"root_key": "downloads", "relative_path": "Season/episode01.mp4", "kind": "file", "fingerprint": "SERVER_GENERATED_FINGERPRINT"}],
+    "origins": [], "selection": null, "context": null, "manual_overrides": {}
+  },
+  "handoff": {"context_id": "same-page-context", "revision": 7, "destination": "workbench or naming", "persistence": "none"},
+  "ordinary_operations": {"preview": "/api/files/operations/preview", "apply": "/api/files/operations/apply", "confirmation": "explicit", "overwrite_confirmation": "separate", "limit": 200},
+  "text_save": {"endpoint": "/api/files/text", "method": "PUT", "fingerprint": "read_text content fingerprint; distinct from ResourceRef and V2 preview_token"}
+}

@@ -1,6 +1,11 @@
 (function () {
   "use strict";
 
+  const stylesheet = document.createElement("link");
+  stylesheet.rel = "stylesheet";
+  stylesheet.href = new URL("v2/filebrowser/filebrowser.css", document.currentScript.src).href;
+  document.head.append(stylesheet);
+
   const DEFAULT_SORTS = [
     ["natural", "自然排序"],
     ["name", "名称 A→Z"],
@@ -90,6 +95,13 @@
       this.onConfirm = options.onConfirm || null;
       this.onSelectionChange = options.onSelectionChange || null;
       this.search = "";
+      this.searchTimer = null;
+      this.destroyed = false;
+      this.taskTimers = new Set();
+      this.onOpenWorkbench = options.onOpenWorkbench || null;
+      this.onOpenNaming = options.onOpenNaming || null;
+      this.onMediaInfo = options.onMediaInfo || null;
+      this.onLoadStart = options.onLoadStart || null;
       this.onMediaRename = options.onMediaRename || null;
       this.onCollage = options.onCollage || null;
       this.onTool = options.onTool || null;
@@ -115,7 +127,7 @@
 
     build() {
       this.host.replaceChildren();
-      const shell = element("div", "unified-file-browser");
+      const shell = element("div", "unified-file-browser fb-v2");
       const heading = element("div", "file-browser-heading");
       heading.append(element("strong", null, this.title));
       if (this.mode !== "full") {
@@ -140,6 +152,15 @@
       const tree = element("div", "file-tree");
       tree.setAttribute("aria-live", "polite");
       treePane.append(treeHeading, tree);
+      treePane.id = `fb-tree-${FileBrowser._nextId = (FileBrowser._nextId || 0) + 1}`;
+      const treeToggle = button("目录树", "button ghost small fb-tree-toggle");
+      treeToggle.setAttribute("aria-controls", treePane.id);
+      treeToggle.setAttribute("aria-expanded", "false");
+      treeToggle.addEventListener("click", () => {
+        const open = shell.classList.toggle("fb-tree-open");
+        treeToggle.setAttribute("aria-expanded", String(open));
+      });
+      heading.append(treeToggle);
 
       const listPane = element("section", "file-list-pane");
       const toolbar = element("div", "file-list-toolbar");
@@ -181,14 +202,14 @@
       });
       syncDirection();
       toolbarActions.append(sortSelect, directionButton);
-      if (this.mode === "full") {
+      {
         const search = document.createElement("input");
         search.type = "search"; search.className = "file-search-input";
         search.placeholder = "搜索当前目录"; search.setAttribute("aria-label", "搜索当前目录");
-        let searchTimer;
+        this.el.search = search;
         search.addEventListener("input", () => {
-          clearTimeout(searchTimer);
-          searchTimer = setTimeout(() => {this.search = search.value; this.loadDirectory({page: 1});}, 200);
+          clearTimeout(this.searchTimer);
+          this.searchTimer = setTimeout(() => {this.search = search.value; this.loadDirectory({page: 1, clearSelection: true});}, 200);
         });
         toolbarActions.append(search);
       }
@@ -207,10 +228,12 @@
           ["paste", "粘贴"],
           ["move", "移动到"],
           ["delete", "删除"],
-          ["mediaRename", "批量重命名"],
+          ["mediaRename", this.onOpenNaming ? "智能命名" : "批量重命名"],
+          ["workbench", "进入发种工作台"],
           ["collage", "生成缩略图"],
           ["report", "媒体报告"], ["upload", "上传图片"], ["torrent", "制作种子"], ["publish", "发布资料"]
         ]) {
+          if (key === "workbench" && !this.onOpenWorkbench) continue;
           const node = button(label, key === "delete" ? "button danger small" : "button ghost small");
           node.addEventListener("click", () => this.runAction(key));
           if (["copy","cut","paste","move","delete"].includes(key)) {
@@ -221,7 +244,7 @@
         }
       }
       if (this.mode === "full") toolbarActions.append(more);
-      if (this.selectionType !== "directory") {
+      if (this.allowMultiple) {
         const selectAll = element("label", "inline-check");
         const selectAllInput = document.createElement("input");
         selectAllInput.type = "checkbox";
@@ -347,6 +370,9 @@
       this.rootKey = rootKey;
       this.path = path || "";
       this.page = 1;
+      clearTimeout(this.searchTimer);
+      this.search = "";
+      if (this.el.search) this.el.search.value = "";
       this.selected.clear();
       this.renderRoots();
       this.renderBreadcrumbs();
@@ -366,9 +392,14 @@
 
     async loadDirectory({page = 1, clearSelection = false, focus = null} = {}) {
       if (!this.rootKey) return;
+      if (this.destroyed) return;
       const seq = ++this.loadSeq;
       if (clearSelection) this.selected.clear();
       this.el.listError.textContent = "";
+      this.data = null;
+      this.el.list.replaceChildren();
+      this.updateSelection(false);
+      this.onLoadStart?.();
       this.el.meta.textContent = "正在读取目录…";
       try {
         const query = new URLSearchParams({
@@ -444,7 +475,7 @@
     renderList() {
       this.el.list.replaceChildren();
       if (!this.data || !this.data.items.length) {
-        this.el.list.append(element("p", "empty", "这个目录是空的"));
+        this.el.list.append(element("p", "empty", this.search ? "没有匹配的文件" : "这个目录是空的"));
         return;
       }
       for (const item of this.data.items) {
@@ -452,6 +483,18 @@
         row.classList.toggle("selected", this.selected.has(itemKey(this.rootKey, item.relative_path)));
         row.classList.toggle("blocked", !item.allowed);
         row.dataset.path = item.relative_path;
+        row.tabIndex = item.allowed ? 0 : -1;
+        row.setAttribute("aria-label", item.name);
+        row.addEventListener("keydown", event => {
+          if (event.target !== row || !item.allowed) return;
+          if (event.key === "Enter") {
+            event.preventDefault();
+            if (item.is_dir) this.navigate(this.rootKey, item.relative_path);
+            else this.openPreview(item);
+          } else if (event.key === " ") {
+            event.preventDefault(); this.toggleItem(item); this.updateSelection();
+          }
+        });
         if (this.isSelectable(item)) {
           const check = document.createElement("input");
           check.type = "checkbox";
@@ -583,6 +626,7 @@
       }
       if (this.el.selectAll) {
         const selectable = (this.data?.items || []).filter(item => this.isSelectable(item));
+        this.el.selectAll.indeterminate = selectable.some(item => this.selected.has(itemKey(this.rootKey, item.relative_path))) && !selectable.every(item => this.selected.has(itemKey(this.rootKey, item.relative_path)));
         this.el.selectAll.checked = selectable.length > 0 && selectable.every(item => this.selected.has(itemKey(this.rootKey, item.relative_path)));
       }
       for (const row of this.el.list.querySelectorAll(".file-row")) {
@@ -608,11 +652,12 @@
       if (buttons.rename) buttons.rename.disabled = count !== 1;
       if (buttons.preview) buttons.preview.disabled = count !== 1 || items[0]?.is_dir;
       if (buttons.mediaRename) {
-        buttons.mediaRename.disabled = this.selectedVideos().length === 0;
+        buttons.mediaRename.disabled = this.onOpenNaming ? !count : (!this.onMediaRename || this.selectedVideos().length === 0);
         buttons.mediaRename.title = count && buttons.mediaRename.disabled
           ? "请选择至少一个可重命名的视频文件"
           : "";
       }
+      if (buttons.workbench) buttons.workbench.disabled = count === 0;
       if (buttons.collage) {
         buttons.collage.disabled = !this.onCollage || this.selectedCollageVideos().length === 0;
         buttons.collage.title = count && buttons.collage.disabled
@@ -660,7 +705,9 @@
         ["move", "移动到…", selected.every(entry => entry.capabilities?.move !== false)],
         ["delete", "删除", selected.every(entry => entry.capabilities?.delete !== false)]
       ];
-      if (selected.every(entry => entry.kind === "video" && !entry.is_dir)) {
+      if (this.onOpenWorkbench) actions.push(["workbench", "进入发种工作台", true]);
+      if (this.onOpenNaming) actions.push(["mediaRename", "智能命名", true]);
+      else if (selected.every(entry => entry.kind === "video" && !entry.is_dir)) {
         actions.push(["mediaRename", "剧集重命名", true]);
       } else if (this.selectedVideos().length) {
         actions.push(["mediaRename", "剧集重命名（仅视频）", true]);
@@ -700,9 +747,17 @@
       }, 0);
     }
 
-    runAction(action) {
+    async runAction(action) {
+      try {
+        await this.performAction(action);
+      } catch (error) {
+        this.el.listError.textContent = error.message;
+      }
+    }
+
+    async performAction(action) {
       if (action === "paste") {
-        this.paste();
+        await this.paste();
         return;
       }
       const items = this.selectedItems();
@@ -710,7 +765,8 @@
       if (["report", "upload", "torrent", "publish"].includes(action) && this.onTool) {
         this.onTool(action, items, this.rootKey); return;
       }
-      if (action === "preview") this.openPreview(items[0]);
+      if (action === "workbench" && this.onOpenWorkbench) await this.onOpenWorkbench(items, this.rootKey);
+      else if (action === "preview") await this.openPreview(items[0]);
       else if (action === "rename") this.openRename(items[0]);
       else if (action === "copy" || action === "cut") {
         this.clipboard = {action, items: items.map(item => ({root_key: this.rootKey, relative_path: item.relative_path, name: item.name, is_dir: item.is_dir}))};
@@ -718,6 +774,7 @@
         this.updateOperationButtons();
       } else if (action === "move") this.chooseOperationTarget("移动到", items);
       else if (action === "delete") this.startOperation("delete", items, null);
+      else if (action === "mediaRename" && this.onOpenNaming) await this.onOpenNaming(items, this.rootKey);
       else if (action === "mediaRename" && this.onMediaRename) this.onMediaRename(this.selectedVideos());
       else if (action === "collage" && this.onCollage) {
         this.onCollage(this.selectedCollageVideos(), this.rootKey);
@@ -726,7 +783,7 @@
 
     paste() {
       if (!this.clipboard) return;
-      this.startOperation(
+      return this.startOperation(
         this.clipboard.action === "cut" ? "move" : "copy",
         this.clipboard.items,
         {root_key: this.rootKey, relative_path: this.path}
@@ -734,6 +791,7 @@
     }
 
     chooseOperationTarget(title, items) {
+      const sources = items.map(item => ({...item, root_key: item.root_key || this.rootKey}));
       FileBrowser.openPicker({
         mode: "move-copy-target",
         title,
@@ -741,7 +799,7 @@
         selectionType: "directory",
         confirmLabel: "选择此目录"
       }).then(target => {
-        if (target) this.startOperation("move", items, target);
+        if (target) this.startOperation("move", sources, target);
       }).catch(error => {
         this.el.listError.textContent = error.message;
       });
@@ -866,7 +924,7 @@
             method: "POST",
             body: JSON.stringify({token: plan.token, confirm_overwrite: overwrite})
           });
-          this.showTaskProgress(result.task_id);
+          this.showTaskProgress(result.task_id, {operation: plan.operation, clipboard: this.clipboard});
         } catch (error) {
           panel.append(element("p", "form-error", error.message));
           busy(apply, false);
@@ -877,7 +935,7 @@
       showModal(panel);
     }
 
-    async showTaskProgress(taskId) {
+    async showTaskProgress(taskId, operationState = {}) {
       const panel = element("div", "operation-dialog");
       panel.append(element("h2", null, "文件操作进行中"));
       const status = element("p", "muted", "正在排队…");
@@ -912,10 +970,11 @@
       };
       remember(false);
       const poll = async () => {
-        if (polling || finished) return;
+        if (polling || finished || this.destroyed) return;
         polling = true;
         try {
           const task = await api(`/api/tasks/${taskId}`);
+          if (this.destroyed) return;
           const result = task.result || {};
           const total = Number(result.total) || 0;
           const processed = Number(result.processed) || 0;
@@ -935,6 +994,7 @@
           if (["completed", "failed", "cancelled"].includes(task.status)) {
             finished = true;
             window.clearInterval(timer);
+            this.taskTimers.delete(timer);
             remember(true);
             document.dispatchEvent(new CustomEvent("app:notice", {detail: {text: status.textContent, error: task.status !== "completed"}}));
             cancel.disabled = true;
@@ -946,7 +1006,12 @@
               const line = element("p", item.status === "failed" ? "form-error" : "muted", `${item.source?.relative_path || ""}${targetLabel}：${statusLabel}${item.message ? `（${item.message}）` : ""}`);
               details.append(line);
             }
-            if (this.clipboard?.action === "cut" && task.status === "completed" && failedCount === 0 && skippedCount === 0) this.clipboard = null;
+            if (operationState.operation === "move" && operationState.clipboard === this.clipboard && this.clipboard?.action === "cut") {
+              const completed = new Set((result.items || []).filter(item => item.status === "completed")
+                .map(item => itemKey(item.source.root_key, item.source.relative_path)));
+              this.clipboard.items = this.clipboard.items.filter(item => !completed.has(itemKey(item.root_key, item.relative_path)));
+              if (!this.clipboard.items.length) this.clipboard = null;
+            }
             this.updateOperationButtons();
             await this.refresh();
           }
@@ -955,10 +1020,14 @@
         } finally { polling = false; }
       };
       await poll();
-      if (!finished) timer = window.setInterval(poll, 1000);
+      if (!finished && !this.destroyed) {
+        timer = window.setInterval(poll, 1000);
+        this.taskTimers.add(timer);
+      }
     }
 
     openRename(item) {
+      const rootKey = this.rootKey;
       const panel = element("div", "operation-dialog");
       panel.append(element("h2", null, "重命名"));
       panel.append(element("p", "muted", `当前：${item.relative_path}`));
@@ -983,7 +1052,7 @@
           await api("/api/files/rename", {
             method: "POST",
             body: JSON.stringify({
-              root_key: this.rootKey,
+              root_key: rootKey,
               relative_path: item.relative_path,
               new_name: `${input.value.trim()}${extension}`,
               fingerprint: item.fingerprint || null
@@ -1004,6 +1073,7 @@
     }
 
     async openPreview(item) {
+      const rootKey = this.rootKey;
       const kind = previewKind(item);
       if (kind === "image") {
         const panel = element("div", "preview-dialog image-preview");
@@ -1011,7 +1081,7 @@
         const frame = element("div", "image-preview-frame");
         const image = document.createElement("img");
         image.alt = item.name;
-        image.src = `/api/files/image?root_key=${encodeURIComponent(this.rootKey)}&path=${encodeURIComponent(item.relative_path)}&v=${item.mtime_ns}`;
+        image.src = `/api/files/image?root_key=${encodeURIComponent(rootKey)}&path=${encodeURIComponent(item.relative_path)}&v=${item.mtime_ns}`;
         image.addEventListener("error", () => frame.append(element("p", "form-error", "图片加载失败")));
         frame.append(image);
         panel.append(frame, element("p", "muted", item.relative_path));
@@ -1020,13 +1090,18 @@
       }
       if (kind === "text") {
         try {
-          const doc = await api(`/api/files/text?root_key=${encodeURIComponent(this.rootKey)}&path=${encodeURIComponent(item.relative_path)}`);
-          this.openTextEditor(item, doc);
+          const doc = await api(`/api/files/text?root_key=${encodeURIComponent(rootKey)}&path=${encodeURIComponent(item.relative_path)}`);
+          this.openTextEditor(item, doc, rootKey);
         } catch (error) {
           const panel = element("div", "operation-dialog");
           panel.append(element("h2", null, item.name), element("p", "form-error", error.message));
           showModal(panel);
         }
+        return;
+      }
+      if (kind === "video" && this.onMediaInfo) {
+        try { await this.onMediaInfo(item, rootKey); }
+        catch (error) { this.el.listError.textContent = error.message; }
         return;
       }
       const panel = element("div", "operation-dialog");
@@ -1036,7 +1111,7 @@
       showModal(panel);
     }
 
-    openTextEditor(item, doc) {
+    openTextEditor(item, doc, rootKey = this.rootKey) {
       const panel = element("div", "text-editor-dialog");
       const head = element("div", "text-editor-head");
       head.append(element("h2", null, doc.name));
@@ -1044,6 +1119,7 @@
       const textarea = document.createElement("textarea");
       textarea.value = doc.content;
       textarea.spellcheck = false;
+      textarea.readOnly = doc.editable === false;
       textarea.setAttribute("aria-label", `${doc.name} 文本内容`);
       const validation = element("p", "rename-warning");
       const error = element("p", "form-error");
@@ -1065,12 +1141,17 @@
       const reload = button("重新加载", "button secondary");
       const cancel = button("取消", "button ghost");
       const save = button("保存", "button primary");
+      save.disabled = doc.editable === false;
+      if (doc.editable === false) error.textContent = "文件只读，无法保存";
       reload.addEventListener("click", async () => {
         try {
-          const fresh = await api(`/api/files/text?root_key=${encodeURIComponent(this.rootKey)}&path=${encodeURIComponent(item.relative_path)}`);
+          const fresh = await api(`/api/files/text?root_key=${encodeURIComponent(rootKey)}&path=${encodeURIComponent(item.relative_path)}`);
           textarea.value = fresh.content;
           fingerprint = fresh.fingerprint;
-          error.textContent = "";
+          textarea.readOnly = fresh.editable === false;
+          save.disabled = fresh.editable === false;
+          error.textContent = fresh.editable === false ? "文件只读，无法保存" : "";
+          validate();
           this.el.actionStatus.textContent = "已重新加载文件";
         } catch (err) {
           error.textContent = err.message;
@@ -1083,7 +1164,7 @@
         try {
           const result = await api("/api/files/text", {
             method: "PUT",
-            body: JSON.stringify({root_key: this.rootKey, relative_path: item.relative_path, content: textarea.value, fingerprint})
+            body: JSON.stringify({root_key: rootKey, relative_path: item.relative_path, content: textarea.value, fingerprint})
           });
           fingerprint = result.fingerprint;
           closeModal();
@@ -1138,7 +1219,8 @@
       if (!this.treeCache.has(this.treeKey(rootKey, ""))) {
         try {
           await this.loadTreeDirectory(rootKey, "");
-        } catch (_) {
+        } catch (error) {
+          this.el.listError.textContent = error.message;
           return;
         }
       }
@@ -1149,7 +1231,8 @@
         if (!this.treeCache.has(this.treeKey(rootKey, current))) {
           try {
             await this.loadTreeDirectory(rootKey, current);
-          } catch (_) {
+          } catch (error) {
+            this.el.listError.textContent = error.message;
             return;
           }
         }
@@ -1195,8 +1278,10 @@
           if (cache.has_more) {
             const more = button("加载更多", "tree-more");
             more.addEventListener("click", async () => {
-              await this.loadTreeDirectory(root.key, "", cache.page + 1);
-              this.drawTree();
+              try {
+                await this.loadTreeDirectory(root.key, "", cache.page + 1);
+                this.drawTree();
+              } catch (error) { this.el.listError.textContent = error.message; }
             });
             children.append(more);
           }
@@ -1213,14 +1298,16 @@
       const key = this.treeKey(root.key, item.relative_path);
       const expanded = this.expanded.has(key);
       const toggle = button(item.is_dir ? (expanded ? "▾" : "▸") : "·", "tree-toggle");
-      toggle.disabled = !item.is_dir;
+      toggle.disabled = !item.is_dir || !item.allowed;
       toggle.addEventListener("click", async event => {
         event.stopPropagation();
         if (!item.is_dir) return;
         if (expanded) this.expanded.delete(key);
         else this.expanded.add(key);
-        if (!this.treeCache.has(key)) await this.loadTreeDirectory(root.key, item.relative_path);
-        this.drawTree();
+        try {
+          if (!this.treeCache.has(key)) await this.loadTreeDirectory(root.key, item.relative_path);
+          this.drawTree();
+        } catch (error) { this.el.listError.textContent = error.message; }
       });
       const label = button(item.name, "tree-label");
       label.classList.toggle("active", root.key === this.rootKey && this.path === item.relative_path && item.is_dir);
@@ -1251,8 +1338,10 @@
           if (cache.has_more) {
             const more = button("加载更多", "tree-more");
             more.addEventListener("click", async () => {
-              await this.loadTreeDirectory(root.key, item.relative_path, cache.page + 1);
-              this.drawTree();
+              try {
+                await this.loadTreeDirectory(root.key, item.relative_path, cache.page + 1);
+                this.drawTree();
+              } catch (error) { this.el.listError.textContent = error.message; }
             });
             children.append(more);
           }
@@ -1272,6 +1361,11 @@
     }
 
     destroy() {
+      this.destroyed = true;
+      ++this.loadSeq;
+      clearTimeout(this.searchTimer);
+      for (const timer of this.taskTimers) window.clearInterval(timer);
+      this.taskTimers.clear();
       window.clearInterval(this.taskTimer);
       this.host.replaceChildren();
     }
@@ -1304,6 +1398,7 @@
           onConfirm: result => {
             settled = true;
             cleanup();
+            browser.destroy();
             closeModal();
             resolve(result);
           }
