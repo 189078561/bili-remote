@@ -20,8 +20,9 @@
 ## 验证结果
 
 - 初轮旧命名兼容及新安全执行：27 passed。
-- 最新模块测试 `python3 scripts/dev_test.py naming`：100 passed，0 failed，0 skipped，1 warning；含实际 Chromium 交互、390/768/1440 宽度、预览无写入、明确确认、后台执行与撤销、localStorage 空。
-- 最终全量回归 `python3 scripts/dev_test.py all`：**289 passed，1 failed，0 skipped，1 warning，113.47 秒**。失败为旧 `tests/test_screenshots_api.py::test_screenshot_api_creates_manageable_persistent_session`：image_succeeded=2 而预期 3。此前一轮为 289 passed（当时模块用例少一项）；不以重试偶然变绿代替修复。
+- 最新模块测试 `python3 scripts/dev_test.py naming`：102 passed，0 failed，0 skipped，1 warning，12.30 秒；含实际 Chromium 交互、390/768/1440 宽度、预览无写入、明确确认、后台执行与撤销、localStorage 空。
+- 最近一次全量回归（目录扫描补强前）`python3 scripts/dev_test.py all`：**289 passed，1 failed，0 skipped，1 warning，113.47 秒**。失败为旧 `tests/test_screenshots_api.py::test_screenshot_api_creates_manageable_persistent_session`：image_succeeded=2 而预期 3。此前一轮为 289 passed（当时模块用例少一项）；不以重试偶然变绿代替修复。
+- 续审修复了目录扫描限制的执行顺序：数量/深度预算在递归指纹计算前检查，多个显式选择共享预算，超大目录不会先被完整哈希；新增超限前置、边界值、深度和跨选择预算测试。该变更及全部命名相关测试已验证，没有重跑已确定性复现且尚未修复的公共截图问题来寻找偶然绿灯。
 - 旧截图问题已确定性定位：临时合成 3 秒、10fps、MPEG-4 视频，直接调用旧 ScreenshotService._extract_frame_with_retries：target=2.95 固定失败，target=2.90 成功。原因是采样允许接近 duration-0.05，而最后帧为 2.9；现有负偏移最大仅 0.036 秒，无法到达最后帧。孤立重跑原 API 用例 1 passed，说明随机边界会间歇触发，不代表修复。公共截图文件禁止本模块修改，修复建议见 handoff.md。
 - 浏览器和媒体样本在临时目录生成；HTTP 默认 mock，实际接口核验另行显式执行。没有请求真实 B站下载、图床、qBittorrent。
 - 唯一既有警告：Starlette TestClient 使用 httpx 的弃用提示，未为消警告升级环境。

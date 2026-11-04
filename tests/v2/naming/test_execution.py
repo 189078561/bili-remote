@@ -192,3 +192,45 @@ def test_deleted_source_and_new_symlink_are_conflicts(engine, tmp_path):
     (root / "a.mkv").symlink_to(outside)
     assert execution.files.validate_operations(operations)[0]["code"] == "stale_resource"
     assert outside.read_bytes() == b"outside"
+
+
+def test_scan_limits_reject_before_recursive_hash(engine, monkeypatch):
+    from bili_remote.v2.naming import filesystem
+    execution, root = engine
+    directory = root / "season"
+    directory.mkdir()
+    for name in ("EP01.mkv", "EP02.mkv", "EP03.mkv"):
+        (directory / name).write_bytes(b"video")
+    execution.files.service.settings.workspace_scan_max_files = 2
+    hashed_directories = []
+    original = filesystem._path_fingerprint
+    def fingerprint(path):
+        if path.is_dir():
+            hashed_directories.append(path)
+        return original(path)
+    monkeypatch.setattr(filesystem, "_path_fingerprint", fingerprint)
+    for action in (
+        lambda: execution.files.reference("downloads", "season"),
+        lambda: execution.files.expand([{"root_key": "downloads", "relative_path": "season", "kind": "directory"}]),
+    ):
+        with pytest.raises(NamingError) as limited:
+            action()
+        assert limited.value.code == "scan_limit"
+    assert hashed_directories == []
+
+
+def test_directory_scan_budget_and_depth_boundaries(engine):
+    execution, root = engine
+    directory = root / "season"
+    directory.mkdir()
+    (directory / "EP01.mkv").write_bytes(b"video")
+    execution.files.service.settings.workspace_scan_max_files = 2
+    reference = execution.files.reference("downloads", "season")
+    assert len(execution.files.expand([reference])) == 1
+    with pytest.raises(NamingError):
+        execution.files.expand([reference], max_depth=0)
+    # The budget is shared by all explicit selections, not reset per directory.
+    (root / "movie.mkv").write_bytes(b"video")
+    with pytest.raises(NamingError) as limited:
+        execution.files.expand([reference, execution.files.reference("downloads", "movie.mkv")])
+    assert limited.value.code == "scan_limit"

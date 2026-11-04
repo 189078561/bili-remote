@@ -49,44 +49,65 @@ class NamingFiles:
             raise NamingError("invalid_resource", "资源不存在、越界或不可访问", status=404) from exc
 
     def fingerprint(self, ref):
-        return _path_fingerprint(self.path(ref))
+        return self._checked_fingerprint(self.path(ref))
+
+    def _walk(self, path, *, budget=None, max_depth=None):
+        """Apply scan limits before hashing or materializing a directory tree."""
+        settings = self.service.settings
+        remaining = budget if budget is not None else [settings.workspace_scan_max_files]
+        depth_limit = settings.workspace_scan_max_depth if max_depth is None else max_depth
+        stack = [(path, 0)]
+        while stack:
+            item, depth = stack.pop()
+            if remaining[0] <= 0 or depth > depth_limit:
+                raise NamingError("scan_limit", "超过配置的目录扫描数量或深度限制")
+            remaining[0] -= 1
+            mode = item.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                raise NamingError("symlink", "命名扫描不允许符号链接")
+            yield item, mode
+            if stat.S_ISDIR(mode):
+                children = []
+                with os.scandir(item) as entries:
+                    for entry in entries:
+                        if len(children) + len(stack) >= remaining[0]:
+                            raise NamingError("scan_limit", "超过配置的目录扫描数量限制")
+                        children.append(Path(entry.path))
+                stack.extend((child, depth + 1) for child in sorted(children, reverse=True))
+
+    def _checked_fingerprint(self, path):
+        if path.is_dir():
+            for _ in self._walk(path):
+                pass
+        return _path_fingerprint(path)
 
     def reference(self, root_key, relative_path):
         ref = {"root_key": root_key, "relative_path": relative_path, "kind": "file"}
         path = self.path(ref)
         ref["kind"] = "directory" if path.is_dir() else "file"
-        ref["fingerprint"] = _path_fingerprint(path)
+        ref["fingerprint"] = self._checked_fingerprint(path)
         return ref
 
     def expand(self, resources, *, limit=1000, max_depth=None):
-        max_depth = max_depth or self.service.settings.workspace_scan_max_depth
-        scan_limit = self.service.settings.workspace_scan_max_files
+        budget = [self.service.settings.workspace_scan_max_files]
         if not isinstance(resources, list) or not resources or len(resources) > limit:
             raise NamingError("resource_limit", "请选择 1 至 1000 个资源")
-        output, seen, scanned = [], set(), 0
+        output, seen = [], set()
         for ref in resources:
             path = self.path(ref)
-            if ref.get("fingerprint") and ref["fingerprint"] != _path_fingerprint(path):
-                raise NamingError("stale_resource", "源文件已变化，请重新选择", status=409)
-            stack = [(path, 0)]
-            while stack:
-                item, depth = stack.pop()
-                scanned += 1
-                if scanned > scan_limit:
-                    raise NamingError("scan_limit", "超过配置的目录扫描数量限制")
-                if depth > max_depth:
-                    raise NamingError("scan_limit", "目录超过扫描深度限制")
+            for item, mode in self._walk(path, budget=budget, max_depth=max_depth):
                 relative = str(PurePosixPath(ref["relative_path"]) / item.relative_to(path)) if item != path else ref["relative_path"]
-                child = self.reference(ref["root_key"], relative)
-                if item.is_dir():
-                    stack.extend((p, depth + 1) for p in sorted(item.iterdir(), reverse=True))
-                elif stat.S_ISREG(item.stat().st_mode) and item.suffix.lower() in VIDEO_EXTENSIONS:
+                self.path({"root_key": ref["root_key"], "relative_path": relative})
+                if stat.S_ISREG(mode) and item.suffix.lower() in VIDEO_EXTENSIONS:
+                    child = self.reference(ref["root_key"], relative)
                     key = (child["root_key"], child["relative_path"])
                     if key not in seen:
                         seen.add(key)
                         output.append(child)
                 if len(seen) > limit:
                     raise NamingError("resource_limit", "目录包含超过 1000 个视频")
+            if ref.get("fingerprint") and ref["fingerprint"] != self._checked_fingerprint(path):
+                raise NamingError("stale_resource", "源文件已变化，请重新选择", status=409)
         return output
 
     def sidecars(self, video_ref):
@@ -146,7 +167,7 @@ class NamingFiles:
             if target_key in targets:
                 conflicts.append({"code": "duplicate_target", "ref": ref, "message": "多个文件生成同一目标"})
             targets[target_key] = target
-            if fingerprints and _path_fingerprint(source) != op["source_fingerprint"]:
+            if fingerprints and self._checked_fingerprint(source) != op["source_fingerprint"]:
                 conflicts.append({"code": "stale_resource", "ref": ref, "message": "源文件指纹已变化"})
         source_paths = set(sources.values())
         for source in source_paths:
@@ -188,9 +209,7 @@ class NamingFiles:
             if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
                 raise NamingError("unsupported_kind", "仅接受普通文件或目录")
             pinned_source = Path(f"/proc/self/fd/{descriptor}") / source.name
-            if stat.S_ISDIR(info.st_mode) and self.service._tree_has_symlink(pinned_source):
-                raise NamingError("symlink", "目录内包含符号链接，不能改名")
-            if _path_fingerprint(pinned_source) != expected_fingerprint:
+            if self._checked_fingerprint(pinned_source) != expected_fingerprint:
                 raise NamingError("stale_resource", "源文件已变化", status=409)
             for name in os.listdir(descriptor):
                 if name.casefold() == target.name.casefold() and name != source.name:
