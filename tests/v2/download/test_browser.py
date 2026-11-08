@@ -64,6 +64,7 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
           });
         }""")
         page.locator("[data-account-status]", has_text="Web 已登录").wait_for()
+        page.locator(".dv2-account > summary").click()
         assert page.get_by_role("button", name="断开 Web").is_visible()
         assert page.get_by_role("button", name="断开 TV").is_hidden()
         page.get_by_role("button", name="断开 Web").click()
@@ -71,14 +72,19 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.get_by_role("button", name="Web 登录").click()
         page.get_by_role("button", name="TV 登录").click()
         assert page.evaluate("window.loginModes") == ["web", "tv"]
+        page.locator(".dv2-account > summary").click()
         page.locator("#dv2-url").fill("https://www.bilibili.com/bangumi/play/ss42")
         page.get_by_role("button", name="解析链接").click()
         page.locator("[data-title]", has_text="合成剧集").wait_for()
         assert page.locator(".dv2-episode").count() == 3
+        if page.locator(".dv2-select-actions details").get_attribute("open") is None:
+            page.locator(".dv2-select-actions summary").click()
         page.get_by_role("button", name="全选正片").click()
         assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
         page.get_by_role("button", name="反选").click()
         assert page.locator("[data-selected-count]").inner_text() == "已选 1 集"
+        if page.locator(".dv2-select-actions details").get_attribute("open") is None:
+            page.locator(".dv2-select-actions summary").click()
         page.get_by_role("button", name="全选正片").click()
         page.get_by_role("button", name="检测所选画质").click()
         page.wait_for_function("window.calls.some(call => call.url === '/api/episodes/formats/batch')")

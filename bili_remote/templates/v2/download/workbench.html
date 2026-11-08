@@ -1,41 +1,37 @@
-<section class="dv2" aria-label="B站下载工作台">
+<section class="dv2" aria-label="B站下载工作台" data-stage="idle">
   <header class="dv2-header">
-    <div><p class="dv2-eyebrow">BILIBILI DOWNLOAD</p><h1>B站下载</h1><p>粘贴链接、选择内容与画质，任务状态会自动更新。</p></div>
-    <div class="dv2-account" aria-live="polite"><span class="dv2-dot" data-account-dot></span><div><strong>账号线路</strong><span data-account-status>正在读取登录状态…</span></div><div class="dv2-login-actions"><button type="button" data-login-web>Web 登录</button><button type="button" data-logout-web hidden>断开 Web</button><button type="button" data-login-tv>TV 登录</button><button type="button" data-logout-tv hidden>断开 TV</button></div></div>
+    <h1>B站下载</h1>
+    <details class="dv2-account"><summary><span class="dv2-dot" data-account-dot></span><span data-account-status>读取账号状态…</span></summary><div class="dv2-login-actions"><button type="button" data-login-web>Web 登录</button><button type="button" data-logout-web hidden>断开 Web</button><button type="button" data-login-tv>TV 登录</button><button type="button" data-logout-tv hidden>断开 TV</button></div></details>
   </header>
   <div class="dv2-layout">
-    <section class="dv2-card dv2-create">
-      <div class="dv2-card-title"><div><span class="dv2-step">01</span><h2>添加下载</h2></div><span data-parse-state aria-live="polite">等待解析</span></div>
+    <section class="dv2-create">
       <form data-download-form>
-        <label class="dv2-link-label" for="dv2-url">B站链接</label>
-        <div class="dv2-link-row"><input id="dv2-url" type="url" required placeholder="粘贴视频、番剧或合集链接" autocomplete="url"><button type="button" data-parse>解析链接</button></div>
-        <div class="dv2-inline-options"><label>下载线路<select data-mode><option value="web">Web 线路</option><option value="tv">TV 线路</option></select></label><p>沿用当前登录状态与线路权限</p></div>
+        <div class="dv2-link-row"><select data-mode aria-label="下载线路"><option value="web">Web</option><option value="tv">TV</option></select><input id="dv2-url" type="url" required aria-label="B站链接" placeholder="粘贴视频、番剧或合集链接" autocomplete="url"><button type="button" data-parse disabled>解析链接</button></div>
+        <div class="dv2-stage-line"><ol class="dv2-steps" aria-label="下载阶段"><li data-stage-index="0"><b>1</b>确认内容</li><li data-stage-index="1"><b>2</b>选集与画质</li><li data-stage-index="2"><b>3</b>下载任务</li></ol><span data-parse-state role="status">等待解析</span></div>
         <div class="dv2-error" data-error role="alert" hidden></div>
-        <div data-resolution hidden>
-          <div class="dv2-media-summary"><img class="dv2-cover" data-cover alt="视频封面" referrerpolicy="no-referrer" hidden><div><strong data-title></strong><span data-summary></span></div></div>
-          <div class="dv2-episodes" data-episodes hidden>
-            <div class="dv2-section-heading"><div><h3>选择剧集</h3><span data-selected-count>已选 0 集</span></div><div class="dv2-select-actions"><button type="button" data-select-main>全选正片</button><button type="button" data-select-all>全选</button><button type="button" data-select-invert>反选</button><button type="button" data-select-none>清空</button></div></div>
-            <div class="dv2-episode-list" data-episode-list></div>
+        <div class="dv2-idle" data-idle><h2>添加一个 B站链接</h2><p>支持单个视频、分P、番剧和合集。</p><div><span>粘贴链接</span><span>选择内容与可用画质</span><span>下载完成后处理资源</span></div></div>
+        <div data-resolution class="dv2-resolution-grid" hidden>
+          <div class="dv2-selection-content">
+            <div class="dv2-media-summary"><div class="dv2-cover-fallback" aria-hidden="true"><svg class="ws-icon"><use href="/static/v2/shared/icons.svg#film"/></svg></div><img class="dv2-cover" data-cover alt="视频封面" referrerpolicy="no-referrer" hidden><div><h2 data-title></h2><p data-summary></p></div></div>
+            <div class="dv2-section-heading" data-episode-heading hidden><div><h3>选择剧集</h3><span data-selected-count>已选 0 集</span></div><div class="dv2-select-actions"><button type="button" data-select-all>全选</button><button type="button" data-select-none>清空</button><details><summary>更多</summary><div><button type="button" data-select-main>全选正片</button><button type="button" data-select-invert>反选</button><button type="button" data-check-batch hidden>检测所选画质</button></div></details></div></div>
+            <div class="dv2-quality-section"><div class="dv2-quality-setting"><label>统一画质<select data-format><option value="bv*+ba/b">最高可用 · 最佳音轨</option></select></label></div><p class="dv2-hint" data-format-hint>画质信息来自解析结果。</p></div>
+            <section class="dv2-episodes" data-episodes hidden>
+
+              <div class="dv2-episode-list" data-episode-list></div>
+            </section>
           </div>
-          <div class="dv2-quality-section"><div class="dv2-quality-setting"><label>画质 / 编码<select data-format><option value="bv*+ba/b">最高可用 · 最佳音轨</option></select></label><button type="button" data-check-batch hidden>检测所选画质</button></div><p class="dv2-hint" data-format-hint>解析后列出可用画质；音轨沿用对应格式选择。</p></div>
-          <details class="dv2-advanced">
-            <summary>高级下载选项</summary>
-            <div class="dv2-options-grid">
-              <label>命名模板<input data-template required></label>
-              <label class="dv2-output">保存子目录 <span>（可选）</span><span class="dv2-output-row"><input data-output placeholder="留空使用下载目录设置"><button type="button" data-pick-folder>浏览</button></span></label>
-              <label class="dv2-checkbox" data-all-parts><input type="checkbox"><span>下载全部分P / 合集内容</span></label>
-            </div>
-          </details>
-          <div class="dv2-submit-row"><span>下载后保留原文件名，可从任务进入工作台</span><button type="submit">加入下载队列</button></div>
+          <aside class="dv2-selection-summary"><h3>本次选择</h3><dl><dt>内容</dt><dd data-summary-count>—</dd><dt>画质</dt><dd data-summary-quality>最高可用</dd><dt>保存到</dt><dd data-summary-output>下载目录</dd></dl>
+            <details class="dv2-advanced"><summary>目录与下载选项</summary><div class="dv2-options-grid"><label>命名模板<input data-template required></label><label class="dv2-output">保存子目录<span class="dv2-output-row"><input data-output placeholder="使用下载目录"><button type="button" data-pick-folder>浏览</button></span></label><label class="dv2-checkbox" data-all-parts><input type="checkbox"><span>下载全部分P / 合集内容</span></label></div></details>
+            <div class="dv2-submit-row"><span data-submit-summary>仅使用本次选择</span><button type="submit">开始下载</button></div><p class="dv2-hint">下载保留来源命名。完成后可进入工作台进行 PT 命名。</p>
+          </aside>
         </div>
       </form>
     </section>
-    <section class="dv2-card dv2-queue">
-      <div class="dv2-card-title"><div><span class="dv2-step">02</span><h2>下载队列</h2></div><button type="button" class="dv2-refresh" data-refresh>刷新</button></div>
-      <p class="dv2-notice" data-notice role="status" aria-live="polite">队列状态自动更新。</p>
-      <div class="dv2-jobs" data-jobs><p class="dv2-empty">正在读取下载任务…</p></div>
+    <section class="dv2-queue">
+      <div class="dv2-card-title"><div><h2>下载任务</h2><span data-queue-count></span></div><button type="button" class="dv2-refresh" data-refresh>刷新</button></div>
+      <p class="dv2-notice" data-notice role="status">队列状态自动更新。</p><div class="dv2-jobs" data-jobs><p class="dv2-empty">读取下载任务…</p></div>
     </section>
-    <details class="dv2-card dv2-history"><summary><span>解析历史</span><span data-history-count></span></summary><div class="dv2-history-tools"><button type="button" data-history-refresh>刷新历史</button></div><div class="dv2-history-list" data-history><p class="dv2-empty">正在读取解析历史…</p></div></details>
+    <details class="dv2-history"><summary><span>解析历史</span><span data-history-count></span></summary><div class="dv2-history-tools"><button type="button" data-history-refresh>刷新历史</button></div><div class="dv2-history-list" data-history><p class="dv2-empty">读取解析历史…</p></div></details>
   </div>
   <dialog data-log-dialog><form method="dialog"><div class="dv2-log-head"><strong>任务日志</strong><button aria-label="关闭">关闭</button></div><pre data-log-content></pre></form></dialog>
 </section>
