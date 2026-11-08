@@ -196,3 +196,8 @@ body:has(.fb-overlay-open) {overflow:hidden;}
  body:not(.final-ui) .fb-v2.fb-tree-open .file-tree-pane {display:block;position:fixed;inset:0 auto 0 0;width:300px;background:var(--ws-surface);z-index:92;}
  body:not(.final-ui) .fb-v2 :is(.fb-tree-toggle,.fb-pane-close) {display:block;}
 }
+
+@media(max-width:600px) {
+ body:not(.final-ui) .fb-v2[data-display-mode=full] :is(.file-row,.file-list-head) {grid-template-columns:22px 20px minmax(0,1fr) 65px;gap:6px;padding-left:6px;padding-right:6px;}
+ body:not(.final-ui) .fb-v2[data-display-mode=full] .file-date,body:not(.final-ui) .fb-v2[data-display-mode=full] .file-list-head>span:nth-child(5) {display:none;}
+}

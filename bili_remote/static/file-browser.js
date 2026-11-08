@@ -354,8 +354,10 @@
         const detailBody = element("div", "file-details-body"); details.append(detailHeading, detailBody);
         const detailToggle = button("文件详情", "button ghost fb-details-toggle");
         detailToggle.setAttribute("aria-controls", details.id);
-        detailToggle.addEventListener("click", () => this.setDetailsOpen(details.hidden));
-        heading.append(detailToggle); browserShell.append(details);
+        detailToggle.addEventListener("click", () => { if(this.finalUI)more.open=false;this.setDetailsOpen(details.hidden); });
+        if(this.finalUI){moreItems.prepend(detailToggle);}
+        else heading.append(detailToggle);
+        browserShell.append(details);
         Object.assign(this.el, {details, detailBody, detailToggle});
       }
       this.host.append(shell);
@@ -392,9 +394,9 @@
       this.setDetailsOpen(!this.narrowDetails.matches);
       this.narrowTree.addEventListener("change", () => this.setTreeOpen(false), opts);
       this.narrowDetails.addEventListener("change", () => this.setDetailsOpen(!this.narrowDetails.matches), opts);
-      this.el.shell.addEventListener("keydown", event => {
+      document.addEventListener("keydown", event => {
         const pane = this.activePane;
-        if (!pane) return;
+        if (!pane || event.defaultPrevented || !this.el.shell.getClientRects().length) return;
         if (event.key === "Escape") { event.preventDefault(); this.setTreeOpen(false); this.setDetailsOpen(false); }
         if (event.key === "Tab") {
           const nodes = [...pane.querySelectorAll('button,input,select,textarea,a[href],[tabindex="0"]')].filter(node => !node.disabled && node.getClientRects().length);
@@ -407,7 +409,7 @@
     setTreeOpen(open) {
       this.el.shell.classList.toggle("fb-tree-open", open);
       this.el.treeToggle.setAttribute("aria-expanded", String(open));
-      this.syncOverlay(open && this.narrowTree.matches ? this.el.treePane : null);
+      this.syncOverlay(open && this.narrowTree.matches ? this.el.treePane : this.el.details && !this.el.details.hidden && this.narrowDetails.matches ? this.el.details : null);
     }
 
     setDetailsOpen(open) {

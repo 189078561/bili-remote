@@ -59,5 +59,13 @@
     })().finally(()=>{pending=null;refresh.disabled=false;});return pending;
   }
   document.querySelectorAll('[data-home-list]').forEach(button=>button.onclick=()=>{list=button.dataset.homeList;document.querySelectorAll('[data-home-list]').forEach(tab=>tab.setAttribute('aria-selected',String(tab===button)));renderResources();});
+  document.addEventListener('app:tasks',event=>{
+    const {kind,items}=event.detail||{};
+    if(['processing','download'].includes(kind) && results[1]?.status==='fulfilled'){
+      const retained=(results[1].value.items||[]).filter(task=>task.kind!==kind);
+      results[1]={status:'fulfilled',value:{items:[...items.map(task=>({...task,kind})),...retained].sort((a,b)=>String(b.updated_at||b.created_at||'').localeCompare(String(a.updated_at||a.created_at||'')))}};
+      renderTasks(results[1]);
+    }
+  });
   window.V2Home={load};
 })();

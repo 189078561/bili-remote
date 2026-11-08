@@ -327,6 +327,8 @@
       event.preventDefault();
       clearError();
       if (!state.resolved) { showError("请先解析链接。"); return; }
+      const resolved=state.resolved, version=state.parseVersion;
+      const current=()=>state.resolved===resolved && version===state.parseVersion;
       const url = state.resolvedUrl || urlField.value.trim();
       const ids = selectedIds();
       const template = $("[data-template]").value.trim();
@@ -353,17 +355,19 @@
               try {await api('/api/jobs/batch',{method:'POST',body:JSON.stringify(group)});}
               catch(error){await refreshJobs();throw new Error(`已提交 ${accepted} 集，其余保持勾选：${error.message}`);}
               accepted+=group.episode_ids.length;
-              for(const input of episodeList.querySelectorAll('input[type=checkbox]'))if(group.episode_ids.includes(input.value))input.checked=false;
-              summary();
+              if(current()){
+                for(const input of episodeList.querySelectorAll('input[type=checkbox]'))if(group.episode_ids.includes(input.value))input.checked=false;
+                summary();
+              }
             }
           }
         } else {
           await api("/api/jobs", {method: "POST", body: JSON.stringify({url, api_mode: modeField.value, format_selector: formatField.value, all_parts: $(`[data-all-parts] input`).checked, output_template: template, output_dir: outputDir, title: state.resolved.title || null, uploader: state.resolved.uploader || null})});
         }
-        stage("submitted");parseState.textContent="已提交下载";
+        if(current()){stage("submitted");parseState.textContent="已提交下载";}
         notice.textContent = "任务已加入现有下载队列；完成后可进入工作台识别并预览命名。";
         await refreshJobs();
-      } catch (error) { showError(error.message); }
+      } catch (error) { if(current())showError(error.message);else options.onNotice?.(error.message,true); }
       finally { state.submitting=false;submitButton.disabled = false;summary(); }
     }
     function jobCard(job) {

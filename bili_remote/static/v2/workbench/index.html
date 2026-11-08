@@ -80,7 +80,7 @@
   <section class="wb-sheet wb-preview-sheet" data-sheet="preview" role="dialog" aria-modal="true" aria-labelledby="wb-preview-heading" hidden>
     <header class="wb-sheet-heading"><div><p class="wb-eyebrow">最终发布内容</p><h2 id="wb-preview-heading">预览与复制</h2></div><button type="button" data-layout="close">返回编辑</button></header>
     <div class="wb-preview-toolbar"><label>发布格式<select data-wb="format"><option value="bbcode">BBCode</option><option value="html">HTML</option><option value="markdown">Markdown</option></select></label><div class="wb-preview-switch"><button type="button" data-preview-mode="effect" aria-pressed="true">效果</button><button type="button" data-preview-mode="source" aria-pressed="false">源码</button></div><button type="button" class="wb-primary" data-copy="content" disabled>复制完整内容</button></div>
-    <div class="wb-preview-body" tabindex="0" aria-label="发布预览正文"><div data-wb="effect"><iframe data-wb="html-preview" title="HTML 发布效果" sandbox="" referrerpolicy="no-referrer" hidden></iframe><div data-wb="rich-preview" class="wb-rich-preview" aria-label="发布效果"></div></div><div data-wb="source" hidden><pre data-wb="output" tabindex="0" aria-label="完整发布内容"></pre></div></div>
+    <div class="wb-preview-body" tabindex="0" aria-label="发布预览正文"><div data-wb="effect"><div data-wb="local-images-preview" class="wb-local-preview" hidden></div><iframe data-wb="html-preview" title="HTML 发布效果" sandbox="" referrerpolicy="no-referrer" hidden></iframe><div data-wb="rich-preview" class="wb-rich-preview" aria-label="发布效果"></div></div><div data-wb="source" hidden><pre data-wb="output" tabindex="0" aria-label="完整发布内容"></pre></div></div>
     <footer class="wb-preview-footer"><span data-wb="validation" role="status">选择资源后自动组合</span></footer>
   </section>
 

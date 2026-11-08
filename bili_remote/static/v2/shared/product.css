@@ -168,7 +168,7 @@ progress::-webkit-progress-value {background:var(--brand);border-radius:8px;}
 .settings-title-block {gap:0;}
 .settings-page h1 {margin:0;font-size:27px;}
 .settings-layout {grid-template-columns:205px minmax(0,1fr);gap:36px;align-items:start;}
-.settings-sidebar {position:sticky;top:calc(var(--header-height) + 24px);}
+.settings-sidebar {position:sticky;top:calc(var(--header-height) + 24px);border-right:1px solid var(--line);padding-right:20px;}
 .settings-group-nav {padding:0;background:transparent;border:0;border-radius:0;box-shadow:none;display:grid;gap:4px;}
 .settings-group-button {display:flex;align-items:center;gap:10px;background:transparent;border:0;color:var(--muted);font-size:13px;min-height:40px;padding:10px 12px;text-align:left;border-radius:6px;}
 .settings-group-button.active {background:var(--selected);color:var(--brand);font-weight:600;}
@@ -176,7 +176,13 @@ progress::-webkit-progress-value {background:var(--brand);border-radius:8px;}
 .settings-group-heading {position:relative;margin:0 0 18px;padding:0 135px 18px 0;border-bottom:1px solid var(--line);}
 .settings-group-heading h2 {font-size:22px;margin:0 0 6px;}
 .settings-group-heading p {font-size:12px;color:var(--muted);margin:0;}
-.settings-group-heading #settings-reset-group {position:absolute;right:0;top:0;font-size:11px;padding:5px 8px;background:transparent;border-color:transparent;color:var(--muted);}
+.settings-group-heading>.settings-dirty-indicator {position:absolute;right:0;top:0;}
+.settings-header-status {display:none;}
+.settings-inspector-footer {display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:24px;color:var(--muted);font-size:11px;}
+.settings-inspector-footer #settings-reset-group {font-size:11px;color:var(--muted);padding:5px 0;background:transparent;border:0;}
+.settings-search-dialog {width:min(540px,calc(100vw - 32px));max-height:80dvh;padding:20px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);}
+.settings-search-dialog::backdrop {background:#14261b66;}
+.settings-search-heading {display:flex;gap:12px;}.settings-search-heading input {flex:1;min-width:0;}.settings-search-results {display:grid;margin-top:12px;gap:4px;}.settings-search-result {text-align:left;background:transparent;color:var(--ink);padding:12px;border:0;border-bottom:1px solid var(--line);font-size:13px;}
 .settings-inspector {padding:0;margin:0 0 20px;background:transparent;border:0;box-shadow:none;}
 .settings-inspector>.card-heading {margin:0;padding:5px 0 8px;}
 .settings-inspector>.card-heading h3 {font-size:12px;color:var(--muted);font-weight:500;margin:0;}
@@ -249,7 +255,7 @@ progress::-webkit-progress-value {background:var(--brand);border-radius:8px;}
  .home-resource {gap:11px;padding:15px 0;}.home-resource-icon {width:60px;height:52px;}.home-resource-copy strong {font-size:13px;}.home-resource-copy small {font-size:10px;line-height:1.6;}.home-resource-actions .button {font-size:10px;min-height:30px;}
  .home-latest {margin-top:0;}.home-status {margin-top:0;}
  .settings-page h1 {font-size:23px;}.settings-page-header {flex-direction:row;align-items:center;margin-bottom:24px;}.settings-header-status {min-width:0;}.settings-title-block {min-width:0;}
- .settings-layout {display:block;}.settings-sidebar {position:static;}.settings-group-nav {display:none;}.settings-mobile-picker {display:flex;align-items:center;gap:12px;margin:0 0 20px;padding-bottom:20px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);}.settings-mobile-picker select {flex:1;width:auto;}
+ .settings-layout {display:block;}.settings-sidebar {position:static;border:0;padding-right:0;}.settings-group-nav {display:none;}.settings-mobile-picker {display:flex;align-items:center;gap:12px;margin:0 0 20px;padding-bottom:20px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);}.settings-mobile-picker select {flex:1;width:auto;}
  .settings-group-heading {padding-right:90px;}.settings-group-heading h2 {font-size:19px;}.settings-group-heading p {font-size:11px;}.settings-group-heading #settings-reset-group {font-size:10px;max-width:100px;white-space:nowrap;padding-right:0;}
  .settings-content :is(.settings-field,.settings-readonly-row,.settings-directory-row),.rule-editor>label,.rule-grid>label {grid-template-columns:minmax(0,1fr) minmax(110px,42%);gap:14px;padding:15px 0;}
  .settings-field-label,.settings-switch-copy strong,.settings-directory-heading strong {font-size:12px;}.settings-field-help,.settings-directory-heading small {font-size:10px;}.settings-content .settings-field>input,.settings-content .settings-field>select,.settings-content .settings-field>textarea {font-size:12px;padding:7px 6px;}.settings-content .settings-field>input[type=number] {width:70px;}

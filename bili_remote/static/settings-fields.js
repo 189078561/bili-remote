@@ -170,6 +170,7 @@
         });
         if (selected) {
           onChange({mount_key: selected.root_key, relative_path: selected.relative_path});
+          if(window.BILI_V2){badge.textContent="待校验";badge.className="settings-badge";}
           const selectedMount = mountRoots.find(item => item.key === selected.root_key);
           const selectedPath = [selectedMount?.path, selected.relative_path].filter(Boolean).join("/");
           effective.querySelector("code").textContent = selectedPath || "挂载根目录";
@@ -223,7 +224,12 @@
       }
     });
     row.append(input, browse);
-    label.append(row);
+    if(window.BILI_V2){
+      const editor=node('details','settings-value-editor'),summary=node('summary');
+      const update=()=>{summary.textContent=input.value||'下载根目录';summary.title=(input.value||'下载根目录')+' · 更改';};
+      update();input.addEventListener('input',update);browse.addEventListener('blur',update);
+      row.classList.add('settings-value-editor-body');editor.append(summary,row);label.append(editor);
+    }else label.append(row);
     return label;
   }
 

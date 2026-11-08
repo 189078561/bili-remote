@@ -15,8 +15,6 @@ SIZES = [(1440,900),(1280,800),(1024,768),(768,1024),(390,844)]
 
 def navigate(page, view):
     show_panel(page)
-    if page.viewport_size['width'] <= 900:
-        page.locator('#nav-toggle').click()
     page.locator('#settings-entry' if view == 'settings' else f'.app-tab[data-view="{view}"]').click()
     expect(page.locator(f'#{view}-view')).to_be_visible()
 
@@ -42,9 +40,10 @@ def test_five_page_visual_matrix(live_server, width, height, theme):
         page.wait_for_function('window.AppResources && window.V2Workbench')
         navigate(page,'home')
         expect(page.locator('#home-resources')).to_contain_text(source.name)
-        page.locator('#home-resources').get_by_role('button',name='进入工作台',exact=True).click()
+        page.locator('#home-resources .home-resource').filter(has_text=source.name).get_by_role('button',name='进入工作台',exact=True).click()
         page.wait_for_function('V2Workbench.preview && V2Workbench.context')
-        expect(page.locator('[data-wb=query]')).to_be_visible()
+        expect(page.locator('[data-sheet=identity]')).to_be_hidden()
+        expect(page.locator('[data-layout=identity]')).to_be_visible()
         expect(page.locator('[data-sheet=resources]')).to_be_hidden()
         page.locator('[data-wb=selected-title]').fill('Motion Study')
         expect(page.locator('[data-wb=rename-list]')).to_contain_text('Motion.Study',timeout=15000)
@@ -57,12 +56,11 @@ def test_five_page_visual_matrix(live_server, width, height, theme):
             if view=='home':expect(page.locator('#home-system-status')).to_have_text('目录与任务服务可用')
             if view=='settings':
                 expect(page.locator('#settings-group-nav button')).to_have_count(10)
-                if width<=900:
-                    assert page.locator('#settings-savebar').evaluate("n=>getComputedStyle(n).position")=='static'
+                expect(page.locator('#settings-savebar')).to_be_hidden()
             page.evaluate('scrollTo(0,0)')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),(view,width,theme)
             color=page.evaluate('getComputedStyle(document.body).backgroundColor')
-            assert color==('rgb(17, 25, 36)' if theme=='dark' else 'rgb(245, 247, 251)'),color
+            assert color==('rgb(22, 29, 26)' if theme=='dark' else 'rgb(245, 245, 241)'),color
             geometry[view]={'body':color,'bounds':page.locator(f'#{view}-view').bounding_box()}
             page.screenshot(path=str(ARTIFACTS/f'{view}-{width}x{height}-{theme}.png'),full_page=True)
         navigate(page,'publish')
@@ -85,6 +83,7 @@ def test_theme_rules_and_drawer_keyboard(live_server):
     playwright,browser,page,errors=browser_session(base,legacy=False)
     try:
         page.wait_for_function('window.AppResources')
+        page.locator('.account-menu summary').click()
         page.locator('#theme-toggle').click()  # system -> light
         page.locator('#theme-toggle').click()  # light -> dark
         expect(page.locator('html')).to_have_attribute('data-theme','dark')

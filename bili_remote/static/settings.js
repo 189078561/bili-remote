@@ -228,7 +228,7 @@
     const heading = element("div", "settings-group-heading");
     heading.append(element("p", "eyebrow", "SETTINGS"), element("h2", null, group.title));
     if (group.description) heading.append(element("p", "muted", group.description));
-    if (window.BILI_V2) heading.append(els.reset);
+    if (window.BILI_V2) heading.append(els.dirty);
     els.content.append(heading);
     const sourceValues = element("datalist");
     sourceValues.id = "settings-source-values";
@@ -242,6 +242,7 @@
     }
     els.content.append(sourceValues);
     for (const section of group.sections) els.content.append(renderSection(group, section));
+    if(window.BILI_V2){const foot=element('div','settings-inspector-footer');foot.append(els.status,els.reset);els.content.append(foot);}
     updateMediaFields();
     renderNavigation();
     updateDirtyState();
@@ -267,6 +268,13 @@
         ]);
         schema = nextSchema;
         if (window.BILI_V2) {
+          const downloads=schema.groups.find(g=>g.key==='downloads');
+          const defaults=downloads.sections.find(s=>s.key==='defaults');
+          defaults.fields.sort((a,b)=>(b.key==='download_default_output_dir')-(a.key==='download_default_output_dir'));
+          defaults.title='保存与命名';defaults.description='';
+          const engine=downloads.sections.find(s=>s.key==='engine'), common=['aria2_enabled','aria2_connections','aria2_resume_retries'];
+          downloads.sections.splice(downloads.sections.indexOf(engine),0,{...engine,key:'engine-common',title:'下载引擎',description:'',advanced:false,fields:engine.fields.filter(f=>common.includes(f.key))});
+          engine.fields=engine.fields.filter(f=>!common.includes(f.key));engine.title='线路探测与超时';
           const rename=schema.groups.find(g=>g.key==='rename');
           rename.title='智能命名规则';
           rename.sections.unshift({key:'v2-naming',title:'V2 全局命名规则',renderer:'v2-rules',ruleKind:'naming_rule',fields:[]});
@@ -375,6 +383,23 @@
     return confirm("有未保存的设置，确定离开设置页面吗？");
   }
 
+  document.querySelector('#settings-search')?.addEventListener('click',()=>{
+    const dialog=element('dialog','settings-search-dialog'),head=element('div','settings-search-heading');
+    dialog.setAttribute('aria-label','查找设置');const input=document.createElement('input');input.type='search';input.placeholder='名称、用途或配置项';input.setAttribute('aria-label','查找设置');
+    const close=element('button','button ghost small','关闭');close.type='button';close.onclick=()=>dialog.close();head.append(input,close);
+    const results=element('div','settings-search-results');dialog.append(head,results);document.body.append(dialog);
+    function search(){results.replaceChildren();const query=input.value.trim().toLocaleLowerCase();
+      for(const group of schema?.groups||[]){if(query && group.title.toLocaleLowerCase().includes(query)){const item=element('button','settings-search-result',group.title);item.type='button';item.onclick=()=>{selectGroup(group.key);dialog.close();};results.append(item);}}
+      for(const group of schema?.groups||[])for(const field of fieldsForGroup(group)){
+        if(!query||![field.label,field.title,field.key,field.description].filter(Boolean).join(' ').toLocaleLowerCase().includes(query))continue;
+        const item=element('button','settings-search-result',`${group.title} · ${field.label||field.title||field.key}`);item.type='button';
+        item.onclick=()=>{selectGroup(group.key);dialog.close();const row=[...els.content.querySelectorAll('[data-setting-key]')].find(n=>n.dataset.settingKey===field.key);if(row){for(let p=row.parentElement;p&&p!==els.content;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;row.scrollIntoView({block:'center'});row.querySelector('input,select,textarea,summary,button')?.focus();}};
+        results.append(item);
+      }
+      if(!results.children.length)results.append(element('p','home-state',query?'没有匹配设置':'输入关键词查找真实配置项'));
+    }
+    input.oninput=search;dialog.addEventListener('close',()=>{dialog.remove();document.querySelector('#settings-search').focus();});search();dialog.showModal();input.focus();
+  });
   els.save.addEventListener("click", save);
   els.cancel.addEventListener("click", cancel);
   els.reset.addEventListener("click", resetGroup);

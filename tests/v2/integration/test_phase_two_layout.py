@@ -19,8 +19,6 @@ SIZES = [(1440, 900), (1280, 800), (1024, 768), (768, 1024), (390, 844)]
 
 def navigate(page, view):
     show_panel(page)
-    if page.viewport_size['width'] <= 900:
-        page.locator('#nav-toggle').click()
     page.locator(f'[data-view="{view}"]').click()
 
 
@@ -65,7 +63,7 @@ def test_real_workspace_visual_matrix(live_server, width, height, theme):
         files = page.locator('#file-browser-host')
         files.locator('.file-row[data-path="Media"]').click()
         files.locator('.file-row[data-path="Media/Layout.Sample.S01E01.mp4"] .file-check').check()
-        files.get_by_role('button', name='进入发种工作台', exact=True).click()
+        files.get_by_role('button', name='进入工作台', exact=True).click()
         page.wait_for_function('V2Workbench.context && V2Workbench.preview')
         expect(page.locator('[data-sheet=resources]')).to_be_hidden()
         expect(page.locator('[data-sheet=preview]')).to_be_hidden()
@@ -74,11 +72,13 @@ def test_real_workspace_visual_matrix(live_server, width, height, theme):
         source = app.state.services.settings.download_root / 'Media' / 'Layout.Sample.S01E01.mp4'
         page.locator('[data-wb=selected-title]').fill('Color Study')
         page.locator('[data-wb=season]').fill('1')
+        show_panel(page, 'naming')
         page.locator('[data-wb=episode]').fill('2')
         expect(page.locator('[data-wb=rename-list]')).to_contain_text('Color.Study', timeout=15000)
         assert page.evaluate('V2Workbench.context.episode.episode.value') == 2
         page.locator('[data-wb=naming-type]').select_option('series')
         expect(page.locator('[data-wb=rename-list]')).to_contain_text('S01E02')
+        show_panel(page)
         assert source.exists()  # Automatic preview is read-only.
         assert not list(source.parent.glob('Color.Study*'))
         expect(page.locator('[data-edit=release_title]')).not_to_have_value('')
@@ -141,40 +141,45 @@ def test_real_workspace_visual_matrix(live_server, width, height, theme):
         assert page.evaluate('layoutIdentity.wb===V2Workbench && layoutIdentity.browser===V2Workbench.browser && layoutIdentity.title===document.querySelector("[data-edit=release_title]")')
         navigate(page, 'files')
         files = page.locator('#file-browser-host')
-        if width <= 900:
+        if width <= 600:
             files.get_by_role('button', name='目录树', exact=True).click()
             page.screenshot(path=str(ARTIFACTS / f'files-tree-{prefix}.png'))
         files.locator('.root-shortcut').filter(has_text='图片目录').click()
         files.locator('.file-row[data-path="验收截图.png"] .file-check').check()
-        if width < 1180:
-            files.get_by_role('button', name='文件详情', exact=True).click()
+        files.locator('.file-batch-actions summary').click()
+        if not files.get_by_role('button', name='文件详情', exact=True).is_visible():
+            files.locator('.file-batch-actions summary').click()
+        files.get_by_role('button', name='文件详情', exact=True).click()
         expect(files.locator('.file-details-pane')).to_have_attribute('data-selection', 'single')
         expect(files.locator('.file-detail-image')).to_be_visible()
         page.wait_for_function('document.querySelector(".file-detail-image").naturalWidth === 320')
-        if width >= 1180:
-            a, b, c = [box(page, '#file-browser-host ' + s) for s in ['.file-tree-pane', '.file-list-pane', '.file-details-pane']]
-            assert a['x'] + a['width'] <= b['x'] and b['x'] + b['width'] <= c['x']
-            assert abs(a['y'] - c['y']) < 2
-            geometry['files'] = [a, b, c]
-        elif width == 390:
+        if width > 600:
+            a, b = [box(page, '#file-browser-host ' + selector) for selector in ['.file-tree-pane', '.file-list-pane']]
+            assert a['x'] + a['width'] <= b['x']
+            assert page.locator('#file-browser-host .file-details-pane').evaluate('n => getComputedStyle(n).position') == 'fixed'
+            geometry['files'] = [a, b]
+        else:
             assert box(page, '.file-details-pane')['width'] == 390
         assert_no_overflow(page)
         page.screenshot(path=str(ARTIFACTS / f'files-details-{prefix}.png'))
         before = box(page, '#file-browser-host .file-list-pane')['width']
         files.locator('.file-details-pane').get_by_role('button', name='收起', exact=True).click()
-        if width >= 1180:
-            assert box(page, '#file-browser-host .file-list-pane')['width'] > before + 250
+        assert abs(box(page, '#file-browser-host .file-list-pane')['width'] - before) < 2
         page.screenshot(path=str(ARTIFACTS / f'files-{prefix}.png'))
         files.locator('.file-row[data-path="pixel.png"] .file-check').check()
+        if not files.get_by_role('button', name='文件详情', exact=True).is_visible():
+            files.locator('.file-batch-actions summary').click()
         files.get_by_role('button', name='文件详情', exact=True).click()
         expect(files.locator('.file-details-pane')).to_have_attribute('data-selection', 'multiple')
         expect(files.locator('.file-detail-image')).to_have_count(0)
         expect(files.locator('.file-details-body')).to_contain_text('已选择 2 项')
         files.locator('.file-details-pane').get_by_role('button', name='收起', exact=True).click()
-        if width <= 900:
+        if width <= 600:
             files.get_by_role('button', name='目录树', exact=True).click()
         files.locator('.root-shortcut').filter(has_text='资源下载目录').click()
         files.locator('.file-row[data-path="Media"] .file-check').check()
+        if not files.get_by_role('button', name='文件详情', exact=True).is_visible():
+            files.locator('.file-batch-actions summary').click()
         files.get_by_role('button', name='文件详情', exact=True).click()
         expect(files.locator('.file-details-pane')).to_have_attribute('data-selection', 'directory')
         expect(files.locator('.file-details-body')).to_contain_text('目录内容未统计')
@@ -213,22 +218,30 @@ def test_details_discard_late_text_and_reuse_real_media_artifacts(live_server):
           };
         }''')
         files.locator('.file-row[data-path="first.txt"] .file-check').check()
+        files.locator('.file-batch-actions summary').click()
+        files.get_by_role('button', name='文件详情', exact=True).click()
         page.wait_for_function('typeof window.releaseFirstText === "function"')
+        page.keyboard.press('Escape')
         files.locator('.file-row[data-path="first.txt"] .file-check').uncheck()
         files.locator('.file-row[data-path="second.txt"] .file-check').check()
+        files.locator('.file-batch-actions summary').click()
+        files.get_by_role('button', name='文件详情', exact=True).click()
         expect(files.locator('.file-detail-text')).to_have_text('second document')
         page.evaluate('releaseFirstText()')
         page.wait_for_timeout(100)
         expect(files.locator('.file-detail-text')).to_have_text('second document')
+        page.keyboard.press('Escape')
         files.locator('.file-row[data-path="Media"]').click()
         files.locator('.file-row[data-path="Media/Layout.Sample.S01E01.mp4"] .file-check').check()
-        files.get_by_role('button', name='进入发种工作台', exact=True).click()
+        files.get_by_role('button', name='进入工作台', exact=True).click()
         page.wait_for_function('V2Workbench.context?.files?.[0]?.probe')
-        page.locator('[data-tab="images"]').click()
+        show_panel(page, 'images')
         page.locator('[data-action="screenshots"]').click()
         expect(page.locator('.wb-image img').first).to_be_visible(timeout=30000)
         page.evaluate('window.contextBeforeDetail = JSON.stringify(V2Workbench.context)')
         navigate(page, 'files')
+        files.locator('.file-batch-actions summary').click()
+        files.get_by_role('button', name='文件详情', exact=True).click()
         files.get_by_role('button', name='读取媒体信息', exact=True).click()
         expect(files.locator('.file-detail-media')).to_contain_text('320')
         files.get_by_role('button', name='查看已有截图', exact=True).click()
@@ -240,9 +253,12 @@ def test_details_discard_late_text_and_reuse_real_media_artifacts(live_server):
         page.screenshot(path=str(ARTIFACTS / 'files-real-media-and-screenshot.png'))
         # The original editor and its save/conflict workflow remain reachable
         # from the new full-screen details panel on a phone.
+        page.keyboard.press('Escape')
         page.set_viewport_size({'width': 390, 'height': 844})
         page.evaluate('mediaBrowser.navigate("downloads", "")')
         files.locator('.file-row[data-path="second.txt"] .file-check').check()
+        if not files.get_by_role('button', name='文件详情', exact=True).is_visible():
+            files.locator('.file-batch-actions summary').click()
         files.get_by_role('button', name='文件详情', exact=True).click()
         files.get_by_role('button', name='预览/编辑（详情）', exact=True).click()
         editor = page.get_by_role('textbox', name='second.txt 文本内容')
@@ -268,9 +284,11 @@ def test_live_adjustments_discard_late_response_and_preserve_manual_rules(live_s
         files = page.locator('#file-browser-host')
         files.locator('.file-row[data-path="Media"]').click()
         files.locator('.file-row[data-path="Media/Layout.Sample.S01E01.mp4"] .file-check').check()
-        files.get_by_role('button', name='进入发种工作台', exact=True).click()
+        files.get_by_role('button', name='进入工作台', exact=True).click()
         page.wait_for_function('V2Workbench.context && V2Workbench.preview')
+        show_panel(page, 'naming')
         page.locator('[data-wb=naming-type]').select_option('series')
+        show_panel(page)
         page.wait_for_function('V2Workbench.preview && V2Workbench.context.effective_rules.naming_rule.template_id === "series"')
         page.evaluate('''() => {
           const fetch = V2Workbench.api.transport;
@@ -286,12 +304,16 @@ def test_live_adjustments_discard_late_response_and_preserve_manual_rules(live_s
         }''')
         page.locator('[data-wb=selected-title]').fill('Earlier Name')
         page.wait_for_function('typeof releaseAdjustment === "function"')
+        show_panel(page, 'naming')
         page.locator('[data-wb=naming-type]').select_option('movie')
         page.locator('[data-wb=naming-type]').select_option('anime')
+        show_panel(page)
         page.locator('[data-wb=selected-title]').fill('Latest Name')
+        show_panel(page, 'naming')
         page.locator('[data-wb=episode]').fill('3')
         # Explicit preview must flush changes even before the debounce expires.
         page.locator('[data-action=naming]').click()
+        show_panel(page)
         page.locator('[data-edit=release_title]').fill('人工标题保持不变')
         page.locator('[data-edit=overview]').fill('人工简介不接受迟到响应覆盖')
         # The older resolve has advanced the server revision but its response

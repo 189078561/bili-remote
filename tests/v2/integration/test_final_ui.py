@@ -185,3 +185,30 @@ def test_final_ui_home_and_settings_real_save(live_server):
         assert not errors,errors
     finally:
         browser.close();playwright.stop()
+
+
+def test_final_ui_settings_search_and_categories(live_server):
+    base,app=live_server
+    playwright,browser,page,errors=browser_session(base,legacy=False)
+    try:
+        page.locator('#settings-entry').click()
+        expect(page.locator('#settings-group-nav button')).to_have_count(10)
+        for width,height in ((1440,900),(390,844),(768,1024)):
+            page.set_viewport_size({'width':width,'height':height})
+            keys=page.locator('#settings-group-select option').evaluate_all('(nodes)=>nodes.map(n=>n.value)')
+            for key in keys:
+                if width<=600:page.locator('#settings-group-select').select_option(key)
+                else:page.locator(f'[data-group={key}]').click()
+                expect(page.locator('.settings-group-heading h2')).not_to_be_empty()
+                assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),(width,key)
+        page.locator('#settings-search').click()
+        page.get_by_role('searchbox',name='查找设置').fill('aria2_min_split_size')
+        page.locator('.settings-search-result').click()
+        expect(page.locator('[data-setting-key=aria2_min_split_size]')).to_be_visible()
+        page.locator('#settings-search').click()
+        page.get_by_role('searchbox',name='查找设置').fill('副标题')
+        page.locator('.settings-search-result').first.click()
+        expect(page.locator('.settings-group-heading h2')).to_have_text('副标题模板')
+        expect(page.locator('#settings-savebar')).to_be_hidden()
+        assert not errors,errors
+    finally:browser.close();playwright.stop()

@@ -200,3 +200,5 @@ body:has(.br-workbench.wb-panel-open) {overflow:hidden;}
  .wb-preview-footer,.wb-sheet-footer {padding:12px 17px max(12px,env(safe-area-inset-bottom));}
  .wb-notices {bottom:calc(76px + env(safe-area-inset-bottom));}
 }
+
+.wb-local-preview {padding:0 0 20px;margin-bottom:20px;border-bottom:1px solid var(--ws-line);}.wb-local-preview img {display:block;max-width:100%;max-height:400px;object-fit:contain;margin:12px auto;}

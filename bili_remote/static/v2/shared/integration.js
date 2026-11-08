@@ -41,6 +41,7 @@
       const {context, reason} = event.detail;
       naming.setContext(context, {resourceSwitch: reason === 'selection'});
     });
+    workbench.host.addEventListener('v2:naming-accepted',event=>naming.setBatch(event.detail.batchId));
     naming.setContext(workbench.context);
     const open = async context => {
       if (!await workbench.select(context.resources, {context, origins: context.origins || []})) return false;

@@ -565,6 +565,7 @@
           {% if not v2_enabled %}<p class="muted">统一管理应用默认行为、目录、下载和剧集重命名。保存只影响后续操作。</p>{% endif %}
         </div>
       </div>
+      {% if v2_enabled %}<button id="settings-search" class="button ghost small" type="button">查找设置</button>{% endif %}
       <div class="settings-header-status">
         <span id="settings-dirty-indicator" class="settings-dirty-indicator">已保存</span>
         <span id="settings-save-status" class="file-action-status" role="status" aria-live="polite"></span>

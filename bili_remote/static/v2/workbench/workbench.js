@@ -414,13 +414,20 @@
       if (!this.context) return; const current = this.stamp("compose"), edit = this.editVersion, revision = this.context.revision;
       try {
         const format = this.el("format").value;
-        const result = await this.api.compose({context: this.context, ...this.fields, poster: val(this.context.metadata?.poster_url) && safeURL(val(this.context.metadata?.poster_url)) ? {kind:'upload',id:'identity-poster',url:safeURL(val(this.context.metadata.poster_url))} : null, reports: this.artifacts.filter(x => x.kind === "report"), screenshots: this.artifacts.filter(x => ["screenshot", "collage", "upload"].includes(x.kind)), links: this.links, format});
+        const result = await this.api.compose({context: this.context, ...this.fields, poster: val(this.context.metadata?.poster_url) && safeURL(val(this.context.metadata?.poster_url)) ? {kind:'upload',id:'identity-poster',url:safeURL(val(this.context.metadata.poster_url))} : null, reports: this.artifacts.filter(x => x.kind === "report"), screenshots: this.artifacts.filter(x => ["screenshot", "collage", "upload"].includes(x.kind) && /^https?:\/\//i.test(x.url || "") && safeURL(x.url)), links: this.links, format});
         if (!current() || edit !== this.editVersion || revision !== this.context?.revision || result.context_revision !== revision) return;
+        const localImages=this.el('local-images-preview');localImages.replaceChildren();
+        const unpublished=this.images.length && !this.artifacts.some(x=>x.kind==='upload' && safeURL(x.url));
+        localImages.hidden=!unpublished;
+        if(unpublished){
+          localImages.append(node('p','缩略图仅本地可见。生成图床链接后才会加入可复制的发布内容。','wb-note'));
+          for(const image of this.images){const img=node('img');img.src='/api/files/image?'+new URLSearchParams({root_key:'images',path:image.path});img.alt=image.path;localImages.append(img);}
+        }
         this.content = result.content; this.el("output").textContent = result.content;
         this.el("rich-preview").hidden = format === "html";
         if (format !== "html") global.BiliWorkbenchPreview?.render(this.el("rich-preview"), result.content, format);
         const messages = [...(result.validation.errors || []), ...(result.validation.warnings || [])].map(x => typeof x === "string" ? x : x.message);
-        this.el("validation").textContent = (result.validation.ready ? "发布内容已就绪" : "内容尚有缺项，可预览复制") + (messages.length ? ` · ${messages.join("；")}` : "");
+        this.el("validation").textContent = (result.validation.ready ? "发布内容已就绪" : "内容尚有缺项，可预览复制") + (messages.length ? ` · ${messages.join("；")}` : "") + (unpublished ? " · 缩略图待上传图床" : "");
         if (format === "html") { this.el("html-preview").srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; img-src https: http:; style-src &#39;unsafe-inline&#39;"><style>body{font:14px/1.6 system-ui;overflow-wrap:anywhere;color-scheme:light dark;color:CanvasText;background:Canvas}img{max-width:100%}pre{white-space:pre-wrap}</style>' + result.content; this.el("html-preview").hidden = false; }
         this.controls();
       } catch (error) { if (current() && edit === this.editVersion) { this.el("validation").textContent = error.message; this.notice(error.message, true); } }
@@ -452,7 +459,9 @@
     async applyRename() {
       if (!this.preview?.can_apply || !this.preview.preview_token || !this.preview.operations?.length || this.preview.conflicts?.length > 0 || this.preview.context_revision !== this.context?.revision || !(Date.parse(this.preview.expires_at) > Date.now())) throw new Error("命名预览已失效，请重新预览");
       const preview = this.preview, epoch = this.epoch, resources = this.resources, response = await this.api.apply(preview, this.applyKey);
-      this.track(response.task, {type: "rename", epoch, resources, operations: preview.operations}); if (this.preview === preview) this.invalidateRename();
+      this.track(response.task, {type: "rename", epoch, resources, operations: preview.operations});
+      if(epoch===this.epoch && response.batch_id)this.host.dispatchEvent(new CustomEvent("v2:naming-accepted",{detail:{batchId:response.batch_id}}));
+      if (this.preview === preview) this.invalidateRename();
     }
     async probe() {
       const epoch = this.epoch, response = await this.api.probe({resources: this.resources, expected_fingerprints: Object.fromEntries(this.resources.map(x => [`${x.root_key}/${x.relative_path}`, x.fingerprint]))});

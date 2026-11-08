@@ -13,18 +13,22 @@ def test_main_page_real_resource_naming_publish_and_rule_memory(live_server):
     writes=[]
     page.on('request',lambda request: writes.append(request.url) if request.method in {'POST','PUT','PATCH'} else None)
     try:
+        page.locator('.app-tabs [data-view=files]').click()
         expect(page.locator('#file-browser-host .file-row[data-path="Media"]')).to_be_visible()
         page.locator('#file-browser-host .file-row[data-path="Media"]').click()
         page.locator('#file-browser-host .file-row[data-path="Media/episode01.mp4"] .file-check').check()
-        page.locator('#file-browser-host').get_by_role('button',name='进入发种工作台',exact=True).click()
+        page.locator('#file-browser-host').get_by_role('button',name='进入工作台',exact=True).click()
         expect(page.locator('[data-wb="resource-media"]')).to_contain_text('1 个媒体文件',timeout=15000)
         page.locator('[data-wb="selected-title"]').fill('Synthetic Work')
         page.locator('[data-wb="season"]').fill('1')
+        show_panel(page, 'naming')
         page.locator('[data-wb="episode"]').fill('1')
         page.locator('[data-action="overrides"]').click()
+        show_panel(page)
         expect(page.locator('[data-edit="release_title"]')).to_have_value(re.compile('Synthetic Work'))
         page.locator('[data-edit="overview"]').fill('合成资源简介')
         expect(page.locator('[data-wb="output"]')).to_contain_text('合成资源简介')
+        show_panel(page, 'naming')
         page.locator('[data-action="naming"]').click()
         expect(page.locator('[data-wb="rename-list"]')).to_contain_text('Synthetic.Work')
         assert path.exists()  # Preview never writes.
@@ -34,7 +38,9 @@ def test_main_page_real_resource_naming_publish_and_rule_memory(live_server):
         assert app.state.services.v2.memory.get()['layers']
         show_panel(page)
         page.locator('[data-edit="release_title"]').fill('Manual keeps this')
+        show_panel(page, 'identity')
         page.locator('[data-action="resolve"]').click()
+        show_panel(page)
         expect(page.locator('[data-edit="release_title"]')).to_have_value('Manual keeps this')
         page.reload()
         page.locator('[data-view="publish"]').click()
