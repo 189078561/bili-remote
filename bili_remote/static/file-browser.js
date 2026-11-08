@@ -95,6 +95,7 @@
       if (!host) throw new Error("文件浏览器缺少挂载节点");
       this.host = host;
       this.mode = options.mode || "full";
+      this.finalUI = Boolean(window.BILI_V2);
       // Presentation is independent of selection/operation capabilities.
       this.displayMode = options.displayMode || (this.mode === "full" ? "full" : "picker");
       if (!["full", "compact", "picker"].includes(this.displayMode)) throw new Error("未知文件浏览展示模式");
@@ -156,7 +157,7 @@
       treePane.setAttribute("aria-label", "目录树");
       const treeHeading = element("div", "file-pane-heading");
       const treeText = element("div");
-      treeText.append(element("strong", null, "目录树"));
+      treeText.append(element("strong", null, this.finalUI ? "子目录" : "目录树"));
       treeText.append(element("span", "muted", "按需展开目录和文件"));
       const treeRefresh = button("刷新", "button ghost small");
       treeRefresh.addEventListener("click", () => this.refresh());
@@ -251,10 +252,12 @@
           if (key === "workbench" && !this.onOpenWorkbench) continue;
           const node = button(label, key === "delete" ? "button danger small" : "button ghost small");
           node.addEventListener("click", () => { more.open = false; this.runAction(key); });
-          if (!["preview","copy","cut","paste","rename","workbench"].includes(key)) {
+          if (!(this.finalUI ? ["workbench", "mediaRename"] : ["preview","copy","cut","paste","rename","workbench"]).includes(key)) {
             (key === "delete" ? dangerItems : moreItems).append(node);
             node.addEventListener("click",()=>more.open=false);
           } else batchActions.append(node);
+          if (this.finalUI && key === "workbench") { node.textContent = "进入工作台"; node.className = "button primary small"; }
+          if (this.finalUI && key === "mediaRename") node.textContent = "命名";
           operationButtons[key] = node;
         }
       }
@@ -286,7 +289,7 @@
       const actionStatus = element("p", "file-action-status");
       actionStatus.setAttribute("role", "status");
       const listHead = element("div", "file-list-head");
-      listHead.setAttribute("aria-hidden", "true");
+      if (!this.finalUI) listHead.setAttribute("aria-hidden", "true");
       listHead.append(
         element("span"),
         element("span"),
@@ -294,6 +297,23 @@
         element("span", null, "大小"),
         element("span", null, "修改时间")
       );
+      if (this.finalUI && this.mode === "full") {
+        // Selection controls belong to the list; the contextual bar exists only with a selection.
+        if (this.el.selectAll) {
+          listHead.firstElementChild.append(this.el.selectAll);
+          this.el.selectAll.classList.add("file-check");
+          batchActions.querySelector(".inline-check")?.remove();
+        }
+        listHead.append(element("span"));
+        const clear = button("取消选择", "button ghost small file-clear-selection");
+        clear.addEventListener("click", () => { this.selected.clear(); this.updateSelection(); });
+        batchActions.insertBefore(clear, batchActions.firstChild.nextSibling);
+        if (operationButtons.workbench) batchActions.insertBefore(operationButtons.workbench, more);
+        if (operationButtons.mediaRename) batchActions.insertBefore(operationButtons.mediaRename, more);
+        if (operationButtons.paste) toolbarActions.append(operationButtons.paste);
+        toolbarActions.prepend(treeToggle);
+        heading.hidden = true;
+      }
       const list = element("div", "file-list");
       list.setAttribute("aria-live", "polite");
       const pager = element("div", "file-pager hidden");
@@ -304,6 +324,7 @@
       next.addEventListener("click", () => this.loadDirectory({page: this.page + 1, clearSelection: true}));
       pager.append(prev, pageLabel, next);
       listPane.append(toolbar, listError, actionStatus, listHead, list, pager);
+      if (this.finalUI) { meta.classList.add("file-summary"); listPane.append(meta); }
       browserShell.append(treePane, listPane);
       treePane.prepend(roots);
       const treeClose = button("关闭目录", "button ghost fb-pane-close");
@@ -341,6 +362,8 @@
 
       Object.assign(this.el, {
         roots,
+        batchActions,
+        toolbarActions,
         tree,
         breadcrumbs,
         meta,
@@ -363,8 +386,8 @@
     }
 
     setupLayout() {
-      this.narrowTree = matchMedia("(max-width: 900px)");
-      this.narrowDetails = matchMedia("(max-width: 1179px)");
+      this.narrowTree = matchMedia(this.finalUI ? "(max-width: 600px)" : "(max-width: 900px)");
+      this.narrowDetails = matchMedia(this.finalUI ? "(min-width: 0px)" : "(max-width: 1179px)");
       const opts = {signal: this.uiAbort.signal};
       this.setDetailsOpen(!this.narrowDetails.matches);
       this.narrowTree.addEventListener("change", () => this.setTreeOpen(false), opts);
@@ -707,9 +730,25 @@
           name.append(note);
           row.title = item.protection_reason;
         }
+        if (this.finalUI && this.displayMode !== "compact") {
+          const summary = element("small", "file-media-summary");
+          const kind = item.is_dir ? "文件夹" : ({video:"视频",image:"图片",text:"文本",torrent:"种子"}[item.kind] || "文件");
+          summary.textContent = `${kind}${!item.is_dir ? " · " + formatBytes(item.size_bytes) : ""}`;
+          name.append(summary);
+        }
         row.append(name, element("span", "file-size", item.is_dir ? "—" : formatBytes(item.size_bytes)), element("span", "file-date", formatDate(item.mtime_ns)));
+        if (this.finalUI && this.mode === "full") {
+          const more = button("…", "button ghost small file-row-more");
+          more.setAttribute("aria-label", `${item.name} 的更多操作`);
+          more.addEventListener("click", event => {
+            event.stopPropagation();
+            const box = more.getBoundingClientRect();
+            this.openContextMenu({clientX:box.left, clientY:box.bottom}, item);
+          });
+          row.append(more);
+        }
         row.addEventListener("click", event => {
-          if (event.target.closest("input")) return;
+          if (event.target.closest("input,button")) return;
           if (!item.allowed) return;
           if (item.is_dir) {
             this.navigate(this.rootKey, item.relative_path);
@@ -815,7 +854,7 @@
         if (check) check.checked = selected;
       }
       this.updateOperationButtons();
-      this.renderDetails();
+      if (this.el.details && !this.el.details.hidden) this.renderDetails();
       if (notify) this.onSelectionChange?.(this.selectedItems().map(item => ({...item, root_key: this.rootKey})));
     }
 
@@ -859,6 +898,13 @@
         }
       }
       if (buttons.paste) buttons.paste.disabled = !this.clipboard;
+      if (this.finalUI && this.mode === "full") {
+        this.el.batchActions.hidden = count === 0;
+        if (buttons.paste) buttons.paste.hidden = !this.clipboard;
+        for (const [key, node] of Object.entries(buttons)) {
+          if (key !== "paste") node.hidden = node.disabled && !node.title;
+        }
+      }
       if (this.el.confirmButton) {
         this.el.confirmButton.disabled = this.selectionType === "directory" ? false : count === 0;
       }
@@ -885,6 +931,7 @@
         ["move", "移动到…", selected.every(entry => entry.capabilities?.move !== false)],
         ["delete", "删除", selected.every(entry => entry.capabilities?.delete !== false)]
       ];
+      if (this.finalUI && this.el.details) actions.push(["details", "文件详情", true]);
       if (this.onOpenWorkbench) actions.push(["workbench", "进入发种工作台", true]);
       if (this.onOpenNaming) actions.push(["mediaRename", "智能命名", true]);
       else if (selected.every(entry => entry.kind === "video" && !entry.is_dir)) {
@@ -902,6 +949,7 @@
         ["publish", "发布资料", selected.length === 1]
       );
       for (const [action, label, enabled] of actions) {
+        if (this.finalUI && !enabled) continue;
         const node = button(label, "context-menu-item");
         node.setAttribute("role", "menuitem");
         node.disabled = !enabled;
@@ -928,6 +976,7 @@
     }
 
     async runAction(action) {
+      if (action === "details") { this.setDetailsOpen(true); return; }
       try {
         await this.performAction(action);
       } catch (error) {
@@ -1426,7 +1475,11 @@
         this.el.tree.append(element("p", "empty", "暂无可用目录"));
         return;
       }
-      for (const root of this.roots) this.el.tree.append(this.treeRoot(root));
+      if (this.finalUI) {
+        const root = this.root();
+        const cache = root && this.treeCache.get(this.treeKey(root.key, ""));
+        for (const item of cache?.items || []) if (item.is_dir) this.el.tree.append(this.treeItem(root, item, 0));
+      } else for (const root of this.roots) this.el.tree.append(this.treeRoot(root));
     }
 
     treeRoot(root) {
@@ -1515,7 +1568,7 @@
             .then(() => this.drawTree())
             .catch(error => children.append(element("p", "form-error", error.message)));
         } else {
-          for (const child of cache.items) children.append(this.treeItem(root, child, depth + 1));
+          for (const child of cache.items) if (!this.finalUI || child.is_dir) children.append(this.treeItem(root, child, depth + 1));
           if (cache.has_more) {
             const more = button("加载更多", "tree-more");
             more.addEventListener("click", async () => {

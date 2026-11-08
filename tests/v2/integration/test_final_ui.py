@@ -47,3 +47,42 @@ def test_final_ui_navigation_and_task_drawer(live_server):
     finally:
         browser.close()
         playwright.stop()
+
+
+def test_final_ui_files_selection_and_details(live_server):
+    base, app = live_server
+    folder = app.state.services.settings.download_root / 'Media'
+    for index in range(2, 9):
+        (folder / f'Synthetic.Series.S01E{index:02d}.1080p.WEB-DL.mkv').write_bytes(b'isolated visual fixture')
+    playwright, browser, page, errors = browser_session(base, legacy=False)
+    try:
+        page.locator('.app-tabs [data-view=files]').click()
+        page.locator('#file-browser-host .file-row[data-path="Media"]').click()
+        expect(page.locator('#file-browser-host .file-row')).to_have_count(8)
+        expect(page.locator('#file-browser-host .file-details-pane')).to_be_hidden()
+        expect(page.locator('#file-browser-host .file-batch-actions')).to_be_hidden()
+        for width, height in ((1440, 900), (390, 844)):
+            page.set_viewport_size({'width': width, 'height': height})
+            page.locator('#file-browser-host .file-check').nth(1).check()
+            expect(page.locator('#file-browser-host .file-batch-actions')).to_be_visible()
+            expect(page.locator('#file-browser-host .file-batch-actions')).to_contain_text('进入工作台')
+            assert page.locator('#file-browser-host .file-batch-actions > button:disabled:visible').count() == 0
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            expect(page.locator('#app-navigation')).to_be_in_viewport()
+            page.screenshot(path=str(ARTIFACTS / f'files-selected-{width}.png'))
+            if width == 1440:
+                import json
+                (ARTIFACTS / 'file-metrics.json').write_text(json.dumps(page.evaluate('''() => Object.fromEntries(['.file-list-head','.file-row','.file-check'].map(s=> { const n=document.querySelector('#file-browser-host '+s), c=getComputedStyle(n);return [s,{height:c.height,minHeight:c.minHeight,padding:c.padding,grid:c.gridTemplateColumns}]}))''')))
+            page.locator('#file-browser-host .file-clear-selection').click()
+            expect(page.locator('#file-browser-host .file-batch-actions')).to_be_hidden()
+            page.locator('#file-browser-host .file-row-more').first.click()
+            page.get_by_role('menuitem', name='文件详情', exact=True).click()
+            expect(page.locator('#file-browser-host .file-details-pane')).to_be_visible()
+            page.keyboard.press('Escape')
+            expect(page.locator('#file-browser-host .file-details-pane')).to_be_hidden()
+            page.locator('#file-browser-host .file-clear-selection').click()
+            page.screenshot(path=str(ARTIFACTS / f'files-browse-{width}.png'))
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()

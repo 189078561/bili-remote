@@ -291,11 +291,20 @@
     <section class="files-header">
       <div>
         <h1>文件管理</h1>
-        <p class="muted">浏览本地资源，选择文件查看详情或批量处理。</p>
+        {% if not v2_enabled %}<p class="muted">浏览本地资源，选择文件查看详情或批量处理。</p>{% endif %}
       </div>
       <div class="button-row files-header-actions">
+        {% if v2_enabled %}
+        <details class="file-history-menu"><summary class="button ghost small">工具记录</summary><div class="file-history-items">
+          <button id="screenshot-sessions-button" class="button ghost small" type="button">缩略图记录</button>
+          <button class="button ghost small" type="button" data-file-tool="release-info">媒体报告</button>
+          <button class="button ghost small" type="button" data-file-tool="uploads">上传记录</button>
+          <button class="button ghost small" type="button" data-file-tool="torrents">种子与 qBittorrent</button>
+        </div></details>
+        {% else %}
         <button id="screenshot-sessions-button" class="button secondary small" type="button">缩略图记录</button>
         <details class="file-history-menu"><summary class="button ghost small">工具记录</summary><div class="file-history-items"><button class="button ghost small" type="button" data-file-tool="release-info">媒体报告</button><button class="button ghost small" type="button" data-file-tool="uploads">上传记录</button><button class="button ghost small" type="button" data-file-tool="torrents">种子与 qBittorrent</button></div></details>
+        {% endif %}
         <button id="file-refresh-button" class="button ghost small" type="button">刷新当前目录</button>
       </div>
     </section>

@@ -3,17 +3,17 @@
    continue using the existing workspace dialog styles and handlers. */
 .fb-v2 {min-width:0; max-width:100%; color:var(--ws-ink);}
 .fb-v2 button,.fb-v2 .button,.fb-v2 select,.fb-v2 input:not([type=checkbox]),.fb-v2 summary.button {font:inherit; color:var(--ws-ink); background:var(--ws-surface); border:1px solid var(--ws-line); border-radius:6px; min-height:38px; padding:7px 10px; box-shadow:none;}
-.fb-v2 button.primary {background:var(--ws-accent); color:var(--ws-surface); border-color:var(--ws-accent); font-weight:650;}
+.fb-v2 button.primary {background:var(--ws-accent); color:var(--on-brand,#fff); border-color:var(--ws-accent); font-weight:650;}
 .fb-v2 button.danger {color:var(--ws-danger); background:var(--ws-subtle);}
 .fb-v2 .muted {color:var(--ws-muted); font-size:12px;}
 .fb-v2 .file-browser-heading {display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:10px;}
 .fb-v2 .file-browser-heading > strong {font-size:14px; font-weight:500; color:var(--ws-muted); margin-right:auto;}
-.fb-v2 .file-browser-shell {display:grid; grid-template-columns:minmax(190px,210px) minmax(0,1fr); gap:12px; align-items:start; border:0; background:transparent; box-shadow:none;}
-.fb-v2[data-display-mode=full] .file-browser-shell {grid-template-columns:minmax(190px,210px) minmax(0,1fr) minmax(270px,300px);}
-.fb-v2[data-display-mode=full].fb-details-collapsed .file-browser-shell {grid-template-columns:minmax(190px,210px) minmax(0,1fr);}
-.fb-v2 :is(.file-tree-pane,.file-list-pane,.file-details-pane) {min-width:0; border:1px solid var(--ws-line); border-radius:10px; background:var(--ws-surface); box-shadow:none;}
+.fb-v2 .file-browser-shell {display:grid; grid-template-columns:190px minmax(0,1fr); gap:24px; align-items:start; border:0; background:transparent; box-shadow:none;}
+.fb-v2[data-display-mode=full] .file-browser-shell {grid-template-columns:190px minmax(0,1fr);}
+.fb-v2[data-display-mode=full].fb-details-collapsed .file-browser-shell {grid-template-columns:190px minmax(0,1fr);}
+.fb-v2 :is(.file-tree-pane,.file-list-pane,.file-details-pane) {min-width:0; border:0; border-radius:0; background:transparent; box-shadow:none;}
 .fb-v2 :is(.file-tree-pane,.file-details-pane) {position:sticky; top:calc(var(--header-height,0px) + 12px); max-height:calc(100dvh - var(--header-height,0px) - 24px); overflow:auto; scrollbar-width:thin;}
-.fb-v2 .file-tree-pane {padding:10px;}
+.fb-v2 .file-tree-pane {padding:0 20px 0 0;border-right:1px solid var(--ws-line);}
 .fb-v2 .file-pane-heading {display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0;}
 .fb-v2 .file-pane-heading .muted {display:none;}
 .fb-v2 .file-pane-heading strong {font-size:14px;}
@@ -22,7 +22,7 @@
 .fb-v2 .root-shortcut.active {background:var(--ws-selected); color:var(--ws-accent);}
 .fb-v2 .root-marker {width:8px; height:8px; border:2px solid currentColor; border-radius:2px; flex-shrink:0;}
 .fb-v2 .root-text {min-width:0;}
-.fb-v2 .root-text strong {font-size:14px; font-weight:550;}
+.fb-v2 .root-text strong {font-size:13px; font-weight:500;}
 .fb-v2 .root-text small {display:none;}
 .fb-v2 .file-tree {min-width:0; overflow:auto; max-height:55vh;}
 .fb-v2 .tree-row {display:flex; align-items:center; gap:2px; padding-left:calc(var(--tree-depth,0) * 12px); border-radius:6px;}
@@ -31,18 +31,19 @@
 .fb-v2 .tree-toggle[aria-expanded=true] svg {transform:rotate(90deg);}
 .fb-v2 .tree-label {flex:1; min-width:0; min-height:34px; padding:4px; border:0; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:transparent;}
 .fb-v2 .tree-label.active {color:var(--ws-accent); background:var(--ws-selected);}
-.fb-v2 .file-list-toolbar {display:grid; grid-template-columns:minmax(0,1fr); padding:12px; gap:10px; border-bottom:1px solid var(--ws-line);}
+.fb-v2 .file-list-toolbar {display:grid; grid-template-columns:minmax(0,1fr); padding:0 0 12px; gap:12px; border:0;}
 .fb-v2 .file-path-block {min-width:0;}
 .fb-v2 .file-path-block .muted {margin:4px 0 0;}
 .fb-v2 .file-breadcrumbs {display:flex; flex-wrap:wrap; gap:2px; align-items:center; overflow-wrap:anywhere;}
 .fb-v2 .crumb {border:0; background:transparent; padding:2px 4px; min-height:32px; white-space:normal; overflow-wrap:anywhere; color:var(--ws-accent);}
 .fb-v2 .crumb-separator {color:var(--ws-muted);}
 .fb-v2 .file-toolbar-actions {display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:0;}
-.fb-v2 .file-search-input {order:-1; width:100%; flex:1 1 160px; min-width:0;}
+.fb-v2 .file-search-input {order:-1; width:280px; flex:0 1 280px; margin-right:auto; min-width:0;}
 .fb-v2 .file-sort-select {min-width:0; max-width:140px; width:auto;}
-.fb-v2 .file-batch-actions {display:flex; align-items:center; flex-wrap:wrap; gap:6px; border-top:1px solid var(--ws-line); padding-top:10px; min-width:0;}
+.fb-v2 .file-batch-actions {display:flex; align-items:center; flex-wrap:wrap; gap:6px; background:var(--ws-selected);border-radius:7px;padding:8px 12px; min-width:0;}
 .fb-v2 .inline-check {display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ws-muted); min-height:38px; margin-right:auto;}
-.fb-v2 .selection-count {font-size:12px; color:var(--ws-muted);}
+.fb-v2 .selection-count {font-size:12px; color:var(--ws-accent);font-weight:600;white-space:nowrap;}
+.fb-v2 .file-clear-selection {margin-right:auto;}
 .fb-v2 .file-selection-hint {width:100%; color:var(--ws-danger); font-size:12px;}
 .fb-v2 .file-selection-hint:empty {display:none;}
 .fb-v2 .file-more-menu {position:relative;}
@@ -50,17 +51,18 @@
 .fb-v2 .file-more-items {position:absolute; right:0; top:calc(100% + 4px); min-width:180px; display:grid; gap:4px; z-index:20; padding:8px; border:1px solid var(--ws-line); border-radius:8px; background:var(--ws-surface); box-shadow:0 8px 24px #0002; max-height:55vh; overflow:auto;}
 .fb-v2 .file-more-items button {width:100%; text-align:left;}
 .fb-v2 .file-danger-actions {border-top:1px solid var(--ws-line); padding-top:8px; margin-top:4px;}
-.fb-v2 :is(.file-list-head,.file-row) {display:grid; grid-template-columns:24px 24px minmax(0,1fr) 65px; gap:8px; align-items:center; padding:10px;}
-.fb-v2 .file-list-head {background:var(--ws-subtle); color:var(--ws-muted); font-size:12px; border-bottom:1px solid var(--ws-line);}
-.fb-v2 .file-list-head span:last-child,.fb-v2 .file-date {display:none;}
+.fb-v2 :is(.file-list-head,.file-row) {display:grid; grid-template-columns:24px 24px minmax(0,1fr) 85px 145px; gap:8px; align-items:center; padding:12px 10px;}
+.fb-v2 .file-list-head {background:var(--ws-subtle); color:var(--ws-muted); font-size:11px; border-bottom:1px solid var(--ws-line);min-height:36px;padding-top:8px;padding-bottom:8px;}
+.fb-v2 .file-date {font-size:12px;color:var(--ws-muted);white-space:nowrap;}
 .fb-v2 .file-list {min-height:300px;}
-.fb-v2 .file-row {min-height:50px; border-bottom:1px solid var(--ws-line); cursor:pointer; font-size:14px;}
+.fb-v2 .file-row {min-height:65px; border-bottom:1px solid var(--ws-line); cursor:pointer; font-size:14px;}
 .fb-v2 .file-row:hover,.fb-v2 .tree-row:hover {background:var(--ws-subtle);}
 .fb-v2 .file-row.selected {background:var(--ws-selected);}
 .fb-v2 .file-row.blocked {opacity:.5; cursor:not-allowed;}
 .fb-v2 .file-row:focus-visible {outline-offset:-2px;}
-.fb-v2 .file-check {width:18px; height:18px; accent-color:var(--ws-accent); margin:0;}
-.fb-v2 .file-name {min-width:0; overflow-wrap:anywhere; white-space:normal; font-size:14px;}
+.fb-v2 .file-check {width:18px; height:18px;min-height:18px;padding:0; accent-color:var(--ws-accent); margin:0;}
+.fb-v2 .file-name {min-width:0; overflow-wrap:anywhere; white-space:normal; font-size:13px;line-height:1.4;}
+.fb-v2 .file-media-summary {display:block;color:var(--ws-muted);font-size:11px;margin-top:4px;}
 .fb-v2 .file-size {display:block; color:var(--ws-muted); font-size:12px; white-space:nowrap;}
 .fb-v2 .file-icon {width:20px; height:20px; color:var(--ws-muted);}
 .fb-v2 .file-icon.folder {color:var(--ws-accent);}
@@ -125,42 +127,72 @@
 .fb-v2[data-display-mode=compact] .file-pager button {min-height:32px; padding:4px;}
 .fb-v2[data-display-mode=picker] .file-list {max-height:45vh; overflow:auto;}
 .fb-v2[data-display-mode=picker] .file-browser-heading {display:flex;}
-#files-view .files-header {margin-bottom:12px; align-items:center; gap:12px;}
-#files-view .files-header h1 {font-size:22px; margin:0; color:var(--ws-ink);}
+#files-view .files-header {margin-bottom:22px; align-items:center; gap:12px;}
+#files-view .files-header h1 {font-size:27px; margin:0; color:var(--ws-ink);}
 #files-view .files-header p {color:var(--ws-muted); margin:4px 0 0;}
 #files-view .files-header-actions .button {color:var(--ws-ink); background:var(--ws-surface); border-color:var(--ws-line);}
 #files-view .file-history-items {background:var(--ws-surface);}
-@media (min-width:1600px) {
-  .fb-v2[data-display-mode=full] :is(.file-row,.file-list-head) {grid-template-columns:24px 24px minmax(0,1fr) 75px 125px;}
-  .fb-v2[data-display-mode=full] .file-date,.fb-v2[data-display-mode=full] .file-list-head span:last-child {display:block; font-size:12px; color:var(--ws-muted);}
+
+.final-ui .app-main>#files-view {padding:25px 32px;}
+.final-ui .fb-v2[data-display-mode=full] :is(.file-row,.file-list-head) {grid-template-columns:24px 24px minmax(0,1fr) 85px 145px 30px;}
+.final-ui .fb-v2 .file-row-more {width:28px;min-height:30px;padding:0;border:0;background:transparent;font-size:20px;}
+.final-ui .fb-v2 .file-summary {display:flex;padding:15px 8px;font-size:11px;color:var(--ws-muted);margin:0;}
+.final-ui .fb-v2 .file-details-pane {position:fixed;inset:0 0 0 auto;width:min(420px,100vw);max-height:100dvh;z-index:92;padding:24px;background:var(--ws-surface);box-shadow:var(--shadow);}
+.final-ui .fb-v2 .fb-pane-backdrop {display:block;position:fixed;inset:0;width:100%;height:100%;max-width:none;background:#14261b66;border:0;border-radius:0;z-index:91;}
+body:has(.fb-overlay-open) {overflow:hidden;}
+.final-ui .fb-v2 .file-list-toolbar .fb-tree-toggle {display:none;}
+.final-ui .fb-v2 .file-pane-heading strong {font-size:12px;font-weight:500;color:var(--ws-muted);}
+.final-ui .fb-v2 .file-details-pane .file-pane-heading strong {font-size:18px;color:var(--ws-ink);}
+@media (max-width:1100px) {
+ .fb-v2 .file-browser-shell,.fb-v2[data-display-mode=full] .file-browser-shell,.fb-v2[data-display-mode=full].fb-details-collapsed .file-browser-shell {grid-template-columns:160px minmax(0,1fr);gap:18px;}
+ .final-ui .fb-v2[data-display-mode=full] :is(.file-row,.file-list-head) {grid-template-columns:20px 20px minmax(0,1fr) 65px 30px;}
+ .final-ui .fb-v2 .file-date,.final-ui .fb-v2 .file-list-head>span:nth-child(5) {display:none;}
+ .final-ui .app-main>#files-view {padding:24px;}
 }
-@media (max-width:1179px) {
-  .fb-v2[data-display-mode=full] .file-browser-shell {grid-template-columns:200px minmax(0,1fr);}
-  .fb-v2 .file-details-pane {position:fixed; inset:0 0 0 auto; width:min(360px,100vw); max-height:100dvh; z-index:92; border-radius:0; padding:16px;}
-  .fb-v2 .fb-pane-backdrop {display:block; position:fixed; inset:0; width:100%; height:100%; max-width:none; background:#101b2e80; border:0; border-radius:0; z-index:91;}
-  body:has(.fb-overlay-open) {overflow:hidden;}
+@media(max-width:600px) {
+ .final-ui .app-main>#files-view {padding:20px 17px 24px;}
+ #files-view .files-header {align-items:center;flex-direction:row;gap:8px;}
+ #files-view .files-header h1 {font-size:23px;white-space:nowrap;}
+ #files-view .files-header-actions {width:auto;gap:2px;}
+ #files-view .files-header-actions .button {font-size:11px;padding:7px;}
+ .fb-v2 .file-browser-shell,.fb-v2[data-display-mode=full] .file-browser-shell,.fb-v2[data-display-mode=full].fb-details-collapsed .file-browser-shell,.fb-v2[data-display-mode=picker] .file-browser-shell {grid-template-columns:minmax(0,1fr);}
+ .fb-v2:not([data-display-mode=compact]) .file-tree-pane {display:none;}
+ .fb-v2:not([data-display-mode=compact]).fb-tree-open .file-tree-pane {display:block;position:fixed;inset:0 auto 0 0;width:min(320px,calc(100vw - 24px));max-height:100dvh;padding:20px 17px;background:var(--ws-surface);z-index:92;}
+ .fb-v2:not([data-display-mode=compact]) :is(.fb-tree-toggle,.fb-pane-close),.final-ui .fb-v2 .file-list-toolbar .fb-tree-toggle {display:block;}
+ .fb-v2 .file-check {width:18px;height:18px;}
+ .fb-v2 .file-breadcrumbs {font-size:11px;}
+ .fb-v2 .file-toolbar-actions {flex-wrap:wrap;gap:7px;}
+ .fb-v2 .file-search-input {flex:1;min-width:100px;width:auto;}
+ .fb-v2 .file-sort-select {max-width:100px;font-size:11px;}
+ .fb-v2 .file-direction-button {font-size:11px;padding:6px;}
+ .fb-v2 .file-list-toolbar {gap:10px;}
+ .fb-v2 .file-batch-actions {display:grid;grid-template-columns:1fr 1fr auto;gap:6px;padding:9px;}
+ .fb-v2 .file-batch-actions .selection-count {grid-column:1/3;}
+ .fb-v2 .file-batch-actions .file-clear-selection {grid-column:3;}
+ .fb-v2 .file-batch-actions>button,.fb-v2 .file-batch-actions summary {white-space:nowrap;}
+ .fb-v2 .file-batch-actions>button:not(.file-clear-selection) {flex:1;}
+ .fb-v2 .file-batch-actions .file-clear-selection {margin-right:0;flex-basis:40%;text-align:right;}
+ .fb-v2 .file-batch-actions .selection-count {margin-right:auto;}
+ .fb-v2 :is(button,summary.button) {font-size:12px;min-height:38px;}
+ .fb-v2 :is(input,select) {font-size:16px;}
+ .final-ui .fb-v2[data-display-mode=full] :is(.file-row,.file-list-head) {grid-template-columns:20px 20px minmax(0,1fr) 26px;gap:6px;padding:12px 5px;}
+ .final-ui .fb-v2 .file-size,.final-ui .fb-v2 .file-list-head>span:nth-child(4) {display:none;}
+ .fb-v2 .file-name {font-size:12px;}
+ .fb-v2 .file-media-summary {font-size:10px;}
+ .fb-v2 .file-more-items {right:0;left:auto;}
+ .fb-v2 .file-pane-heading {flex-wrap:wrap;}
+ .fb-v2 .file-details-pane {width:100%;}
+ .fb-v2[data-display-mode=compact] .file-row {grid-template-columns:22px 16px minmax(0,1fr);}
+ .fb-v2[data-display-mode=compact] :is(button,summary,input,select) {min-height:40px;}
 }
-@media (max-width:900px) {
-  .fb-v2[data-display-mode=compact] :is(button,select,input:not([type=checkbox]),summary,.inline-check) {min-height:44px; height:auto;}
-  .fb-v2[data-display-mode=compact] .file-row {grid-template-columns:22px 16px minmax(0,1fr);}
-  #files-view .files-header {align-items:flex-start;}
-  .fb-v2[data-display-mode=full] .file-browser-shell,.fb-v2[data-display-mode=full].fb-details-collapsed .file-browser-shell,.fb-v2[data-display-mode=picker] .file-browser-shell {grid-template-columns:minmax(0,1fr);}
-  .fb-v2:not([data-display-mode=compact]) .file-tree-pane {display:none;}
-  .fb-v2:not([data-display-mode=compact]).fb-tree-open .file-tree-pane {display:block; position:fixed; inset:0 auto 0 0; width:min(320px,calc(100vw - 24px)); max-height:100dvh; padding:16px; border-radius:0; z-index:92;}
-  .fb-v2:not([data-display-mode=compact]) :is(.fb-tree-toggle,.fb-pane-close) {display:block;}
-  .fb-v2 :is(button,select,input:not([type=checkbox]),summary.button,.inline-check) {min-height:44px;}
-  .fb-v2 :is(input,select) {font-size:16px;}
-  .fb-v2 .file-check {width:22px; height:22px;}
-  .fb-v2 .file-list-head {display:none;}
-  .fb-v2 .file-row {grid-template-columns:24px 24px minmax(0,1fr) 65px; min-height:60px;}
-  .fb-v2 .file-toolbar-actions {width:100%;}
-  .fb-v2 .file-search-input {flex-basis:100%;}
-  .fb-v2 .file-more-items {right:auto; left:0;}
-  .fb-v2 .file-pane-heading {flex-wrap:wrap;}
+/* Legacy compatibility route retains its pre-existing side-panel presentation. */
+@media(max-width:1179px) {
+ body:not(.final-ui) .fb-v2 .file-details-pane {position:fixed;inset:0 0 0 auto;width:min(360px,100vw);max-height:100dvh;z-index:92;background:var(--ws-surface);padding:16px;}
+ body:not(.final-ui) .fb-v2 .fb-pane-backdrop {display:block;position:fixed;inset:0;width:100%;height:100%;max-width:none;background:#14261b66;z-index:91;}
 }
-@media (max-width:480px) {
-  .fb-v2 .file-details-pane {width:100%;}
-  .fb-v2 .file-browser-heading > strong {display:none;}
-  .fb-v2 .file-browser-heading {justify-content:space-between;}
-  .fb-v2 .file-batch-actions > button {flex:1 1 auto;}
+@media(max-width:900px) {
+ body:not(.final-ui) .fb-v2[data-display-mode] .file-browser-shell {grid-template-columns:1fr;}
+ body:not(.final-ui) .fb-v2:not([data-display-mode=compact]) .file-tree-pane {display:none;}
+ body:not(.final-ui) .fb-v2.fb-tree-open .file-tree-pane {display:block;position:fixed;inset:0 auto 0 0;width:300px;background:var(--ws-surface);z-index:92;}
+ body:not(.final-ui) .fb-v2 :is(.fb-tree-toggle,.fb-pane-close) {display:block;}
 }
