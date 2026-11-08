@@ -151,3 +151,37 @@ def test_final_ui_parent_child_selection_deduplicates_before_processing(live_ser
     finally:
         browser.close()
         playwright.stop()
+
+
+def test_final_ui_home_and_settings_real_save(live_server):
+    from tests.v2.integration.test_final_product import seed
+    base,app=live_server
+    source=seed(app)
+    playwright,browser,page,errors=browser_session(base,legacy=False)
+    try:
+        page.locator('.app-tabs [data-view=home]').click()
+        expect(page.locator('#home-resources')).to_contain_text(source.name)
+        assert page.locator('.home-entry').count()==0
+        for width,height in ((1440,900),(390,844)):
+            page.set_viewport_size({'width':width,'height':height})
+            page.screenshot(path=str(ARTIFACTS/f'home-{width}.png'))
+            page.locator('#settings-entry').click()
+            expect(page.locator('#settings-group-nav button')).to_have_count(10)
+            if width==390:page.locator('#settings-group-select').select_option('downloads')
+            else:page.locator('[data-group=downloads]').click()
+            expect(page.locator('#settings-savebar')).to_be_hidden()
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            page.screenshot(path=str(ARTIFACTS/f'settings-{width}.png'))
+            if width==390:page.locator('#settings-group-select').select_option('collage')
+            else:page.locator('[data-group=collage]').click()
+            field=page.locator('[data-setting-key=screenshot_output_mode] select')
+            current=field.input_value();next_value='collage' if current=='single' else 'single'
+            field.select_option(next_value)
+            expect(page.locator('#settings-savebar')).to_be_visible()
+            page.locator('#settings-save').click()
+            expect(page.locator('#settings-dirty-indicator')).to_have_text('已保存')
+            assert app.state.services.database.get_settings()['screenshot_output_mode']==next_value
+            page.locator('.app-tabs [data-view=home]').click()
+        assert not errors,errors
+    finally:
+        browser.close();playwright.stop()

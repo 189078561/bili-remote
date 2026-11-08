@@ -84,15 +84,14 @@ def test_settings_center_desktop_and_mobile_browser_flow(live_server) -> None:
         page.locator("#settings-entry").click()
         page.wait_for_url(f"{base_url}/settings")
         page.locator("#settings-view").wait_for(state="visible")
+        page.locator(".settings-group-button").first.wait_for(state="visible")
         assert page.locator(".settings-sidebar").is_visible()
         assert not page.locator("#settings-group-select").is_visible()
 
         save = page.locator("#settings-save")
         assert save.is_disabled()
-        cursor = save.evaluate("element => getComputedStyle(element).cursor")
-        assert cursor == "not-allowed"
+        assert not page.locator("#settings-savebar").is_visible()
         request_count = len(settings_requests)
-        save.hover()
         page.wait_for_timeout(350)
         assert len(settings_requests) == request_count
 
@@ -115,12 +114,11 @@ def test_settings_center_desktop_and_mobile_browser_flow(live_server) -> None:
         )
         assert app.state.services.database.get_settings()["file_browser_page_size"] == "140"
 
-        page.locator("#settings-back").click()
+        page.locator('.app-tabs [data-view="download"]').click()
         page.wait_for_url(f"{base_url}/")
         page.locator("#download-view").wait_for(state="visible")
 
         page.set_viewport_size({"width": 390, "height": 844})
-        page.locator("#nav-toggle").click()
         page.locator("#settings-entry").click()
         page.wait_for_url(f"{base_url}/settings")
         page.locator("#settings-view").wait_for(state="visible")
@@ -129,7 +127,7 @@ def test_settings_center_desktop_and_mobile_browser_flow(live_server) -> None:
         assert (
             page.locator(".settings-layout").evaluate("n => getComputedStyle(n).display") == "block"
         )
-        assert page.locator("#nav-toggle").is_visible()
+        assert page.locator("#app-navigation").is_visible()
     finally:
         browser.close()
         playwright.stop()

@@ -1,15 +1,7 @@
 <main id="home-view" class="page app-view">
-  <header class="product-heading"><div><h1>首页</h1><p>从一份资源开始，完成你的下一次发布。</p></div><button id="home-refresh" class="button ghost small" type="button">刷新状态</button></header>
-  <section class="home-entry">
-    <div><h2>让媒体准备，更有条理。</h2><p>选择视频或整季目录，识别作品、检查命名、制作素材，然后预览并复制发布内容。</p><button class="button primary home-open" type="button" data-target="files">浏览我的文件</button></div>
-    <div class="home-entry-actions">
-      <button class="home-open" type="button" data-target="publish"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#film"/></svg><span><strong>发种工作台</strong><small>同一份资源，从命名到发布内容</small></span></button>
-      <button class="home-open" type="button" data-target="download"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#download"/></svg><span><strong>添加 B站下载</strong><small>粘贴链接，选择内容与画质</small></span></button>
-    </div>
-  </section>
+  <header class="product-heading"><div><h1>首页</h1><p>最近的资源与正在进行的任务</p></div><button class="button primary home-open" type="button" data-target="download"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#download"/></svg>新建下载</button></header>
   <div class="home-grid" id="home-summary">
-    <section class="home-section"><div class="home-section-heading"><h2>最近可处理资源</h2><button class="button ghost small home-open" type="button" data-target="files">查看全部</button></div><p class="muted">下载根目录 · 按修改时间排列</p><div id="home-resources" aria-live="polite"><p class="home-state">正在读取资源…</p></div></section>
-    <section class="home-section"><div class="home-section-heading"><h2>当前任务</h2><button class="button ghost small" type="button" data-open-task-center>任务与通知</button></div><div id="home-tasks" aria-live="polite"><p class="home-state">正在读取任务…</p></div></section>
+    <section class="home-section home-library"><div class="home-section-heading"><h2>最近资源</h2><button class="button ghost small home-open" type="button" data-target="files">查看全部</button></div><div class="home-resource-tabs" role="tablist" aria-label="最近资源来源"><button type="button" role="tab" aria-selected="true" data-home-list="recent">最近文件</button><button type="button" role="tab" aria-selected="false" data-home-list="downloads">下载完成</button></div><div id="home-resources" aria-live="polite"><p class="home-state">正在读取资源…</p></div><div class="home-quick-actions"><button class="button secondary home-open" type="button" data-target="files"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#folder"/></svg>打开文件</button><button id="home-refresh" class="button ghost small" type="button">刷新状态</button></div></section>
+    <aside class="home-activity"><section class="home-section"><div class="home-section-heading"><h2>正在进行</h2><button class="button ghost small" type="button" data-open-task-center>全部任务</button></div><div id="home-tasks" aria-live="polite"><p class="home-state">正在读取任务…</p></div></section><section class="home-section home-latest"><div class="home-section-heading"><h2>最近产物</h2></div><div id="home-artifacts" aria-live="polite"><p class="home-state">正在读取产物…</p></div></section><footer class="home-status"><span id="home-system-status">正在检查状态…</span><span id="home-updated"></span></footer></aside>
   </div>
-  <footer class="home-status"><span id="home-system-status">正在检查服务状态…</span><span>存储容量：暂不可用</span><span id="home-updated"></span></footer>
 </main>

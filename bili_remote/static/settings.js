@@ -83,6 +83,10 @@
     els.dirty.classList.toggle("dirty", dirty);
     els.save.disabled = !dirty || saving;
     els.cancel.disabled = !dirty || saving;
+    if (window.BILI_V2) {
+      document.querySelector('#settings-savebar').hidden = !dirty;
+      els.view.classList.toggle('settings-has-changes',dirty);
+    }
     els.savebarTitle.textContent = dirty ? "有未保存的设置" : "设置已保存";
     els.savebarDetail.textContent = dirty
       ? "保存后会更新服务端配置；运行中的解析或下载不会受影响。"
@@ -103,6 +107,12 @@
       item.className = "settings-group-button";
       item.dataset.group = group.key;
       item.textContent = group.title;
+      if (window.BILI_V2) {
+        const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),use=document.createElementNS('http://www.w3.org/2000/svg','use');
+        svg.setAttribute('class','ws-icon');svg.setAttribute('aria-hidden','true');
+        use.setAttribute('href','/static/v2/shared/icons.svg#'+({general:'home',files:'folder',downloads:'download',rename:'film',subtitle:'file',collage:'image',image_host:'image',torrent:'file',release:'film',maintenance:'settings'})[group.key]);
+        svg.append(use);item.prepend(svg);
+      }
       item.classList.toggle("active", group.key === activeGroup);
       item.setAttribute("aria-current", group.key === activeGroup ? "page" : "false");
       item.addEventListener("click", () => selectGroup(group.key));
@@ -118,12 +128,12 @@
 
   function renderSection(group, section) {
     const card = document.createElement("article");
-    card.className = "card settings-card settings-section";
+    card.className = window.BILI_V2 ? "settings-section settings-inspector" : "card settings-card settings-section";
     card.dataset.section = section.key;
     const heading = document.createElement("div");
     heading.className = "card-heading";
     const copy = document.createElement("div");
-    copy.append(element("h2", null, section.title));
+    copy.append(element(window.BILI_V2 ? "h3" : "h2", null, section.title));
     if (section.description) copy.append(element("p", "muted", section.description));
     heading.append(copy);
     if (section.advanced) heading.append(element("span", "settings-badge", "高级"));
@@ -160,7 +170,11 @@
     const grid = element("div", section.advanced ? "settings-field-grid advanced-grid" : "settings-field-grid");
     for (const field of section.fields) {
       const context = {
-        directories: draftDirectories,
+        directories: window.BILI_V2 ? Object.fromEntries(Object.entries(draftDirectories).map(([key,value])=>{
+          const original=(settings?.directories||[]).find(item=>item.key===key)||{};
+          const mount=(settings?.mount_roots||[]).find(item=>item.key===value.mount_key);
+          return [key,{...original,...value,path:[mount?.path,value.relative_path].filter(Boolean).join('/'),pending:JSON.stringify(value)!==JSON.stringify(savedDirectories[key])}];
+        })) : draftDirectories,
         mountRoots: settings?.mount_roots || [],
         secretsConfigured: settings?.secrets_configured || {},
         onChange: value => {
@@ -214,6 +228,7 @@
     const heading = element("div", "settings-group-heading");
     heading.append(element("p", "eyebrow", "SETTINGS"), element("h2", null, group.title));
     if (group.description) heading.append(element("p", "muted", group.description));
+    if (window.BILI_V2) heading.append(els.reset);
     els.content.append(heading);
     const sourceValues = element("datalist");
     sourceValues.id = "settings-source-values";

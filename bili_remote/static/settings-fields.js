@@ -21,12 +21,15 @@
   }
 
   function fieldLabel(field) {
-    const label = node("label", "settings-field");
+    const label = node(window.BILI_V2 ? "div" : "label", "settings-field");
     label.dataset.settingKey = field.key;
-    const heading = node("span", "settings-field-label", field.label);
+    const heading = node(window.BILI_V2 ? "label" : "span", "settings-field-label", field.label);
+    if (window.BILI_V2) heading.htmlFor = `setting-${field.key}`;
     if (field.advanced) heading.append(node("span", "settings-advanced-badge", "高级"));
-    label.append(heading);
-    if (field.description) label.append(node("small", "settings-field-help", field.description));
+    const copy = window.BILI_V2 ? node("span", "settings-field-copy") : label;
+    copy.append(heading);
+    if (field.description) copy.append(node("small", "settings-field-help", field.description));
+    if (window.BILI_V2) label.append(copy);
     return label;
   }
 
@@ -55,7 +58,7 @@
       input.value = value ?? field.default ?? "";
     } else if (field.control === "list") {
       input = document.createElement("textarea");
-      input.rows = 4;
+      input.rows = window.BILI_V2 ? 2 : 4;
       input.value = Array.isArray(value) ? value.join("\n") : String(value || "");
       input.placeholder = field.placeholder || "每行一个";
     } else if (field.control === "password") {
@@ -86,11 +89,16 @@
     input.addEventListener("change", () => {
       if (field.control === "select") onChange(input.value);
     });
-    label.append(input);
+    if (window.BILI_V2) input.id = `setting-${field.key}`;
+    if (window.BILI_V2 && ['template','list','password'].includes(field.control)) {
+      const editor=node('details','settings-value-editor'),summary=node('summary');
+      summary.textContent=field.control==='password' ? (field.configured?'已配置 · 更换':'配置凭据') : field.control==='list'?'编辑列表':'编辑模板';
+      const body=node('div','settings-value-editor-body');body.append(input);editor.append(summary,body);label.append(editor);
+    } else label.append(input);
     if (field.sensitive && field.configured) {
-      label.append(node("small", "settings-field-help", "已保存凭据；留空保持现有值，输入新值后保存会替换。"));
+      (label.querySelector(".settings-field-copy") || label).append(node("small", "settings-field-help", "已保存凭据；留空保持现有值，输入新值后保存会替换。"));
     }
-    if (field.unit) label.append(node("small", "settings-field-help", field.unit));
+    if (field.unit) (label.querySelector(".settings-field-copy") || label).append(node("small", "settings-field-help", field.unit));
     return label;
   }
 
@@ -127,7 +135,9 @@
     copy.append(node("strong", null, field.label));
     copy.append(node("small", "muted", field.description || ""));
     const badge = node("span", "settings-badge");
-    if (directory?.available) {
+    if (directory?.pending) {
+      badge.textContent = "待校验";
+    } else if (directory?.available) {
       badge.textContent = directory.writable ? "可读写" : "不可写";
       badge.classList.add(directory.writable ? "ok" : "warning");
     } else {
@@ -172,7 +182,10 @@
       }
     });
     actions.append(browse);
-    wrapper.append(heading, effective, actions);
+    if (window.BILI_V2) {
+      const control = node("div", "settings-directory-control");
+      control.append(effective, actions); wrapper.append(heading, control);
+    } else wrapper.append(heading, effective, actions);
     return wrapper;
   }
 
@@ -182,6 +195,7 @@
     const rootKey = field.directory_root || "downloads";
     const input = document.createElement("input");
     input.value = value || "";
+    if (window.BILI_V2) input.id = `setting-${field.key}`;
     input.placeholder = field.placeholder || "留空表示下载根目录";
     input.addEventListener("input", () => onChange(input.value));
     const browse = button("选择目录", "button ghost");

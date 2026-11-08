@@ -558,11 +558,11 @@
   <main id="settings-view" class="page app-view settings-page hidden" aria-labelledby="settings-title">
     <header class="settings-page-header">
       <div class="settings-title-block">
-        <button id="settings-back" class="button ghost small" type="button">← 返回</button>
+        <button id="settings-back" class="button ghost small" type="button"{% if v2_enabled %} hidden{% endif %}>← 返回</button>
         <div>
           <p class="eyebrow">GLOBAL SETTINGS</p>
-          <h1 id="settings-title">全局设置</h1>
-          <p class="muted">统一管理应用默认行为、目录、下载和剧集重命名。保存只影响后续操作。</p>
+          <h1 id="settings-title">{{ "设置" if v2_enabled else "全局设置" }}</h1>
+          {% if not v2_enabled %}<p class="muted">统一管理应用默认行为、目录、下载和剧集重命名。保存只影响后续操作。</p>{% endif %}
         </div>
       </div>
       <div class="settings-header-status">
@@ -578,7 +578,7 @@
           <select id="settings-group-select"></select>
         </label>
         <nav id="settings-group-nav" class="settings-group-nav" aria-label="设置分类"></nav>
-        <p class="muted settings-sidebar-note">修改后点击底部“保存设置”。命名预设独立即时保存。</p>
+        {% if not v2_enabled %}<p class="muted settings-sidebar-note">修改后点击底部“保存设置”。命名预设独立即时保存。</p>{% endif %}
       </aside>
       <section id="settings-content" class="settings-content" aria-live="polite">
         <p class="empty">正在读取设置…</p>
