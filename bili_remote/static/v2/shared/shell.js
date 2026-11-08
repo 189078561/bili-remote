@@ -70,6 +70,11 @@
       if (!$("task-center").hidden) { setDrawer(false); event.preventDefault(); }
       else if (document.body.classList.contains("nav-open")) closeNavigation(true);
     }
+    if(event.key === 'Tab' && !$("task-center").hidden && $("modal").classList.contains('hidden')) {
+      const nodes=[...$("task-center").querySelectorAll('button,select,a[href],summary')].filter(el=>!el.disabled&&el.getClientRects().length);
+      if(event.shiftKey && document.activeElement===nodes[0]){event.preventDefault();nodes.at(-1)?.focus();}
+      else if(!event.shiftKey && document.activeElement===nodes.at(-1)){event.preventDefault();nodes[0]?.focus();}
+    }
     if (event.key === "Tab" && mobile.matches && document.body.classList.contains("nav-open")) {
       const controls = [toggle, ...nav.querySelectorAll("button")];
       const first = controls[0], last = controls.at(-1);
@@ -83,7 +88,7 @@
   const terminal = status => ["completed", "failed", "cancelled", "auth_required"].includes(status);
   const statuses = {queued: "排队中", running: "进行中", completed: "已完成", failed: "失败", cancelled: "已取消", auth_required: "需要登录"};
   const types = {screenshot: "截图", screenshots: "截图", collage: "缩略图", torrent: "种子制作", torrent_create: "种子制作", release_info: "媒体报告", upload: "图床上传", file_operation: "文件操作"};
-  let processingRequest, drawerReturn;
+  let processingRequest, drawerReturn, drawerInert=[];
   function observe(kind, task, baseline = false) {
     const key = `${kind}:${task.id}`;
     const previous = observed.get(key);
@@ -137,7 +142,12 @@
   }
   function setDrawer(open) {
     if (open) { drawerReturn = document.activeElement; closeNavigation(); }
+    if(open && $("task-center").hidden) {
+      drawerInert=[document.querySelector('.app-shell'),document.querySelector('.topbar')].map(el=>[el,el.inert]);
+      drawerInert.forEach(([el])=>el.inert=true);
+    } else if(!open) {drawerInert.forEach(([el,value])=>el.inert=value);drawerInert=[];syncNavigation();}
     $("task-center").hidden = !open;
+    $("task-center-backdrop").hidden = !open;
     $("task-center-toggle").setAttribute("aria-expanded", String(open));
     if (open) { render(); $("task-center-close").focus(); refreshProcessing(); }
     else (drawerReturn?.isConnected ? drawerReturn : $("task-center-toggle")).focus();
@@ -167,7 +177,7 @@
       cache.delete(task.id);
       await refresh();
     };
-    if (["running", "queued"].includes(task.status)) actions.append(button("取消", () => mutate("cancel")));
+    if (["running", "queued"].includes(task.status) && (!window.BILI_V2 || task.cancel_allowed !== false)) actions.append(button("取消", () => mutate("cancel")));
     if (["failed", "cancelled", "auth_required"].includes(task.status) && (window.BILI_V2 ? task.retry_allowed : (kind === "download" || !["file_operation","v2_rename_apply","v2_rename_undo"].includes(task.task_type)))) actions.append(button("重试", () => mutate("retry")));
     if (kind === "processing" && task.task_type === "file_operation" && ["failed", "cancelled"].includes(task.status)) actions.append(button("重新检查文件", () => { setDrawer(false); openBusinessView("files"); }));
     actions.append(button("日志", async () => {
@@ -176,6 +186,21 @@
       output.append(node("h2", `任务 #${task.id} 日志`), node("pre", result.content || "暂无日志", "log-output"));
       showModal(output, {stack: true});
     }));
+    if(task.status === 'completed') {
+      if(kind === 'download' && window.AppResources) {
+        actions.append(button('进入工作台',async()=>{await AppResources.openDownload(task);setDrawer(false);}));
+        actions.append(button('打开文件管理',async()=>{await AppResources.openDownload(task,'files');setDrawer(false);}));
+      }
+      for(const artifact of task.artifact_refs || []) {
+        if(!artifact.url)continue;
+        try {
+          const url=new URL(artifact.url,location.href);
+          if(!['http:','https:'].includes(url.protocol)||url.username||url.password)continue;
+          const link=node('a',({report:'下载报告',torrent:'下载种子',screenshot:'打开截图',collage:'打开拼图',upload:'打开图床图片'})[artifact.kind]||'打开产物','task-result-link');
+          link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';actions.append(link);
+        }catch{}
+      }
+    }
     card.append(actions);
     return card;
   }
@@ -194,6 +219,7 @@
   }
   window.AppTaskCenter = {receive, failed, readProcessing, refresh, open: () => setDrawer(true)};
   $("task-center-toggle").onclick = () => setDrawer($("task-center").hidden);
+  $("task-center-backdrop").onclick=()=>setDrawer(false);
   $("task-center-close").onclick = () => setDrawer(false);
   $("task-center-filter").onchange = render;
   $("task-center-refresh").onclick = async event => {

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
+from playwright.sync_api import expect
+from test_browser_modules import browser_session, live_server  # noqa: F401
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -81,6 +83,7 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.get_by_role("button", name="检测所选画质").click()
         page.wait_for_function("window.calls.some(call => call.url === '/api/episodes/formats/batch')")
         page.locator("[data-format]").select_option("profile:0")
+        page.locator(".dv2-advanced > summary").click()
         page.get_by_role("button", name="浏览").click()
         assert page.locator("[data-output]").input_value() == "Series/Season 1"
         page.locator("[data-download-form] button[type=submit]").click()
@@ -103,3 +106,33 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         browser.close()
     finally:
         playwright.stop()
+
+
+def test_changed_link_cannot_restore_old_parse_result(live_server):
+    """Offline upstream responses; verifies client race protection, not B站 access."""
+    base,_=live_server
+    playwright,browser,page,errors=browser_session(base,legacy=False)
+    pending=[]
+    try:
+        page.wait_for_function('window.AppResources')
+        page.locator('[data-view=download]').click()
+        def respond(route):
+            data=route.request.post_data_json
+            if data['url'].endswith('old'):
+                pending.append(route)
+            else:
+                route.fulfill(json={'title':'新的合成解析','formats':[],'episodes':[],'api_mode':'web'})
+        page.route('**/api/resolve',respond)
+        page.locator('#dv2-url').fill('https://www.bilibili.com/video/old')
+        page.locator('[data-parse]').click()
+        page.wait_for_timeout(100)
+        assert pending
+        page.locator('#dv2-url').fill('https://www.bilibili.com/video/new')
+        page.locator('[data-parse]').click()
+        expect(page.locator('[data-title]')).to_have_text('新的合成解析')
+        pending.pop().fulfill(json={'title':'旧的迟到解析','formats':[],'episodes':[],'api_mode':'web'})
+        page.wait_for_timeout(100)
+        expect(page.locator('[data-title]')).to_have_text('新的合成解析')
+        assert not errors,errors
+    finally:
+        browser.close();playwright.stop()

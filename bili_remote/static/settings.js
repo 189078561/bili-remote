@@ -129,6 +129,11 @@
     if (section.advanced) heading.append(element("span", "settings-badge", "高级"));
     card.append(heading);
 
+    if (section.renderer === "v2-rules" && window.V2RuleSettings) {
+      const host = element("div"); card.append(host);
+      V2RuleSettings.mount(host, section.ruleKind);
+      return card;
+    }
     if (section.renderer === "naming-profiles") {
       if (!window.NamingProfilesEditor) {
         card.append(element("p", "form-error", "命名预设组件未加载"));
@@ -246,6 +251,14 @@
           api("/api/settings")
         ]);
         schema = nextSchema;
+        if (window.BILI_V2) {
+          const rename=schema.groups.find(g=>g.key==='rename');
+          rename.title='智能命名规则';
+          rename.sections.unshift({key:'v2-naming',title:'V2 全局命名规则',renderer:'v2-rules',ruleKind:'naming_rule',fields:[]});
+          const release=schema.groups.find(g=>g.key==='release');
+          if(release) release.title='影视资料与发布';
+          schema.groups.splice(schema.groups.indexOf(rename)+1,0,{key:'subtitle',title:'副标题模板',description:'规则可以记住，生成的发布文本只在当前页面保留。',sections:[{key:'v2-subtitle',title:'全局副标题规则',renderer:'v2-rules',ruleKind:'subtitle_rule',fields:[]}]});
+        }
         settings = nextSettings;
         savedValues = {...nextSettings.values};
         draftValues = clone(savedValues);

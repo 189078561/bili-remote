@@ -168,3 +168,39 @@ body:has(.br-workbench.wb-panel-open) {overflow:hidden;}
   .wb-resource-sheet .fb-pane-backdrop {z-index:85;}
   .wb-preview-footer {padding:12px 16px;}
 }
+/* Search is part of the main resource workflow, not a separate configuration sheet. */
+.wb-search-inline {padding:4px 0 20px;border-bottom:1px solid var(--ws-line);margin-bottom:20px;}
+.wb-search-inline .wb-identity-controls {display:grid;grid-template-columns:minmax(0,1fr) 140px auto;align-items:end;gap:12px;}
+.wb-search-inline input {width:100%;}
+.wb-search-inline .wb-candidates {display:grid;gap:0;max-height:320px;overflow:auto;margin-top:12px;}
+.wb-candidates .wb-candidate {display:flex;align-items:center;gap:12px;text-align:left;border:0;border-bottom:1px solid var(--ws-line);border-radius:0;background:transparent;padding:12px 4px;}
+.wb-candidate-copy {display:grid;gap:4px;}
+.wb-candidate small {color:var(--ws-muted);font-size:12px;}
+.wb-candidate img {width:36px;height:50px;object-fit:cover;border-radius:4px;}
+.wb-naming-heading {margin:0 0 12px;font-size:15px;}
+.wb-rule-quick {display:flex;align-items:end;gap:12px;margin-top:12px;flex-wrap:wrap;}
+.wb-rule-quick label {display:grid;gap:6px;max-width:180px;font-size:12px;color:var(--ws-muted);}
+.wb-rule-quick input {width:100%;}
+@media(max-width:600px) {
+  .wb-search-inline .wb-identity-controls {grid-template-columns:minmax(0,1fr) 100px;}
+  .wb-search-inline .wb-identity-controls>label:first-child {grid-column:1/-1;}
+  .wb-search-inline .wb-identity-controls button {width:100%;}
+  .wb-rule-quick label {max-width:none;flex:1 1 40%;}
+}
+@media(min-width:1100px) {
+  .wb-identification {padding:14px 0;}
+  .wb-search-inline {padding-bottom:14px;margin-bottom:14px;}
+  .wb-name-controls {grid-template-columns:minmax(180px,1.5fr) minmax(140px,1fr) 90px 66px 66px 122px;}
+  .wb-rule-quick {display:inline-flex;margin-top:10px;width:50%;}
+  .wb-rule-quick label {max-width:140px;}
+  .wb-rule-quick>.wb-note {display:none;}
+  .wb-adjustment-status {display:inline-flex;vertical-align:bottom;width:49%;justify-content:flex-end;margin-bottom:0;}
+  .wb-adjustment-status span {font-size:11px;}
+  .wb-naming-result {margin-top:12px;}
+  .wb-publishing {padding-top:16px;}
+}
+@media(max-width:600px) {
+  .wb-search-inline .wb-identity-controls>button {grid-column:auto;}
+  .wb-name-controls {grid-template-columns:repeat(3,minmax(0,1fr));}
+  .wb-name-controls>label:nth-child(-n+2),.wb-name-controls>label:last-child {grid-column:1/-1;}
+}

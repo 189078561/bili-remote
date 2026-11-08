@@ -57,8 +57,17 @@
       this.host.addEventListener("input", event => {
         const name = event.target.dataset.edit;
         if (name) { this.fieldVersions[name] = (this.fieldVersions[name] || 0) + 1; this.dirty.add(name); this.setField(name, event.target.value); this.editVersion++; this.scheduleCompose(); }
-        if (["naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode", "scope", "naming-type"].includes(event.target.dataset.wb)) this.scheduleAdjustment(event.target.dataset.wb);
+        if (["naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode", "scope", "naming-type", "source-rule", "group-rule"].includes(event.target.dataset.wb)) this.scheduleAdjustment(event.target.dataset.wb);
       }, opts);
+      const imageControls=()=>{
+        const collage=this.el('image-mode').value==='collage',percent=this.el('range-mode').value==='percent';
+        this.el('image-columns').disabled=!collage;this.el('image-rows').disabled=!collage;
+        this.el('start-percent').disabled=!percent;this.el('end-percent').disabled=!percent;
+        this.el('skip-start').disabled=percent;this.el('skip-end').disabled=percent;
+        if(collage && this.el('image-rows').value)this.el('image-count').value=Number(this.el('image-columns').value)*Number(this.el('image-rows').value);
+      };
+      for(const key of ['image-mode','image-columns','image-rows','range-mode'])this.el(key).addEventListener('input',imageControls,opts);
+      imageControls();
       this.el("query").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); this.run("search", this.button("search")); } }, opts);
       this.el("format").addEventListener("change", () => { this.editVersion++; this.scheduleCompose(); }, opts);
       this.el("title-choice").addEventListener("change", () => {
@@ -87,6 +96,7 @@
     setLayoutView(view) { this.openPanel(view === "preview" ? "preview" : null); }
     setResourceDrawer(open) { this.openPanel(open ? "resources" : null); }
     openPanel(name) {
+      if(name==='identity'){this.openPanel(null);this.el('query').focus();this.el('query').scrollIntoView({block:'center',behavior:'smooth'});return;}
       if (name && !this.host.querySelector(`[data-sheet="${name}"]`)) return;
       if (!this.activePanel && name) this.panelReturnFocus = document.activeElement;
       this.activePanel = name; this.drawerOpen = name === "resources";
@@ -105,7 +115,7 @@
         this.el("naming-rule").value = this.context?.effective_rules?.naming_rule?.templates?.[this.namingType] || "";
       }
       if (["selected-title","season","episode","scope"].includes(field)) this.pendingAdjustmentEpoch = this.epoch;
-      if (["naming-rule","subtitle-rule","title-rule","cast-limit","naming-type"].includes(field)) this.rememberRules();
+      if (["naming-rule","subtitle-rule","title-rule","cast-limit","naming-type","source-rule","group-rule"].includes(field)) this.rememberRules();
       this.invalidateRename(); this.versions.context = (this.versions.context || 0) + 1;
       const ticket = this.adjustmentVersion = (this.adjustmentVersion || 0) + 1, epoch = this.epoch;
       this.contextChanged(); // Also invalidates in-flight advanced naming requests.
@@ -122,9 +132,13 @@
       }, 450);
     }
     renderPresentation() {
-      const ctx = this.context, identity = ctx?.identity, probe = ctx?.files?.[0]?.probe || {};
-      this.el("resource-status").textContent = !this.resources.length ? "尚未选择资源" : this.busy("resolve") ? "正在识别" : !ctx ? "等待识别结果" : identity?.confirmed ? "影视身份已确认" : "媒体已读取 · 影视身份待确认";
-      this.el("resource-media").textContent = [val(probe.resolution), val(probe.video_codec), ctx?.episode?.season ? `第 ${val(ctx.episode.season)} 季` : "", ctx?.episode?.episode ? `第 ${val(ctx.episode.episode)} 集` : "", ctx ? `${ctx.files?.length || 0} 个媒体文件` : ""].filter(Boolean).join(" · ");
+      const ctx = this.context, identity = ctx?.identity, files=ctx?.files||[];
+      const measured=files.length>0 && files.every(file=>file.probe&&!file.probe.probe_error&&val(file.probe.video_codec));
+      const common=key=>{const values=files.map(file=>val(file.probe?.[key]));return values.length&&values.every(value=>value!==''&&String(value)===String(values[0]))?values[0]:'';};
+      this.el("resource-status").textContent = !this.resources.length ? "尚未选择资源" : this.busy("resolve") ? "正在识别" : !ctx ? "等待识别结果" : `${measured?'媒体已探测':'媒体参数待补充'} · ${identity?.confirmed?'影视身份已确认':'影视身份待确认'}`;
+      this.el("resource-media").textContent = [common('resolution'),common('video_codec'),common('audio_codec'),common('audio_channels'),ctx?.episode?.season ? `第 ${val(ctx.episode.season)} 季` : '',ctx?.episode?.scope==='season'?'整季':ctx?.episode?.episode?`第 ${val(ctx.episode.episode)} 集`:'',ctx?`${files.length} 个媒体文件`:''].filter(Boolean).join(' · ');
+      const identified=files.filter(file=>Number(val(file.episode?.episode))>0).length;
+      this.el('season-summary').textContent=ctx?.episode?.scope==='season'?`共 ${files.length} 个媒体文件 · 已识别集号 ${identified} · 待确认 ${files.length-identified} · 命名冲突 ${this.preview?.conflicts?.length??ctx?.conflicts?.length??0}`:'';
       this.el("identity-title").textContent = "影视识别与文件命名";
       if (this.resources.length) { this.el("resource").textContent = val(ctx?.selected_title) || this.resources[0].relative_path.split("/").at(-1); this.el("context-summary").textContent = this.resources.length === 1 ? this.resources[0].relative_path : `${this.resources.length} 项工作资源 · ${this.resources[0].relative_path} 等`; }
       this.el("provider-status").textContent = ctx ? [identity?.tmdb_id ? `TMDB #${identity.tmdb_id}` : "TMDB 未匹配", identity?.bangumi_id ? `Bangumi #${identity.bangumi_id}` : "Bangumi 未匹配", identity?.confirmed ? "身份已确认" : "可搜索资料或手动输入名称"].join(" · ") : "TMDB / Bangumi：等待识别";
@@ -281,6 +295,7 @@
       this.namingType = {anime_single:"anime",tv:"series"}[this.namingType] || this.namingType;
       this.el("naming-type").value = this.namingType;
       this.el("naming-rule").value = ctx.effective_rules?.naming_rule?.templates?.[this.namingType] || "";
+      for(const key of ['source','group']){const rule=ctx.effective_rules?.naming_rule?.[key];this.el(`${key}-rule`).value=(typeof rule==='object'?rule?.value:rule)||(key==='source'?'WEB-DL':'HDVWEB');}
       this.el("naming-rule").disabled = !ctx.effective_rules?.naming_rule;
       this.el("subtitle-rule").value = ctx.effective_rules?.subtitle_rule?.template_id || "";
       this.el("cast-limit").value = String(ctx.effective_rules?.subtitle_rule?.cast_limit || 3);
@@ -307,7 +322,9 @@
         const rule = this.context?.effective_rules?.naming_rule || fallback, kind = this.el("naming-type").value || this.namingType;
         const templates = {...rule.templates};
         if (raw) templates[kind] = raw; else delete templates[kind];
-        return {...rule, template_id:kind, templates};
+        const values={};
+        for(const key of ['source','group']){const value=this.el(`${key}-rule`).value.trim(),old=rule[key];values[key]=value===(typeof old==='object'?old?.value:old)?old:{value,source:'manual',manual:true,confirmed:true};}
+        return {...rule, ...values, template_id:kind, templates};
       }
       const rule = this.context?.effective_rules?.subtitle_rule || fallback;
       return {...rule, ...(raw ? {template_id: raw} : {}), cast_limit: this.el("cast-limit").value === "all" ? "all" : Number(this.el("cast-limit").value)};
@@ -331,9 +348,13 @@
       const query = this.el("query").value.trim(); if (!query) throw new Error("请输入作品名称"); const current = this.stamp("search"), text = query;
       const result = await this.api.search(query, this.el("media-type").value); if (!current() || text !== this.el("query").value.trim()) return;
       const container = this.el("candidates"); container.replaceChildren();
+      if(result.warnings?.length) container.append(node('p',result.warnings.map(x=>x.message).join('；'),'wb-note'));
       if (!result.items.length) container.append(node("p", "未找到候选，可以调整名称后重试。", "wb-note"));
       result.items.forEach(candidate => {
-        const button = node("button", candidate.title || candidate.name || candidate.id); button.type = "button"; button.disabled = !this.resources.length;
+        const button = node("button", null, 'wb-candidate');
+        const info=node('span',null,'wb-candidate-copy');info.append(node('strong',candidate.title||candidate.name||candidate.id),node('small',[candidate.original_title,candidate.year,({movie:'电影',series:'剧集',anime:'动画'})[candidate.media_type],candidate.provider?`${candidate.provider.toUpperCase()} #${candidate.id}`:null].filter(Boolean).join(' · ')));button.append(info);
+        const poster=safeURL(candidate.poster_url);if(candidate.poster_url&&poster){const image=node('img');image.alt='';image.src=poster;image.referrerPolicy='no-referrer';image.onerror=()=>image.remove();button.prepend(image);}
+        button.type = "button"; button.disabled = !this.resources.length;
         button.onclick = () => this.withButton(button, async () => { const epoch = this.epoch; await this.resolve({provider: candidate.provider, id: String(candidate.id), media_type: candidate.media_type}); if (epoch === this.epoch && this.context?.identity) this.openPanel(null); }); container.append(button);
       });
     }
@@ -369,7 +390,7 @@
       if (!this.context) return; const current = this.stamp("compose"), edit = this.editVersion, revision = this.context.revision;
       try {
         const format = this.el("format").value;
-        const result = await this.api.compose({context: this.context, ...this.fields, poster: null, reports: this.artifacts.filter(x => x.kind === "report"), screenshots: this.artifacts.filter(x => ["screenshot", "collage", "upload"].includes(x.kind)), links: this.links, format});
+        const result = await this.api.compose({context: this.context, ...this.fields, poster: val(this.context.metadata?.poster_url) && safeURL(val(this.context.metadata?.poster_url)) ? {kind:'upload',id:'identity-poster',url:safeURL(val(this.context.metadata.poster_url))} : null, reports: this.artifacts.filter(x => x.kind === "report"), screenshots: this.artifacts.filter(x => ["screenshot", "collage", "upload"].includes(x.kind)), links: this.links, format});
         if (!current() || edit !== this.editVersion || revision !== this.context?.revision || result.context_revision !== revision) return;
         this.content = result.content; this.el("output").textContent = result.content;
         this.el("rich-preview").hidden = format === "html";
@@ -419,7 +440,12 @@
       if (!Number.isInteger(total) || total < 1 || total > 120 || !Number.isInteger(columns) || columns < 1 || columns > 10) throw new Error("张数需在 1–120 之间，列数需在 1–10 之间");
       const epoch = this.epoch, skipStart = Number(this.el("skip-start").value), skipEnd = Number(this.el("skip-end").value);
       if (![skipStart, skipEnd].every(value => Number.isFinite(value) && value >= 0 && value <= 86400)) throw new Error("跳过时长必须在 0–86400 秒之间");
-      const result = await this.api.request("/api/files/screenshots", {sources: this.sources(), total, columns, output_mode: this.el("image-mode").value, auto_upload: false, content_type: this.context?.identity?.media_type || "custom", skip_start_seconds: skipStart, skip_end_seconds: skipEnd});
+      const extra={};
+      const rows=this.el('image-rows').value;if(rows){if(!Number.isInteger(Number(rows))||Number(rows)<1||Number(rows)>12)throw new Error('行数需在 1–12 之间');extra.rows=Number(rows);}
+      if(this.el('range-mode').value==='percent'){const start=Number(this.el('start-percent').value),end=Number(this.el('end-percent').value);if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end>100||start>=end)throw new Error('百分比范围需要满足 0 ≤ 开始 < 结束 ≤ 100');extra.start_percent=start;extra.end_percent=end;}
+      if(this.el('image-format').value)extra.format=this.el('image-format').value;
+      if(this.el('image-style').value)extra.style=this.el('image-style').value;
+      const result = await this.api.request("/api/files/screenshots", {...extra, sources: this.sources(), total, columns, output_mode: this.el("image-mode").value, auto_upload: false, content_type: this.context?.identity?.media_type || "custom", skip_start_seconds: skipStart, skip_end_seconds: skipEnd});
       this.track(result.task, {type: "screenshot", session: result.session_id, epoch});
     }
     async report() {
@@ -431,7 +457,7 @@
     async torrent() {
       const source = this.resources[0], epoch = this.epoch;
       const trackers = this.el("trackers").value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-      const result = await this.api.request("/api/torrents/jobs", {source_root_key: source.root_key, source_relative_path: source.relative_path, private: this.el("private").checked, overwrite: false, ...(trackers.length ? {trackers} : {})});
+      const result = await this.api.request("/api/torrents/jobs", {source_root_key: source.root_key, source_relative_path: source.relative_path, private: this.el("private").checked, overwrite: false, ...(this.el("piece-length").value ? {piece_length:this.el("piece-length").value} : {}), ...(trackers.length ? {trackers} : {})});
       this.track(result.task, {type: "torrent", epoch});
     }
     async upload() {

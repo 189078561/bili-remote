@@ -17,7 +17,7 @@
       const response = await fetch(url, {cache: "no-store", ...options, method, headers});
       let data = {};
       try { data = await response.json(); } catch { /* an empty response is handled below */ }
-      if (!response.ok) throw new Error(data.detail || `请求失败 (${response.status})`);
+      if (!response.ok) throw new Error(data.detail?.message || (typeof data.detail === "string" ? data.detail : `请求失败 (${response.status})`));
       return data;
     };
   }
@@ -77,7 +77,7 @@
     if (!root) throw new TypeError("download workbench root is required");
     const api = options.api || createApi();
     const $ = (selector) => root.querySelector(selector);
-    const state = {resolved: null, resolvedUrl: "", jobs: [], previousStatuses: new Map(), seenInitialJobs: false, timer: null, formatProfiles: [], formatRequest: 0};
+    const state = {resolved: null, resolvedUrl: "", jobs: [], previousStatuses: new Map(), seenInitialJobs: false, timer: null, formatProfiles: [], formatRequest: 0, parseVersion: 0};
     const form = $("[data-download-form]");
     const urlField = $("#dv2-url");
     const modeField = $("[data-mode]");
@@ -222,14 +222,19 @@
       clearError();
       const url = urlField.value.trim();
       if (!url) { showError("请先粘贴 B 站链接。"); urlField.focus(); return; }
+      const request=++state.parseVersion, mode=modeField.value;
+      state.resolved=null; resolution.hidden=true; ++state.formatRequest;
       const button = $("[data-parse]");
       button.disabled = true;
       button.textContent = "解析中…";
       parseState.textContent = "正在读取视频与剧集信息";
       try {
-        const result = await api("/api/resolve", {method: "POST", body: JSON.stringify({url, api_mode: modeField.value})});
+        const result = await api("/api/resolve", {method: "POST", body: JSON.stringify({url, api_mode: mode})});
+        if(request!==state.parseVersion || url!==urlField.value.trim() || mode!==modeField.value)return;
         state.resolved = result;
         state.resolvedUrl = result.webpage_url || url;
+        const cover=$("[data-cover]");
+        if(cover){cover.hidden=true;cover.removeAttribute('src');try{const image=new URL(result.thumbnail||result.cover);if(['http:','https:'].includes(image.protocol)&&!image.username&&!image.password){cover.src=image.href;cover.hidden=false;cover.onerror=()=>{cover.hidden=true;};}}catch{}}
         $("[data-title]").textContent = result.title || "已解析内容";
         $("[data-summary]").textContent = [result.uploader, result.duration ? elapsed(result.duration) : null, result.playlist_count ? `${result.playlist_count} 项` : null, modeLabel(result.api_mode || modeField.value)].filter(Boolean).join(" · ");
         $("[data-template]").value = result.episodes?.length ? (options.playlistTemplate || options.outputTemplate || "") : (options.singleTemplate || options.outputTemplate || "");
@@ -241,12 +246,12 @@
         if (result.warning) formatHint.textContent = result.warning;
         parseState.textContent = "解析完成";
       } catch (error) {
+        if(request!==state.parseVersion)return;
         state.resolved = null;
         resolution.hidden = true;
         showError(error.message);
       } finally {
-        button.disabled = false;
-        button.textContent = "解析链接";
+        if(request===state.parseVersion){button.disabled = false;button.textContent = "解析链接";}
       }
     }
     function setSelection(method) {
@@ -321,15 +326,16 @@
       if (job.status === "completed" && options.onOpenFile) addAction(actions, "进入工作台", async () => {
         try { await options.onOpenFile(job); } catch (error) { showError(error.message); }
       });
+      if(job.status==='completed' && options.onOpenDirectory) addAction(actions,'打开文件管理',()=>options.onOpenDirectory(job));
       card.append(actions);
       return card;
     }
     function addAction(parent, text, callback, extraClass = "") {
-      const button = make("button", extraClass, text); button.type = "button"; button.addEventListener("click", callback); parent.append(button);
+      const button = make("button", extraClass, text); button.type = "button"; button.addEventListener("click", async()=>{button.disabled=true;try{await callback();}catch(error){showError(error.message);}finally{button.disabled=false;}}); parent.append(button);
     }
     async function taskAction(job, action) {
       clearError();
-      try { await api(`/api/jobs/${job.id}/${action}`, {method: "POST"}); await refreshJobs(); }
+      try { await api(`/api/jobs/${job.id}/${action}`, {method: "POST"}); await refreshJobs({force:true}); }
       catch (error) { showError(error.message); }
     }
     function alertTransition(job) {
@@ -343,15 +349,16 @@
         if (window.Notification?.permission === "granted") new Notification("B站下载", {body: message});
       }
     }
-    async function refreshJobs() {
+    async function refreshJobs({force=false} = {}) {
       try {
         const jobs = await api("/api/jobs?limit=500");
+        if(!force && jobsHost.contains(document.activeElement)){state.jobs=jobs||[];return;}
         jobsHost.replaceChildren();
         if (!Array.isArray(jobs) || !jobs.length) jobsHost.append(make("p", "dv2-empty", "暂无下载任务"));
         else for (const job of jobs) { jobsHost.append(jobCard(job)); if (state.seenInitialJobs) alertTransition(job); else state.previousStatuses.set(String(job.id), job.status); }
         state.seenInitialJobs = true;
         state.jobs = jobs || [];
-      } catch (error) { jobsHost.replaceChildren(make("p", "dv2-empty", error.message)); }
+      } catch (error) { notice.textContent=`队列读取失败：${error.message}；保留上次结果。`;if(!state.jobs.length)jobsHost.replaceChildren(make("p", "dv2-empty", error.message)); }
     }
     async function showLog(jobId) {
       try {
@@ -399,14 +406,15 @@
 
     $("[data-parse]").addEventListener("click", parse);
     urlField.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); parse(); } });
+    urlField.addEventListener('input',()=>{++state.parseVersion;++state.formatRequest;state.resolved=null;resolution.hidden=true;parseState.textContent='等待解析';$("[data-parse]").disabled=false;$("[data-parse]").textContent='解析链接';});
     form.addEventListener("submit", submit);
-    modeField.addEventListener("change", () => { if (state.resolved) parse(); });
+    modeField.addEventListener("change", () => { ++state.parseVersion; if (urlField.value.trim()) parse(); });
     $("[data-select-main]").addEventListener("click", () => setSelection("main"));
     $("[data-select-all]").addEventListener("click", () => setSelection("all"));
     $("[data-select-invert]").addEventListener("click", () => setSelection("invert"));
     $("[data-select-none]").addEventListener("click", () => setSelection("none"));
     $("[data-check-batch]").addEventListener("click", checkBatchFormats);
-    $("[data-refresh]").addEventListener("click", refreshJobs);
+    $("[data-refresh]").addEventListener("click", ()=>refreshJobs({force:true}));
     $("[data-history-refresh]").addEventListener("click", refreshHistory);
     $("[data-pick-folder]").addEventListener("click", async () => {
       if (typeof options.onChooseDirectory !== "function") return;

@@ -13,17 +13,19 @@
   <link rel="stylesheet" href="/static/v2/shared/design-system.css?v={{ asset_version }}">
   <script>window.BILI_V2 = {{ 'true' if v2_enabled else 'false' }};</script>
   {% if v2_enabled %}
+  <script src="/static/v2/shared/theme.js?v={{ asset_version }}"></script>
   <link rel="stylesheet" href="/static/v2/workbench/workbench.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/v2/download/workbench.css?v={{ asset_version }}">
+  <link rel="stylesheet" href="/static/v2/shared/product.css?v={{ asset_version }}">
   {% endif %}
 </head>
 <body>
   <a class="skip-link" href="#app-content">跳转到内容</a>
   <header class="topbar">
     <div class="topbar-inner">
-      <button id="nav-toggle" class="button ghost small" type="button" aria-label="切换导航" aria-controls="app-navigation" aria-expanded="false">☰</button>
+      <button id="nav-toggle" class="button ghost small" type="button" aria-label="切换导航" aria-controls="app-navigation" aria-expanded="false"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#menu"/></svg></button>
       <div class="brand">
-        <span class="brand-mark small" aria-hidden="true">▶</span>
+        <span class="brand-mark small" aria-hidden="true"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#play"/></svg></span>
         <div>
           <strong>{{ app_name }}</strong>
           <span class="version">yt-dlp {{ ytdlp_version }}</span>
@@ -31,6 +33,7 @@
       </div>
       <div id="app-page-label" class="app-page-label" aria-live="polite">文件管理</div>
       <div class="account-actions">
+        {% if v2_enabled %}<button id="theme-toggle" class="button ghost" type="button" aria-label="切换主题"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#sun"/></svg><span id="theme-label">跟随系统</span></button>{% endif %}
         <button id="task-center-toggle" class="button secondary" type="button" aria-controls="task-center" aria-expanded="false">任务与通知 <span id="task-center-count" class="count-badge">…</span></button>
         <span id="service-state" class="service-state"><span class="status-dot online"></span>服务在线</span>
         <span class="muted">{{ username }}</span>
@@ -43,11 +46,11 @@
     <button id="nav-backdrop" type="button" aria-label="关闭导航" tabindex="-1" hidden></button>
     <aside id="app-navigation" class="app-sidebar">
       <nav class="app-tabs" aria-label="功能导航">
-        <button class="app-tab active" type="button" data-view="home"><span aria-hidden="true">⌂</span>首页</button>
+        <button class="app-tab active" type="button" data-view="home"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#home"/></svg>首页</button>
         <button class="app-tab" type="button" data-view="files"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#folder"/></svg>文件管理</button>
         <button class="app-tab" type="button" data-view="publish"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"/></svg>发种工作台</button>
-        <button class="app-tab" type="button" data-view="download"><span aria-hidden="true">↓</span>B站下载</button>
-        <button id="settings-entry" class="app-tab settings-entry" type="button" aria-label="打开全局设置"><span aria-hidden="true">⚙</span>设置</button>
+        <button class="app-tab" type="button" data-view="download"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#download"/></svg>B站下载</button>
+        <button id="settings-entry" class="app-tab settings-entry" type="button" aria-label="打开全局设置"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#settings"/></svg>设置</button>
       </nav>
       <div class="app-sidebar-footer">
         <span class="muted sidebar-note">媒体处理与发布辅助</span>
@@ -55,6 +58,7 @@
     </aside>
     <div id="app-content" class="app-main" tabindex="-1">
 
+  {% if v2_enabled %}{% include "v2/shared/home.html" %}{% else %}
   <main id="home-view" class="page app-view overview-page">
     <section class="hero overview-hero">
       <div>
@@ -83,6 +87,8 @@
       </div>
     </section>
   </main>
+
+  {% endif %}
 
   <main id="{{ 'legacy-download-view' if v2_enabled else 'download-view' }}" class="page app-view hidden">
     <section class="hero">
@@ -566,12 +572,13 @@
 
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
     <div class="modal-panel">
-      <button id="modal-close" class="modal-close" type="button" aria-label="关闭">×</button>
+      <button id="modal-close" class="modal-close" type="button" aria-label="关闭"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#close"/></svg></button>
       <div id="modal-content"></div>
     </div>
   </div>
 
-  <aside id="task-center" class="task-center" aria-labelledby="task-center-title" hidden>
+  <button type="button" id="task-center-backdrop" aria-label="关闭任务面板" tabindex="-1" hidden></button>
+  <aside role="dialog" aria-modal="true" id="task-center" class="task-center" aria-labelledby="task-center-title" hidden>
     <header class="card-heading"><div><h2 id="task-center-title">任务与通知</h2><p class="muted">下载与媒体工具 · 最近 500 条 / 类</p></div><button id="task-center-close" class="button ghost" type="button" aria-label="关闭任务中心">关闭</button></header>
     <div class="task-filters"><label>显示<select id="task-center-filter"><option value="all">全部任务</option><option value="active">进行中</option><option value="failed">需要处理</option><option value="completed">已完成</option></select></label><button id="task-center-refresh" class="button secondary" type="button">刷新</button></div>
     <p id="task-center-error" class="form-error" role="status"></p>
@@ -586,6 +593,7 @@
   <script src="/static/settings-fields.js?v={{ asset_version }}"></script>
   <script src="/static/settings-profiles.js?v={{ asset_version }}"></script>
   <script src="/static/media-tools.js?v={{ asset_version }}"></script>
+  {% if v2_enabled %}<script src="/static/v2/shared/home.js?v={{ asset_version }}"></script><script src="/static/v2/shared/rule-settings.js?v={{ asset_version }}"></script>{% endif %}
   <script src="/static/modules.js?v={{ asset_version }}"></script>
   <script src="/static/ui.js?v={{ asset_version }}"></script>
   <script src="/static/workspace.js?v={{ asset_version }}"></script>

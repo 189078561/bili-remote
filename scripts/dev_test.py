@@ -26,6 +26,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("group", choices=GROUPS, default="smoke", nargs="?")
     parser.add_argument("--python", help="Existing interpreter with requirements-dev installed")
+    parser.add_argument("--filter", help="Run only tests matching this pytest expression")
+    parser.add_argument("--maxfail", type=int, default=0, help="Stop after this many failures; zero runs all")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     candidates = [root / ".venv/bin/python", Path("/opt/bili-remote/.venv/bin/python")]
@@ -80,6 +82,8 @@ def main() -> int:
                 "pytest",
                 "-q",
                 "-ra",
+                f"--maxfail={args.maxfail}",
+                *(["-k", args.filter] if args.filter else []),
                 f"--junitxml={report}",
                 "--basetemp",
                 str(base / "pytest"),

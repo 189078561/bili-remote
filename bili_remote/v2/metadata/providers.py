@@ -147,7 +147,14 @@ class TMDBProvider(Provider):
         params = {"query": query, "language": "zh-CN", "page": page}
         if year:
             params["year" if namespace == "movie" else "first_air_date_year"] = year
-        data = await self.get("search/" + namespace, **params)
+        direct = re.fullmatch(r"tmdb[:\s]+(?:(movie|tv)[:/])?(\d{1,12})", query.strip(), re.I)
+        if direct:
+            namespace = direct.group(1) or namespace
+            media_type = "movie" if namespace == "movie" else "series"
+            row = await self.get(namespace + "/" + direct.group(2), language="zh-CN")
+            data = {"results": [row], "page": 1, "total_pages": 1}
+        else:
+            data = await self.get("search/" + namespace, **params)
         items = []
         for row in data.get("results", [])[:1000]:
             if not isinstance(row, dict) or not row.get("id"):
@@ -155,6 +162,7 @@ class TMDBProvider(Provider):
             items.append({"provider": self.name, "id": identifier(row["id"]), "media_type": media_type,
                           "title": row.get("title" if namespace == "movie" else "name") or "",
                           "original_title": row.get("original_title" if namespace == "movie" else "original_name") or "",
+                          "poster_url": "https://image.tmdb.org/t/p/w92" + row["poster_path"] if row.get("poster_path") else None,
                           "year": (row.get("release_date" if namespace == "movie" else "first_air_date") or "")[:4] or None})
         return {"items": items, "page": data.get("page", page), "total_pages": data.get("total_pages"), "warnings": []}
 

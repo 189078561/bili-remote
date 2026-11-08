@@ -1,0 +1,114 @@
+/* Product shell: shared semantic colors across all five V2 pages. */
+:root {
+  --bg:#f5f7fb; --surface:#fff; --surface-2:#edf1f7; --ink:#1e293b; --muted:#64748b;
+  --line:#dce3ed; --brand:#2563eb; --brand-dark:#1d4ed8; --selected:#eaf1ff;
+  --danger:#b4233d; --success:#187549; --warning:#93650c; --on-brand:#fff;
+  color-scheme:light;
+}
+:root[data-theme=dark] {
+  --bg:#111924; --surface:#192331; --surface-2:#222f40; --ink:#e8eef8; --muted:#a6b5c9;
+  --line:#35455a; --brand:#91b8ff; --brand-dark:#accaff; --selected:#233b5d;
+  --danger:#ff9eaf; --success:#81d6a7; --warning:#f1ca83; --on-brand:#12213a;
+  color-scheme:dark;
+}
+@media(prefers-color-scheme:dark) {
+  :root:not([data-theme=light]) {
+    --bg:#111924; --surface:#192331; --surface-2:#222f40; --ink:#e8eef8; --muted:#a6b5c9;
+    --line:#35455a; --brand:#91b8ff; --brand-dark:#accaff; --selected:#233b5d;
+    --danger:#ff9eaf; --success:#81d6a7; --warning:#f1ca83; --on-brand:#12213a;
+    color-scheme:dark;
+  }
+}
+body {background:var(--bg); color:var(--ink);}
+.topbar,.app-sidebar,.modal-panel,.settings-savebar {background:var(--surface);color:var(--ink);border-color:var(--line);}
+.brand,.brand strong {color:var(--ink);}
+.brand .version {display:none;}
+.brand-mark.small {background:var(--brand);color:var(--on-brand);}
+.topbar .button,.app-tab,.app-page-label {color:var(--muted);}
+.app-sidebar .app-tab {display:flex;align-items:center;gap:12px;}
+.app-sidebar .app-tab.active,.settings-group-button.active {background:var(--selected);color:var(--brand);}
+.ws-icon {width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;}
+.button.primary {color:var(--on-brand);}
+.button.secondary,.button.ghost,.settings-field input,.settings-field select,.settings-field textarea {background:var(--surface);color:var(--ink);border-color:var(--line);}
+.button.danger,.status-pill.failed,.status-pill.auth_required {color:var(--danger);background:var(--surface-2);}
+.status-pill.completed {color:var(--success);background:var(--surface-2);}
+#theme-toggle {display:flex;align-items:center;gap:6px;}
+.app-main > :is(#home-view,#download-view,#settings-view) {max-width:1400px;padding:28px 32px;margin:auto;}
+.product-heading {display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:28px;}
+.product-heading h1 {margin:0 0 6px;font-size:24px;}
+.product-heading p {margin:0;color:var(--muted);font-size:13px;}
+.home-entry {display:grid;grid-template-columns:1.3fr 1fr;gap:24px;align-items:center;padding:28px 0 32px;border-bottom:1px solid var(--line);}
+.home-entry h2 {font-size:24px;line-height:1.5;margin:0 0 12px;}
+.home-entry p {color:var(--muted);max-width:520px;}
+.home-entry-actions {display:grid;gap:12px;}
+.home-entry-actions button {text-align:left;padding:16px 20px;display:flex;align-items:center;gap:14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);cursor:pointer;}
+.home-entry-actions button:hover {border-color:var(--brand);}
+.home-entry-actions button span {display:grid;gap:3px;}
+.home-entry-actions small {color:var(--muted);font-size:12px;}
+.home-entry-actions .ws-icon {width:24px;height:24px;color:var(--brand);}
+.home-grid {display:grid;grid-template-columns:minmax(0,1.4fr) minmax(280px,1fr);gap:36px;margin-top:28px;}
+.home-section {min-width:0;}
+.home-section-heading {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;}
+.home-section h2 {font-size:16px;margin:0;}
+.home-resource,.home-task {padding:14px 0;border-top:1px solid var(--line);display:flex;align-items:center;gap:12px;min-width:0;}
+.home-resource-copy,.home-task-copy {flex:1;min-width:0;}
+.home-resource strong,.home-task strong {display:block;font-size:14px;overflow-wrap:anywhere;}
+.home-resource small,.home-task small {color:var(--muted);font-size:12px;}
+.home-resource .button {flex-shrink:0;}
+.home-status {border-top:1px solid var(--line);padding-top:16px;margin-top:24px;display:flex;flex-wrap:wrap;gap:12px 28px;color:var(--muted);font-size:12px;}
+.home-state {padding:24px 0;color:var(--muted);font-size:13px;}
+.home-task progress {margin-top:8px;}
+.home-error {color:var(--danger);}
+/* Settings remain a genuine page. Sections use dividers instead of nested cards. */
+.settings-page-header {margin-bottom:28px;}
+.settings-content .settings-card {background:transparent;border:0;border-top:1px solid var(--line);border-radius:0;padding:20px 0;box-shadow:none;}
+.settings-group-heading {margin-bottom:18px;}
+.settings-group-heading .eyebrow {display:none;}
+.settings-group-heading h2 {font-size:20px;}
+.settings-layout {grid-template-columns:200px minmax(0,1fr);gap:36px;}
+.settings-group-button {color:var(--muted);background:transparent;border-radius:6px;}
+.settings-field-help,.settings-sidebar-note,.settings-field-description {color:var(--muted);}
+.settings-badge,.settings-directory-value,.settings-help,.naming-profile-row {background:var(--surface-2);color:var(--ink);border-color:var(--line);}
+.settings-advanced,.settings-field,.settings-group-heading {border-color:var(--line);}
+.settings-savebar {box-shadow:0 -4px 20px #00000008;}
+.rule-editor {display:grid;gap:16px;max-width:880px;}
+.rule-grid {display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.rule-editor label {display:grid;gap:6px;font-size:13px;}
+.rule-editor input,.rule-editor select,.rule-editor textarea {width:100%;}
+.rule-editor textarea {font-family:ui-monospace,monospace;}
+.rule-editor .rule-check {display:flex;align-items:center;gap:8px;}
+.rule-editor .rule-check input {width:18px;}
+.rule-editor .rule-note {font-size:12px;color:var(--muted);margin:0;}
+.rule-editor [role=status] {overflow-wrap:anywhere;}
+.task-center {overscroll-behavior:contain;}
+.task-result-link {display:inline-flex;align-items:center;min-height:36px;padding:6px 8px;color:var(--brand);overflow-wrap:anywhere;}
+@media(max-width:900px) {
+  .app-main > :is(#home-view,#download-view,#settings-view) {padding:20px 16px;}
+  .home-entry {grid-template-columns:1fr;padding:8px 0 24px;gap:12px;}
+  .home-entry h2 {font-size:22px;}
+  .home-grid {grid-template-columns:1fr;gap:24px;}
+  .settings-layout {display:block;}
+  .app-main > #settings-view {padding-bottom:190px;}
+  .settings-savebar {padding-bottom:max(12px,env(safe-area-inset-bottom));}
+  #theme-label {display:none;}
+  #theme-toggle {width:44px;justify-content:center;}
+  .product-heading {align-items:flex-start;margin-bottom:18px;}
+  .home-resource {flex-wrap:wrap;}
+  .home-resource-copy {flex-basis:60%;}
+  .rule-grid {grid-template-columns:1fr;}
+  .brand strong {font-size:12px;}
+  .account-actions .button {padding:6px;}
+}
+.app-sidebar .app-tab:not(.active) {color:var(--muted);}
+:is(#download-view,#settings-view) label,.settings-field-label,.settings-switch-field strong {color:var(--ink);}
+.settings-dirty-indicator {background:var(--surface-2);color:var(--success);}
+.settings-dirty-indicator.dirty {color:var(--warning);background:var(--surface-2);}
+.settings-group-nav {background:var(--surface);border-color:var(--line);box-shadow:none;}
+.settings-readonly,.settings-effective-path,.settings-directory-card {background:var(--surface-2);border-color:var(--line);color:var(--ink);}
+@media(max-width:900px) {
+  .app-main > #settings-view {padding-bottom:24px;}
+  .settings-savebar {position:static;align-items:stretch;flex-direction:column;gap:12px;margin-top:20px;}
+  .settings-savebar .button-row {display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;}
+  .settings-savebar .button-row .button {flex:1;padding:8px;font-size:12px;}
+  .settings-mobile-picker {color:var(--ink);}
+}

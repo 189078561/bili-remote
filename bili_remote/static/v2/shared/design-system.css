@@ -181,3 +181,6 @@ progress { display: block; width: 100%; height: 6px; accent-color: var(--brand);
   #download-view .job-url { overflow-wrap: anywhere; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+#task-center-backdrop {position:fixed;inset:0;background:#11192466;border:0;z-index:129;}
+.task-center {z-index:130;}
+body:has(.task-center:not([hidden])) {overflow:hidden;}

@@ -12,20 +12,19 @@
         <div class="dv2-inline-options"><label>下载线路<select data-mode><option value="web">Web 线路</option><option value="tv">TV 线路</option></select></label><p>沿用当前登录状态与线路权限</p></div>
         <div class="dv2-error" data-error role="alert" hidden></div>
         <div data-resolution hidden>
-          <div class="dv2-media-summary"><strong data-title></strong><span data-summary></span></div>
+          <div class="dv2-media-summary"><img class="dv2-cover" data-cover alt="视频封面" referrerpolicy="no-referrer" hidden><div><strong data-title></strong><span data-summary></span></div></div>
           <div class="dv2-episodes" data-episodes hidden>
             <div class="dv2-section-heading"><div><h3>选择剧集</h3><span data-selected-count>已选 0 集</span></div><div class="dv2-select-actions"><button type="button" data-select-main>全选正片</button><button type="button" data-select-all>全选</button><button type="button" data-select-invert>反选</button><button type="button" data-select-none>清空</button></div></div>
             <div class="dv2-episode-list" data-episode-list></div>
           </div>
-          <details class="dv2-advanced" open>
-            <summary>画质与保存设置</summary>
+          <div class="dv2-quality-section"><div class="dv2-quality-setting"><label>画质 / 编码<select data-format><option value="bv*+ba/b">最高可用 · 最佳音轨</option></select></label><button type="button" data-check-batch hidden>检测所选画质</button></div><p class="dv2-hint" data-format-hint>解析后列出可用画质；音轨沿用对应格式选择。</p></div>
+          <details class="dv2-advanced">
+            <summary>高级下载选项</summary>
             <div class="dv2-options-grid">
-              <div class="dv2-quality-setting"><label>画质 / 编码<select data-format><option value="bv*+ba/b">最高可用 · 最佳音轨</option></select></label><button type="button" data-check-batch hidden>检测所选画质</button></div>
               <label>命名模板<input data-template required></label>
               <label class="dv2-output">保存子目录 <span>（可选）</span><span class="dv2-output-row"><input data-output placeholder="留空使用下载目录设置"><button type="button" data-pick-folder>浏览</button></span></label>
               <label class="dv2-checkbox" data-all-parts><input type="checkbox"><span>下载全部分P / 合集内容</span></label>
             </div>
-            <p class="dv2-hint" data-format-hint>解析后列出可用画质；音轨沿用对应格式选择。</p>
           </details>
           <div class="dv2-submit-row"><span>下载后保留原文件名，可从任务进入工作台</span><button type="submit">加入下载队列</button></div>
         </div>

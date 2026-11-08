@@ -184,6 +184,7 @@
   }
 
   async function loadOverview() {
+    if (window.BILI_V2 && window.V2Home) return V2Home.load();
     const host = byId("home-summary");
     const refresh = byId("home-refresh");
     if (!host || host.hidden || state.loading.has("home")) return;

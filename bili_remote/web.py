@@ -427,6 +427,8 @@ class ScreenshotCreateRequest(BaseModel):
     timestamps: list[str] = Field(default_factory=list, max_length=120)
     width: int | None = Field(default=None, ge=0, le=3840)
     content_type: Literal["movie", "series", "anime", "custom"] | None = None
+    start_percent: float | None = Field(default=None, ge=0, lt=100)
+    end_percent: float | None = Field(default=None, gt=0, le=100)
     skip_start_seconds: float | None = Field(default=None, ge=0, le=86400)
     skip_end_seconds: float | None = Field(default=None, ge=0, le=86400)
     output_relative_path: str | None = None

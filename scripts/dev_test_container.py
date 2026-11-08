@@ -8,6 +8,8 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('group',nargs='?',default='all')
+parser.add_argument("--filter", help="Run only matching tests inside the isolated container")
+parser.add_argument("--maxfail", type=int, default=0)
 args=parser.parse_args()
 copy=root/'.dev'/'py312-src'
 copy.mkdir(parents=True,exist_ok=True)
@@ -20,4 +22,5 @@ for name in ['pyproject.toml','requirements.txt','requirements-dev.txt']:
 (copy/'.dev').mkdir(exist_ok=True)
 raise SystemExit(subprocess.call(['docker','run','--rm','--network','none','--shm-size','1g',
     '--mount',f'type=bind,src={copy},dst=/work','bili-remote-v2-test:py312',
-    'python','scripts/dev_test.py',args.group,'--python','/usr/local/bin/python']))
+    'python','scripts/dev_test.py',args.group,'--python','/usr/local/bin/python',
+    '--maxfail',str(args.maxfail),*(['--filter',args.filter] if args.filter else [])]))

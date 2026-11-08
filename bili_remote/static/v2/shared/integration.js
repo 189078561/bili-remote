@@ -53,8 +53,10 @@
     workbench.el('save-rules').onclick=async () => {
       try {
         const memory=await api('/api/v2/naming/memory');
+        const globalNaming={...workbench.readRule('naming-rule')};
+        for(const key of ['custom_title','selected_title_id','episode_overrides'])delete globalNaming[key];
         await api('/api/v2/naming/memory',{method:'PUT',body:JSON.stringify({scope:'global',expected_revision:memory.revision.global || 0,
-          naming_rule:workbench.readRule('naming-rule'),subtitle_rule:workbench.readRule('subtitle-rule')})});
+          naming_rule:globalNaming,subtitle_rule:workbench.readRule('subtitle-rule')})});
         AppNotice.show('规则已保存；发布文本仅保留在当前页面');
       } catch(error) { AppNotice.show(error.message,true); }
     };
@@ -75,6 +77,27 @@
     await mediaBrowser.init();
     document.addEventListener('app:files-refresh', () => mediaBrowser.loadDirectory({clearSelection:false}).catch(error=>AppNotice.show(error.message,true)));
     let downloadSelection = 0;
+    const recognizeDownload = async job => {
+      const epoch=workbench.epoch, selection=++downloadSelection;
+      const proposal=await api(`/api/v2/downloads/${job.id}/recognize`,{method:'POST',body:'{}'});
+      if(epoch!==workbench.epoch || selection!==downloadSelection) return null;
+      if(!proposal.context?.resources?.length) throw new Error('下载文件不可用，请查看任务详情');
+      return proposal.context;
+    };
+    window.AppResources = {
+      openWorkbench: items => adapter.handoff('workbench',items,items[0]?.root_key || 'downloads'),
+      openFiles: async ref => {
+        if(!ref)throw new Error('没有可打开的资源');
+        const directory=ref.kind==='directory'?ref.relative_path:ref.relative_path.split('/').slice(0,-1).join('/');
+        openBusinessView('files');
+        await mediaBrowser.navigate(ref.root_key,directory,{focus:ref.kind==='directory'?null:ref.relative_path});
+      },
+      openDownload: async (job, destination='workbench') => {
+        const context=await recognizeDownload(job);if(!context)return false;
+        if(destination==='files')return AppResources.openFiles(context.resources[0]);
+        return open(context);
+      }
+    };
     BiliDownloadV2.mount(document.querySelector('.dv2'), {
       singleTemplate: downloadDefaults.single, playlistTemplate: downloadDefaults.playlist,
       onLogin: mode => openQrLogin(mode),
@@ -82,12 +105,8 @@
         const chosen=await FileBrowser.openPicker({mode:'select-directory',scope:'browse',rootKeys:['downloads'],title:'选择保存目录'});
         return chosen?.relative_path || '';
       },
-      onOpenFile: async job => {
-        const epoch = workbench.epoch, selection = ++downloadSelection;
-        const proposal=await api(`/api/v2/downloads/${job.id}/recognize`,{method:'POST',body:'{}'});
-        if (epoch !== workbench.epoch || selection !== downloadSelection) return false;
-        return open(proposal.context);
-      },
+      onOpenFile: job => AppResources.openDownload(job),
+      onOpenDirectory: job => AppResources.openDownload(job,'files'),
       onCompleted: job => { if(!window.AppTaskCenter) AppNotice.show(`下载 #${job.id} 已完成，可打开工作台识别并预览命名`); },
     });
   } catch (error) { AppNotice.show(`模块挂载失败：${error.message}`,true); }

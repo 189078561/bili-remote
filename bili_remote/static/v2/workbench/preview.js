@@ -2,16 +2,20 @@
 (function (global) {
   "use strict";
   const allowedURL = value => { try { const url = new URL(value); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password ? url.href : null; } catch { return null; } };
+  function decodeText(text, format) {
+    const entities={'&#91;':'[','&#93;':']','&lt;':'<','&gt;':'>','&amp;':'&','&quot;':'"','&#x27;':"'"};
+    return text.replace(/&#91;|&#93;|&lt;|&gt;|&amp;|&quot;|&#x27;/g,x=>entities[x]);
+  }
   function appendInline(host, text, format) {
     const expression = format === "bbcode" ? /\[img\]([\s\S]*?)\[\/img\]|\[url=([^\]]+)\]([\s\S]*?)\[\/url\]|\[(b|i|u)\]([\s\S]*?)\[\/\4\]/gi : /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|`([^`]+)`/g;
     let cursor = 0;
     for (const match of text.matchAll(expression)) {
-      host.append(document.createTextNode(text.slice(cursor, match.index)));
+      host.append(document.createTextNode(decodeText(text.slice(cursor, match.index), format)));
       let element;
       if (format === "bbcode") {
         if (match[1] && allowedURL(match[1])) { element = document.createElement("img"); element.src = allowedURL(match[1]); element.alt = "发布图片"; }
         else if (match[2] && allowedURL(match[2])) { element = document.createElement("a"); element.href = allowedURL(match[2]); element.textContent = match[3]; }
-        else if (match[4]) { element = document.createElement({b: "strong", i: "em", u: "u"}[match[4].toLowerCase()]); element.textContent = match[5]; }
+        else if (match[4]) { element = document.createElement({b: "strong", i: "em", u: "u"}[match[4].toLowerCase()]); appendInline(element, match[5], format); }
       } else {
         if (match[2] && allowedURL(match[2])) { element = document.createElement("img"); element.src = allowedURL(match[2]); element.alt = match[1] || "发布图片"; }
         else if (match[4] && allowedURL(match[4])) { element = document.createElement("a"); element.href = allowedURL(match[4]); element.textContent = match[3]; }
@@ -21,7 +25,7 @@
       if (element?.tagName === "IMG") { element.loading = "lazy"; element.referrerPolicy = "no-referrer"; }
       host.append(element || document.createTextNode(match[0])); cursor = match.index + match[0].length;
     }
-    host.append(document.createTextNode(text.slice(cursor)));
+    host.append(document.createTextNode(decodeText(text.slice(cursor), format)));
   }
   function render(host, text, format) {
     host.replaceChildren();

@@ -3,6 +3,7 @@ import html
 import re
 from urllib.parse import urlsplit
 from ..naming.errors import NamingError
+from .markup import format_description
 
 
 def safe_url(url):
@@ -25,9 +26,9 @@ class PublishingService:
             return re.sub(r'([\\`*_{}\[\]()#+.!|>~-])',r'\\\1',html.escape(text))
         texts=[release_title,subtitle,overview,*list(report_texts or [])]
         if format=='html':
-            blocks=[f'<h1>{escape(release_title)}</h1>',f'<p>{escape(subtitle)}</p>',f'<p>{escape(overview).replace(chr(10),"<br>")}</p>']
+            blocks=[f'<h1>{escape(release_title)}</h1>',f'<p>{escape(subtitle)}</p>','<div>'+format_description(overview,format,safe_url)+'</div>']
             blocks.extend('<pre>'+escape(t)+'</pre>' for t in (report_texts or []))
-        else: blocks=[escape(t) for t in texts if t]
+        else: blocks=[escape(t) for t in [release_title,subtitle] if t] + ([format_description(overview,format,safe_url)] if overview else []) + [escape(t) for t in report_texts or [] if t]
         for artifact in artifacts or []:
             url=artifact.get('url')
             if not url: continue

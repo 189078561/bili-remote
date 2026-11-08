@@ -156,6 +156,7 @@ class ArtifactRef(Model):
     url: str | None = None
 
 class TaskRef(Model):
+    title: str | None = None
     kind: Literal['download','processing']
     id: int
     task_type: str

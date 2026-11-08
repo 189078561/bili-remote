@@ -41,6 +41,7 @@ class TaskCenter:
                     pass
         return {'kind':kind,'id':row['id'],'task_type':task_type,'status':status,
             'progress':row.get('progress') if kind == 'download' else None,
+            'title':row.get('title') if kind == 'download' else None,
             'created_at':row.get('created_at'),'finished_at':row.get('finished_at'),
             'artifact_refs':refs,'error':row.get('error'),
             'retry_allowed':status in {'failed','cancelled','auth_required'} and (kind == 'download' or task_type in SAFE_RETRY),

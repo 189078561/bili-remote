@@ -435,6 +435,15 @@ class ScreenshotService:
         )
         if not 0 <= skip_start <= 86_400 or not 0 <= skip_end <= 86_400:
             raise ScreenshotError("跳过时长必须在 0 到 86400 秒之间")
+        range_options = {}
+        if data.get("start_percent") is not None or data.get("end_percent") is not None:
+            start_percent = _finite_number(data.get("start_percent"), "开始百分比")
+            end_percent = _finite_number(data.get("end_percent"), "结束百分比")
+            if not 0 <= start_percent < end_percent <= 100:
+                raise ScreenshotError("百分比范围需要满足 0 ≤ 开始 < 结束 ≤ 100")
+            if data.get("timestamps"):
+                raise ScreenshotError("百分比范围不能与指定时间点同时使用")
+            range_options = {"start_percent": start_percent, "end_percent": end_percent}
         output_relative_path = normalize_relative_path(str(data.get("output_relative_path") or ""))
         output_dir = self._resolve_images_directory(output_relative_path)
         collage_base = (
@@ -516,6 +525,7 @@ class ScreenshotService:
                 "total": total,
                 "width": width,
                 "content_type": content_type,
+                **range_options,
                 "skip_start_seconds": round(skip_start, 3),
                 "skip_end_seconds": round(skip_end, 3),
                 "sampling_mode": sampling_mode,
@@ -536,6 +546,7 @@ class ScreenshotService:
                 "total": total,
                 "width": width,
                 "content_type": content_type,
+                **range_options,
                 "skip_start_seconds": round(skip_start, 3),
                 "skip_end_seconds": round(skip_end, 3),
                 "sampling_mode": sampling_mode,
@@ -762,6 +773,10 @@ class ScreenshotService:
                     duration = optical.get("duration_seconds") or details["duration_seconds"]
                     if duration is None:
                         raise ScreenshotError("无法获取视频时长")
+                    if params.get("start_percent") is not None:
+                        # Resolve independently for every video, using its actual duration.
+                        skip_start = float(duration) * float(params["start_percent"]) / 100
+                        skip_end = float(duration) * (100 - float(params["end_percent"])) / 100
                     video_stream = self._video_stream(payload)
                     media = {
                         "filename": source_name,
