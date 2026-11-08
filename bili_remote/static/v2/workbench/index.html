@@ -18,34 +18,41 @@
 <p class="wb-entry-status" data-entry-status role="status">正在检查登录状态…</p>
 <section class="br-workbench" data-workbench hidden aria-label="发种工作台">
   <div class="wb-surface">
-    <header class="wb-page-heading"><div><h1>发种工作台</h1></div><button type="button" class="wb-primary" data-layout="preview"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"></use></svg>预览与复制</button></header>
-    <section class="wb-resource-bar" aria-label="当前工作资源">
-      <div class="wb-resource-mark"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#film"></use></svg></div><div class="wb-resource-info"><h2 data-wb="resource">选择一个视频或整季资源，开始制作</h2><p data-wb="context-summary">从文件管理或下载页进入，可直接使用已选资源。</p><div class="wb-resource-facts"><span data-wb="resource-status" role="status">尚未选择资源</span><span data-wb="resource-media"></span></div></div>
-      <button type="button" data-layout="resources" aria-controls="wb-resources" aria-expanded="false">更换资源</button>
-    </section>
+    <header class="wb-resource-bar" aria-label="当前工作资源">
+      <div class="wb-resource-mark"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#film"/></svg></div>
+      <div class="wb-resource-info"><h1 data-wb="resource">选择工作资源</h1><p data-wb="context-summary">从文件管理或下载页进入，直接使用已选资源。</p><div class="wb-resource-facts"><span data-wb="resource-media"></span><span data-wb="resource-status" role="status">尚未选择资源</span></div></div>
+      <div class="wb-resource-actions"><button type="button" class="wb-quiet" data-layout="resources" aria-controls="wb-resources" aria-expanded="false"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#folder"/></svg>更换资源</button><button type="button" class="wb-primary" data-layout="preview"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"/></svg>完整预览</button></div>
+    </header>
     <div class="wb-studio">
       <section class="wb-identification" aria-labelledby="wb-identify-heading">
-        <div class="wb-section-heading"><div><h2 id="wb-identify-heading" data-wb="identity-title">确认影视作品与文件名称</h2></div><div class="wb-actions"><button type="button" data-action="resolve" disabled>重新识别</button><button type="button" data-layout="identity">查找影视资料</button><button type="button" data-layout="naming">命名详情</button></div></div>
-        <p class="wb-provider-status" data-wb="provider-status">TMDB / Bangumi：等待识别，未确认资料不会作为事实填入。</p>
-
-        <section class="wb-search-inline" aria-label="查找影视资料"><div class="wb-identity-controls"><label>影视资料<input data-wb="query" placeholder="中文、英文、日文名称或 tmdb:123" maxlength="200"></label><label>类型<select data-wb="media-type"><option value="series">电视剧</option><option value="anime">动画</option><option value="movie">电影</option></select></label><button type="button" data-action="search">搜索资料</button></div><div data-wb="candidates" class="wb-candidates"></div></section>
-        <h3 class="wb-naming-heading">智能文件命名</h3>
-        <div class="wb-name-controls"><label>选用名称<input data-wb="selected-title"></label><label>其他译名<select data-wb="title-choice" disabled><option value="">暂无名称候选</option></select></label><label>命名类型<select data-wb="naming-type"><option value="movie">电影</option><option value="series">剧集</option><option value="anime">动画</option><option value="season">整季</option></select></label><label>季号<input data-wb="season" type="number" min="0" step="1"></label><label>集号<input data-wb="episode" type="number" min="1" step="1"></label><label>处理范围<select data-wb="scope"><option value="single">单集 / 单视频</option><option value="season">整季</option></select></label></div>
-        <div class="wb-rule-quick"><label>片源<input data-wb="source-rule" value="WEB-DL" maxlength="100" list="wb-sources"></label><datalist id="wb-sources"><option>WEB-DL</option><option>WEBRip</option><option>BluRay</option><option>Remux</option></datalist><label>制作组<input data-wb="group-rule" value="HDVWEB" maxlength="100"></label><span class="wb-note">命名规则值，可自行调整</span></div>
-        <div class="wb-adjustment-status"><span data-wb="adjustment-status" role="status">名称与季集修改后自动更新预览，不执行文件改名。</span><button type="button" data-action="overrides" disabled>应用人工调整</button></div>
-        <div class="wb-naming-result"><div class="wb-section-heading"><h3>文件命名预览</h3><div class="wb-actions"><button type="button" data-action="naming" disabled>命名预览</button><button type="button" data-action="apply" disabled>确认重命名</button></div></div><p class="wb-note" data-wb="season-summary"></p><p data-wb="naming-status" class="wb-note">选择资源后，将显示服务返回的目标文件名。</p><div data-wb="rename" hidden><h3>确认命名预览</h3><div data-wb="rename-list"></div><p data-wb="rename-warning" class="wb-note"></p></div></div>
-        <p data-wb="issues" role="status" class="wb-issues"></p>
+        <div class="wb-section-heading"><h2 id="wb-identify-heading" data-wb="identity-title">影视匹配</h2><span class="wb-match-status" data-wb="match-status">待匹配</span></div>
+        <div class="wb-identity-summary"><div><strong data-wb="identity-name">尚未匹配影视资料</strong><p class="wb-provider-status" data-wb="provider-status">选择资源后识别</p></div><button type="button" data-layout="identity">更换匹配</button></div>
       </section>
-      <section class="wb-publishing" aria-labelledby="wb-edit-heading"><div class="wb-section-heading"><div><h2 id="wb-edit-heading">发布内容</h2></div><span class="wb-note">即时组合 · 仅保留在当前页面</span></div>
+      <section class="wb-naming" aria-labelledby="wb-name-heading">
+        <div class="wb-section-heading"><h2 id="wb-name-heading">文件命名</h2><span class="wb-note" data-wb="season-summary"></span></div>
+        <div class="wb-name-controls">
+          <label class="wb-title-control">选用名称<input data-wb="selected-title" placeholder="输入作品名称"></label>
+          <label>季号<input data-wb="season" type="number" min="0" step="1"></label>
+          <label>片源 · 规则值<input data-wb="source-rule" value="WEB-DL" maxlength="100" list="wb-sources"></label><datalist id="wb-sources"><option>WEB-DL</option><option>WEBRip</option><option>BluRay</option><option>Remux</option></datalist>
+          <label>制作组<input data-wb="group-rule" value="HDVWEB" maxlength="100"></label>
+        </div>
+        <div class="wb-naming-result">
+          <p data-wb="naming-status" class="wb-note">选择资源后显示目标文件名。预览不会修改文件。</p>
+          <div data-wb="rename" hidden><div data-wb="rename-summary" class="wb-rename-row"></div><button type="button" data-layout="changes" data-wb="change-count">查看变更</button></div>
+        </div>
+        <div class="wb-adjustment-status"><span data-wb="adjustment-status" role="status">未执行改名</span><div class="wb-actions"><button type="button" class="wb-quiet" data-layout="naming">规则与逐集调整</button></div></div>
+
+      </section>
+      <section class="wb-publishing" aria-labelledby="wb-edit-heading"><div class="wb-section-heading"><div><h2 id="wb-edit-heading">发布内容</h2></div><span class="wb-note">即时组合 · 人工编辑优先</span></div>
 <section id="wb-panel-content" aria-labelledby="wb-edit-heading" data-panel="content">
-        <div class="wb-field"><div class="wb-field-bar"><label for="wb-title">主标题</label><div><button type="button" data-action="title" disabled>生成</button><button type="button" data-copy="release_title" disabled>复制</button></div></div><textarea id="wb-title" data-edit="release_title" rows="2" placeholder="识别后自动生成，也可以直接编辑"></textarea><span data-lock="release_title" class="wb-note"></span></div>
-        <div class="wb-field"><div class="wb-field-bar"><label for="wb-subtitle">副标题</label><div><button type="button" data-action="subtitle" disabled>生成</button><button type="button" data-copy="subtitle" disabled>复制</button></div></div><textarea id="wb-subtitle" data-edit="subtitle" rows="2" placeholder="根据识别资料生成副标题"></textarea><span data-lock="subtitle" class="wb-note"></span></div>
-        <div class="wb-field"><div class="wb-field-bar"><label for="wb-overview">简介</label><button type="button" data-copy="overview" disabled>复制</button></div><textarea id="wb-overview" data-edit="overview" rows="5" placeholder="影视简介；支持人工编辑及 [b]粗体[/b]、[img]图片链接[/img] 等 BBCode"></textarea><span data-lock="overview" class="wb-note"></span></div>
+        <div class="wb-field"><div class="wb-field-bar"><label for="wb-title">主标题</label><span data-lock="release_title" class="wb-note"></span><div><button type="button" data-action="title" disabled>重新生成</button><button type="button" data-copy="release_title" disabled>复制</button></div></div><textarea id="wb-title" data-edit="release_title" rows="1" placeholder="识别后自动生成，也可以直接编辑"></textarea></div>
+        <div class="wb-field"><div class="wb-field-bar"><label for="wb-subtitle">副标题</label><span data-lock="subtitle" class="wb-note"></span><div><button type="button" data-action="subtitle" disabled>重新生成</button><button type="button" data-copy="subtitle" disabled>复制</button></div></div><textarea id="wb-subtitle" data-edit="subtitle" rows="1" placeholder="根据识别资料生成副标题"></textarea></div>
+        <div class="wb-field"><div class="wb-field-bar"><label for="wb-overview">简介</label><span data-lock="overview" class="wb-note"></span><button type="button" data-copy="overview" disabled>复制</button></div><div class="wb-format-tools" aria-label="简介格式"><button type="button" data-format="b" aria-label="加粗">B</button><button type="button" data-format="i" aria-label="斜体">I</button><button type="button" data-format="url">链接</button><button type="button" data-format="img">图片</button><span>BBCode</span></div><textarea id="wb-overview" data-edit="overview" rows="5" placeholder="影视简介；支持人工编辑及 [b]粗体[/b]、[img]图片链接[/img] 等 BBCode"></textarea></div>
 
       </section>
       </section>
       <section class="wb-tool-launcher" aria-label="辅助素材"><div><h2>发种辅助工具</h2><p class="wb-note">使用当前资源，产物自动关联到本次发布。</p></div><div class="wb-tool-buttons"><button type="button" id="wb-tab-images" data-tab="images"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#image"></use></svg><span>缩略图</span><span data-wb="images-count" class="wb-tool-count"></span></button><button type="button" id="wb-tab-report" data-tab="report"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"></use></svg><span>媒体报告</span><span data-wb="report-count" class="wb-tool-count"></span></button><button type="button" id="wb-tab-torrent" data-tab="torrent"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"></use></svg><span>种子制作</span><span data-wb="torrent-count" class="wb-tool-count"></span></button></div></section>
-      <details class="wb-tasks" open><summary>后台任务 <span data-wb="task-count">0</span></summary><p data-wb="task-status" class="wb-note"></p><div data-wb="tasks"></div></details>
+      <div data-wb="artifact-summary" class="wb-artifact-summary"></div><details class="wb-tasks"><summary>后台任务 <span data-wb="task-count">0</span></summary><p data-wb="task-status" class="wb-note"></p><div data-wb="tasks"></div></details>
     </div>
     <footer class="wb-page-footer"><span>发布内容不保存为草稿</span><a href="/legacy">旧版兼容界面</a></footer>
   </div>
@@ -57,6 +64,7 @@
   <section class="wb-sheet wb-naming-sheet" data-sheet="naming" role="dialog" aria-modal="true" aria-labelledby="wb-naming-dialog-title" hidden>
     <header class="wb-sheet-heading"><div><p class="wb-eyebrow">同一工作上下文</p><h2 id="wb-naming-dialog-title">命名详情与发布规则</h2></div><button type="button" data-layout="close">完成</button></header>
     <div class="wb-sheet-body">
+      <section class="wb-rule-section"><h3>命名类型与处理范围</h3><button type="button" class="wb-quiet" data-action="naming" disabled>更新预览</button><div class="wb-inline"><label>命名类型<select data-wb="naming-type"><option value="movie">电影</option><option value="series">剧集</option><option value="anime">动画</option><option value="season">整季</option></select></label><label>集号<input data-wb="episode" type="number" min="1" step="1"></label><label>处理范围<select data-wb="scope"><option value="single">单集 / 单视频</option><option value="season">整季</option></select></label></div><button type="button" data-action="overrides" disabled>应用人工调整</button></section>
       <section class="wb-rule-section"><h3>文件与发布模板</h3><label>文件命名模板<textarea data-wb="naming-rule" maxlength="500" rows="2" spellcheck="false" placeholder="留空使用当前类型的内置模板" disabled></textarea></label><div class="wb-inline"><label>副标题样式<select data-wb="subtitle-rule"><option value="">使用识别规则</option><option value="tv_episode">电视剧单集</option><option value="tv_season">电视剧整季</option><option value="anime">日本动画</option><option value="movie">电影</option></select></label><label>演员数量<select data-wb="cast-limit"><option value="3">3 位</option><option value="5">5 位</option><option value="8">8 位</option><option value="all">全部</option></select></label></div><label>发布主标题模板<textarea data-wb="title-rule" maxlength="500" rows="2" spellcheck="false" placeholder="留空使用服务默认规则，如 {Title} {Year} {Resolution}"></textarea></label><div class="wb-actions"><button type="button" data-action="rules" disabled>应用规则</button><button type="button" data-wb="save-rules">保存为全局规则</button></div></section>
       <section class="wb-rule-section" data-wb="naming-advanced"><h3>逐集映射、字幕关联与撤销</h3><div data-wb="naming-panel"></div></section>
       <section class="wb-rule-section"><div class="wb-section-heading"><h3>逐文件媒体参数</h3><button type="button" data-action="probe" disabled>识别媒体参数</button></div><div data-wb="media"></div></section>
@@ -74,6 +82,18 @@
     <div class="wb-preview-toolbar"><label>发布格式<select data-wb="format"><option value="bbcode">BBCode</option><option value="html">HTML</option><option value="markdown">Markdown</option></select></label><div class="wb-preview-switch"><button type="button" data-preview-mode="effect" aria-pressed="true">效果</button><button type="button" data-preview-mode="source" aria-pressed="false">源码</button></div><button type="button" class="wb-primary" data-copy="content" disabled>复制完整内容</button></div>
     <div class="wb-preview-body" tabindex="0" aria-label="发布预览正文"><div data-wb="effect"><iframe data-wb="html-preview" title="HTML 发布效果" sandbox="" referrerpolicy="no-referrer" hidden></iframe><div data-wb="rich-preview" class="wb-rich-preview" aria-label="发布效果"></div></div><div data-wb="source" hidden><pre data-wb="output" tabindex="0" aria-label="完整发布内容"></pre></div></div>
     <footer class="wb-preview-footer"><span data-wb="validation" role="status">选择资源后自动组合</span></footer>
+  </section>
+
+  <section class="wb-sheet wb-identity-sheet" data-sheet="identity" role="dialog" aria-modal="true" aria-labelledby="wb-match-heading" hidden>
+    <header class="wb-sheet-heading"><h2 id="wb-match-heading">更换影视匹配</h2><button type="button" data-layout="close">完成</button></header>
+    <div class="wb-sheet-body"><section class="wb-search-inline" aria-label="查找影视资料"><div class="wb-identity-controls"><label>影视名称或身份<input data-wb="query" placeholder="中文、英文、日文名称或 tmdb:123" maxlength="200"></label><label>类型<select data-wb="media-type"><option value="series">电视剧</option><option value="anime">动画</option><option value="movie">电影</option></select></label><button type="button" class="wb-primary" data-action="search">搜索资料</button></div><div data-wb="candidates" class="wb-candidates"></div></section>
+      <details class="wb-diagnostics"><summary>识别与预检提示</summary><p data-wb="issues" role="status" class="wb-issues"></p></details><section class="wb-rule-section"><h3>多语言名称</h3><label>使用已有译名<select data-wb="title-choice" disabled><option value="">暂无名称候选</option></select></label><p class="wb-note">命名名称可在主页面直接修改，不会改变已确认的影视身份。</p><button type="button" data-action="resolve" disabled>重新识别</button></section>
+    </div>
+  </section>
+  <section class="wb-sheet wb-changes-sheet" data-sheet="changes" role="dialog" aria-modal="true" aria-labelledby="wb-changes-heading" hidden>
+    <header class="wb-sheet-heading"><div><h2 id="wb-changes-heading">核对文件命名</h2><p class="wb-note">以下为服务返回的真实路径预览，尚未改名。</p></div><button type="button" data-layout="close">返回</button></header>
+    <div class="wb-sheet-body"><div data-wb="rename-list"></div><p data-wb="rename-warning" class="wb-note"></p></div>
+    <footer class="wb-sheet-footer"><button type="button" data-layout="naming">逐集调整与撤销</button><button type="button" class="wb-primary" data-action="apply" disabled>确认重命名</button></footer>
   </section>
   <div class="wb-notices" data-wb="notices" aria-live="polite" aria-atomic="false"></div>
 </section>

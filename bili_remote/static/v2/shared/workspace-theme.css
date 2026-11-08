@@ -5,11 +5,11 @@
  --ws-accent:var(--brand,#2e6653); --ws-selected:var(--selected,#e7f0e8); --ws-danger:var(--danger,#ac4d3e);
  color:var(--ws-ink);
 }
-.app-main > :is(#files-view, #publish-view) {padding:16px; max-width:none; background:var(--ws-bg); min-height:calc(100dvh - var(--header-height, 64px));}
+body:not(.final-ui) .app-main > :is(#files-view, #publish-view) {padding:16px; max-width:none; background:var(--ws-bg); min-height:calc(100dvh - var(--header-height, 64px));}
 :where(.br-workbench, .fb-v2) {font:14px/1.6 system-ui,-apple-system,"PingFang SC",sans-serif;}
 :where(.br-workbench, .fb-v2) *, :where(.br-workbench, .fb-v2) *::before {box-sizing:border-box;}
 :where(.br-workbench, .fb-v2) :is(button, input, textarea, select, summary) {font:inherit;}
-:where(.br-workbench, .fb-v2) :is(button, select, input:not([type=checkbox]), textarea, summary.button) {
+:where(.br-workbench, .fb-v2) :where(button, select, input:not([type=checkbox]), textarea, summary.button) {
   color:var(--ws-ink); background:var(--ws-surface); border:1px solid var(--ws-line);
   border-radius:6px; min-height:38px; padding:7px 10px; max-width:100%; box-shadow:none;
 }
@@ -21,14 +21,14 @@
 :where(.br-workbench, .fb-v2) a {color:var(--ws-accent); overflow-wrap:anywhere;}
 .ws-icon {width:18px; height:18px; flex-shrink:0; fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round;}
 /* Shell colors follow the active workspace without restyling other pages. */
-body:has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar) {background:var(--ws-surface); color:var(--ws-ink); border-color:var(--ws-line);}
-body:has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar) :is(.button,.app-tab,.app-page-label,.muted,.brand) {color:var(--ws-muted); border-color:var(--ws-line);}
-body:has(:is(#files-view,#publish-view):not(.hidden)) .topbar .button {background:var(--ws-surface);}
-body:has(:is(#files-view,#publish-view):not(.hidden)) .app-sidebar .app-tab.active {background:var(--ws-selected); color:var(--ws-accent);}
+body:not(.final-ui):has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar) {background:var(--ws-surface); color:var(--ws-ink); border-color:var(--ws-line);}
+body:not(.final-ui):has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar) :is(.button,.app-tab,.app-page-label,.muted,.brand) {color:var(--ws-muted); border-color:var(--ws-line);}
+body:not(.final-ui):has(:is(#files-view,#publish-view):not(.hidden)) .topbar .button {background:var(--ws-surface);}
+body:not(.final-ui):has(:is(#files-view,#publish-view):not(.hidden)) .app-sidebar .app-tab.active {background:var(--ws-selected); color:var(--ws-accent);}
 #modal:has(.file-picker-dialog,.operation-dialog,.text-editor-dialog,.preview-dialog,.fb-media-info) .modal-panel {background:var(--ws-surface); color:var(--ws-ink); border-color:var(--ws-line);}
 #modal:has(.file-picker-dialog,.operation-dialog,.text-editor-dialog,.preview-dialog,.fb-media-info) :is(input,textarea,select,.button) {color:var(--ws-ink); background:var(--ws-surface); border-color:var(--ws-line);}
 @media (max-width:900px) {
-  .app-main > :is(#files-view, #publish-view) {padding:12px;}
-  :where(.br-workbench, .fb-v2) :is(button, select, input:not([type=checkbox]), summary) {min-height:44px;}
+  body:not(.final-ui) .app-main > :is(#files-view, #publish-view) {padding:12px;}
+  :where(.br-workbench, .fb-v2) :where(button, select, input:not([type=checkbox]), summary) {min-height:44px;}
   :where(.br-workbench, .fb-v2) :is(input, select, textarea) {font-size:16px;}
 }

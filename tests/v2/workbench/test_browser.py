@@ -21,7 +21,7 @@ def show_panel(page, name=None):
     """Follow the visible sheet controls without mounting or changing business state."""
     if name == 'content':
         name = None
-    target = name if name in ('resources', 'naming', 'preview', 'identity') else ('tools' if name else None)
+    target = name if name in ('resources', 'naming', 'preview', 'identity', 'changes') else ('tools' if name else None)
     # Confirmation resolves asynchronously, then closes the picker itself.
     page.wait_for_function('!(window.wb || window.V2Workbench || window.workbench)?.selecting')
     active_name = page.evaluate('document.querySelector(".wb-sheet:not([hidden])")?.dataset.sheet || null')
@@ -34,7 +34,7 @@ def show_panel(page, name=None):
             active.locator('.wb-sheet-heading button').click()
     if name:
         key = 'data-tab' if target == 'tools' else 'data-layout'
-        page.locator(f'[{key}="{name}"]').click()
+        page.locator(f'[{key}="{name}"]:visible').first.click()
 
 
 def mount(page):
@@ -116,6 +116,7 @@ def test_contract_edit_copy_formats_responsive_and_no_draft(live_server):
         page.locator('[data-edit="overview"]').fill('人工简介')
         expect(page.locator('[data-wb="output"]')).to_contain_text('人工简介')
         show_panel(page, None)
+        show_panel(page, 'identity')
         page.locator('[data-action="resolve"]').click()
         page.wait_for_function('wb.context.revision === 3')
         assert page.locator('[data-edit="release_title"]').input_value().startswith('人工主标题')
@@ -164,6 +165,7 @@ def test_real_browser_unconfigured_metadata_is_honest(live_server):
         assert page.evaluate('wb.context.identity') is None
         assert page.locator('[data-action="naming"]').is_enabled()
         show_panel(page, None)
+        show_panel(page, 'naming')
         page.locator('[data-action="naming"]').click()
         expect(page.locator('[data-wb="rename-warning"]')).to_contain_text('缺少')
         assert page.locator('[data-action="apply"]').is_disabled()
@@ -204,6 +206,7 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         show_panel(page, None)
         page.locator('[data-wb="selected-title"]').fill('Synthetic Tool Flow')
         show_panel(page, None)
+        show_panel(page, 'naming')
         page.locator('[data-action="overrides"]').click()
         expect(page.locator('[data-edit="release_title"]')).to_have_value(re.compile('Synthetic Tool Flow'))
         show_panel(page, None)
@@ -255,6 +258,7 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         page.goto(base_url + '/static/v2/workbench/index.html')
         expect(page.locator('[data-workbench]')).to_be_visible()
         assert page.locator('[data-edit="release_title"]').input_value() == ''
+        page.locator('.wb-tasks > summary').click()
         task_card = page.locator('.wb-task', has_text='torrent_build')
         task_card.get_by_role('button', name='查看产物').click()
         expect(task_card.get_by_role('link', name='下载种子')).to_be_visible()
@@ -307,6 +311,7 @@ def test_slow_responses_and_rename_confirmation(live_server):
         held.clear()
         page.route('**/api/v2/naming/preview', lambda route: held.append(route))
         show_panel(page, None)
+        show_panel(page, 'naming')
         page.locator('[data-action="naming"]').click()
         show_panel(page, None)
         page.locator('[data-wb="selected-title"]').fill('新的选名')
@@ -315,6 +320,7 @@ def test_slow_responses_and_rename_confirmation(live_server):
         expect(page.locator('[data-wb="rename"]')).to_be_hidden()
         page.unroute('**/api/v2/naming/preview')
         show_panel(page, None)
+        show_panel(page, 'naming')
         page.locator('[data-action="naming"]').click()
         expect(page.locator('[data-wb="rename"]')).to_be_visible()
         accepted_revision = page.evaluate('wb.preview.context_revision')
@@ -325,6 +331,7 @@ def test_slow_responses_and_rename_confirmation(live_server):
             route.fulfill(json={"task": {"kind": "processing", "id": 999, "status": "queued", "task_type": "naming_apply"}})
         page.route('**/api/v2/naming/apply', apply)
         show_panel(page, None)
+        show_panel(page, 'changes')
         page.locator('[data-action="apply"]').click()
         page.wait_for_timeout(100)
         payload = [payload for path, payload in requests if path == 'naming/apply'][0]
@@ -363,6 +370,7 @@ def test_task_identity_notifications_retry_cancel_and_refresh_without_content(li
         assert page.locator('.wb-task').count() == 2
         assert page.locator('.wb-task progress').first.get_attribute('value') is None
         assert page.locator('[data-wb="notices"]').inner_text() == ''
+        page.locator('.wb-tasks > summary').click()
         page.locator('.wb-task').first.get_by_role('button', name='取消', exact=True).click()
         page.locator('.wb-task').nth(1).get_by_role('button', name='重试', exact=True).click()
         expect(page.locator('.wb-task').nth(1)).to_contain_text('运行中')
@@ -491,6 +499,7 @@ def test_completed_rename_reads_authoritative_paths_and_preserves_edits(live_ser
             page.wait_for_timeout(20)
         assert held_resolves and held_reports
         show_panel(page, None)
+        show_panel(page, 'naming')
         page.locator('[data-action="naming"]').click()
         expect(page.locator('[data-wb="rename"]')).to_be_visible()
         # Test-only execution adapter: rename only a synthetic file in tmp_path.
@@ -502,6 +511,7 @@ def test_completed_rename_reads_authoritative_paths_and_preserves_edits(live_ser
             route.fulfill(json={'task': task, 'batch_id': 'synthetic-batch'})
         page.route('**/api/v2/naming/apply', execute)
         show_panel(page, None)
+        show_panel(page, 'changes')
         page.locator('[data-action="apply"]').click()
         expect(page.locator('[data-wb="rename"]')).to_be_hidden()
         tasks[0] = {**tasks[0], 'status': 'completed', 'finished_at': '2026-11-04T00:00:00Z'}
@@ -602,6 +612,7 @@ def test_file_checks_stage_without_reset_and_resource_switch_requires_confirmati
                 {type:'upload',epoch:wb.epoch});
         }''')
         show_panel(page, None)
+        show_panel(page, 'naming')
         page.locator('[data-action="naming"]').click()
         expect(page.locator('[data-wb="rename"]')).to_be_visible()
         expect(page.locator('[data-wb="output"]')).to_contain_text('保留人工简介')

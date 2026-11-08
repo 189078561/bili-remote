@@ -43,6 +43,14 @@
       this.host.addEventListener("click", event => {
         const layout = event.target.closest("[data-layout]");
         if (layout) this.openPanel(layout.dataset.layout === "close" || layout.dataset.layout === "edit" ? null : layout.dataset.layout);
+        const format = event.target.closest("[data-format]");
+        if (format) {
+          const editor = this.host.querySelector('[data-edit="overview"]'), start=editor.selectionStart, end=editor.selectionEnd;
+          const selected=editor.value.slice(start,end), tag=format.dataset.format;
+          let text = `[${tag}]${selected}[/${tag}]`;
+          if (tag === 'url') { const url=global.prompt('链接地址', selected.startsWith('http') ? selected : 'https://'); if (!url) return; if (!safeURL(url)) { this.notice('请输入有效的 HTTP 或 HTTPS 地址',true); return; } text=`[url=${url}]${selected || url}[/url]`; }
+          editor.setRangeText(text,start,end,'select'); editor.dispatchEvent(new Event('input',{bubbles:true})); editor.focus();
+        }
         const previewMode = event.target.closest("[data-preview-mode]");
         if (previewMode) {
           const source = previewMode.dataset.previewMode === "source";
@@ -96,7 +104,7 @@
     setLayoutView(view) { this.openPanel(view === "preview" ? "preview" : null); }
     setResourceDrawer(open) { this.openPanel(open ? "resources" : null); }
     openPanel(name) {
-      if(name==='identity'){this.openPanel(null);this.el('query').focus();this.el('query').scrollIntoView({block:'center',behavior:'smooth'});return;}
+
       if (name && !this.host.querySelector(`[data-sheet="${name}"]`)) return;
       if (!this.activePanel && name) this.panelReturnFocus = document.activeElement;
       this.activePanel = name; this.drawerOpen = name === "resources";
@@ -125,7 +133,7 @@
         try {
           if (this.pendingAdjustmentEpoch === this.epoch) await this.resolve(null, this.overrides());
           else await this.applyRules();
-          if (ticket === this.adjustmentVersion && epoch === this.epoch) this.el("adjustment-status").textContent = "预览已更新；确认重命名前不会修改文件。";
+          if (ticket === this.adjustmentVersion && epoch === this.epoch) this.el("adjustment-status").textContent = "未执行改名 · 预览已更新";
         } catch(error) {
           if (ticket === this.adjustmentVersion && epoch === this.epoch) { this.el("adjustment-status").textContent = error.message; this.notice(error.message,true); }
         }
@@ -139,12 +147,26 @@
       this.el("resource-media").textContent = [common('resolution'),common('video_codec'),common('audio_codec'),common('audio_channels'),ctx?.episode?.season ? `第 ${val(ctx.episode.season)} 季` : '',ctx?.episode?.scope==='season'?'整季':ctx?.episode?.episode?`第 ${val(ctx.episode.episode)} 集`:'',ctx?`${files.length} 个媒体文件`:''].filter(Boolean).join(' · ');
       const identified=files.filter(file=>Number(val(file.episode?.episode))>0).length;
       this.el('season-summary').textContent=ctx?.episode?.scope==='season'?`共 ${files.length} 个媒体文件 · 已识别集号 ${identified} · 待确认 ${files.length-identified} · 命名冲突 ${this.preview?.conflicts?.length??ctx?.conflicts?.length??0}`:'';
-      this.el("identity-title").textContent = "影视识别与文件命名";
+      this.el("identity-title").textContent = "影视匹配";
+      this.el("identity-name").textContent = identity ? (ctx.titles?.find(title=>title.source !== 'manual')?.text || val(ctx.metadata?.title) || '已匹配作品') : '尚未匹配影视资料';
+      this.el("match-status").textContent = identity?.confirmed ? '已确认' : identity ? '待确认' : '待匹配';
+      this.el("match-status").classList.toggle('confirmed',Boolean(identity?.confirmed));
       if (this.resources.length) { this.el("resource").textContent = val(ctx?.selected_title) || this.resources[0].relative_path.split("/").at(-1); this.el("context-summary").textContent = this.resources.length === 1 ? this.resources[0].relative_path : `${this.resources.length} 项工作资源 · ${this.resources[0].relative_path} 等`; }
-      this.el("provider-status").textContent = ctx ? [identity?.tmdb_id ? `TMDB #${identity.tmdb_id}` : "TMDB 未匹配", identity?.bangumi_id ? `Bangumi #${identity.bangumi_id}` : "Bangumi 未匹配", identity?.confirmed ? "身份已确认" : "可搜索资料或手动输入名称"].join(" · ") : "TMDB / Bangumi：等待识别";
-      if (this.preview?.context_revision === ctx?.revision && this.preview) this.el("adjustment-status").textContent = "预览已更新；确认重命名前不会修改文件。";
+      this.el("provider-status").textContent = ctx ? [val(ctx.metadata?.year),({movie:"电影",series:"剧集",anime:"动画"})[identity?.media_type],identity?.tmdb_id ? `TMDB #${identity.tmdb_id}` : "TMDB 未匹配", identity?.bangumi_id ? `Bangumi #${identity.bangumi_id}` : "Bangumi 未匹配", identity?.confirmed ? "身份已确认" : "可搜索资料或手动输入名称"].filter(Boolean).join(" · ") : "TMDB / Bangumi：等待识别";
+      if (this.preview?.context_revision === ctx?.revision && this.preview) this.el("adjustment-status").textContent = "未执行改名 · 预览已更新";
       else if (this.advancedPreview) this.el("adjustment-status").textContent = "高级预览已更新；请在命名详情中确认执行。";
       this.el("resource").title = this.resources.map(item => item.relative_path).join("\n");
+      const first = this.el("rename-list").firstElementChild;
+      this.el("rename-summary").replaceChildren(...(first ? [...first.childNodes].map(child=>child.cloneNode(true)) : []));
+      this.el("change-count").textContent = `查看 ${this.el("rename-list").children.length} 项变更`;
+      this.el("naming-status").hidden = !!first && !this.el("rename").hidden;
+      const resultRows = this.el("artifact-summary"); resultRows.replaceChildren();
+      for (const artifact of this.artifacts) {
+        const item=node('button',null,'wb-artifact'); item.type='button';
+        const name=({report:'媒体报告',torrent:'种子文件',screenshot:'截图',collage:'缩略图',upload:'图床链接'})[artifact.kind] || '工具产物';
+        item.append(node('strong',name),node('span',artifact.resource?.relative_path?.split('/').at(-1) || `#${artifact.id}`));
+        item.onclick=()=>this.setTab(artifact.kind === 'report' ? 'report' : artifact.kind === 'torrent' ? 'torrent' : 'images'); resultRows.append(item);
+      }
       for (const [name,count] of [["images",this.images.length],["report",this.artifacts.filter(x=>x.kind==="report").length],["torrent",this.el("torrents").children.length]]) this.el(`${name}-count`).textContent = count ? `${count} 项产物` : "";
     }
     notice(message, error = false) {
@@ -199,7 +221,8 @@
       try {
         if (!Array.isArray(items) || !items.length || items.length > 1000) throw new Error("请选择 1 至 1000 项资源");
         if (items.some(item => !item.is_dir && !["directory", "video", "file"].includes(item.kind))) throw new Error("请选择视频文件或整季目录");
-        resources = items.map(ref);
+        const candidates = items.map(ref);
+        resources = candidates.filter((item,index) => candidates.findIndex(other=>other.root_key===item.root_key && other.relative_path===item.relative_path) === index && !candidates.some(parent=>parent.kind==='directory' && parent.root_key===item.root_key && item.relative_path.startsWith(parent.relative_path + '/')));
       } catch (error) { this.notice(error.message, true); return false; }
       const selectedSignature = signature(resources), selectionVersion = ++this.selectionVersion, previousEpoch = this.epoch;
       const includesDirectory = resources.some(item => item.kind === "directory");
@@ -379,7 +402,8 @@
       const result = name === "release_title" ? await this.api.title(this.context, this.readRule("title-rule")) : await this.api.subtitle(this.context, this.readRule("subtitle-rule", this.context.effective_rules?.subtitle_rule || {}));
       if (!current() || this.context?.revision !== revision || result.context_revision !== revision || this.fields[name] !== edit || fieldVersion !== (this.fieldVersions[name] || 0) || (!wasDirty && this.dirty.has(name))) return;
       this.dirty.delete(name); this.setField(name, result.text); this.editVersion++; this.scheduleCompose();
-      if (result.warnings?.length) this.notice(result.warnings.map(x => x.message).join("；"));
+      const warning = this.host.querySelector(`[data-lock="${name}"]`);
+      if (result.warnings?.length) warning.textContent = result.warnings.map(x => x.message).join("；");
     }
     scheduleCompose() {
       if (this.destroyed) return;

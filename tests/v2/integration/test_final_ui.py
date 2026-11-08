@@ -86,3 +86,68 @@ def test_final_ui_files_selection_and_details(live_server):
     finally:
         browser.close()
         playwright.stop()
+
+
+def test_final_ui_workbench_resource_editing_and_readonly_preview(live_server):
+    from tests.v2.integration.test_final_product import seed
+    base, app = live_server
+    source = seed(app)
+    playwright, browser, page, errors = browser_session(base, legacy=False)
+    try:
+        page.locator('.app-tabs [data-view=files]').click()
+        page.locator(f'#file-browser-host .file-row[data-path="{source.name}"] .file-check').check()
+        page.locator('#file-browser-host').get_by_role('button', name='进入工作台', exact=True).click()
+        page.wait_for_function('V2Workbench.context && V2Workbench.preview')
+        expect(page.locator('[data-sheet=resources]')).to_be_hidden()
+        expect(page.locator('[data-sheet=identity]')).to_be_hidden()
+        page.locator('[data-wb=selected-title]').fill('Motion Study')
+        expect(page.locator('[data-wb=rename-summary]')).to_contain_text('Motion.Study', timeout=15000)
+        page.locator('[data-edit=release_title]').fill('Motion Study S01 · 合成媒体验收')
+        page.locator('[data-edit=subtitle]').fill('合成短片 / 本地媒体参数')
+        page.locator('[data-edit=overview]').fill('隔离环境生成的合成视频，用于验证真实工具流程。人工编辑保留。')
+        expect(page.locator('[data-wb=output]')).to_contain_text('人工编辑保留')
+        for width, height in ((1440, 900), (390, 844)):
+            page.set_viewport_size({'width':width,'height':height})
+            page.wait_for_function('V2Workbench.preview?.context_revision === V2Workbench.context?.revision && !V2Workbench.pendingAdjustmentEpoch')
+            page.evaluate('scrollTo(0,0)')
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            page.screenshot(path=str(ARTIFACTS / f'workbench-{width}.png'))
+            page.locator('[data-layout=identity]').click()
+            expect(page.locator('[data-wb=query]')).to_be_visible()
+            page.locator('[data-action=resolve]').click()
+            expect(page.locator('[data-edit=release_title]')).to_have_value('Motion Study S01 · 合成媒体验收')
+            page.locator('[data-sheet=identity] [data-layout=close]').click()
+            page.locator('[data-layout=changes]').click()
+            expect(page.locator('[data-wb=rename-list]')).to_contain_text('Motion.Study')
+            page.screenshot(path=str(ARTIFACTS / f'workbench-changes-{width}.png'))
+            page.locator('[data-sheet=changes] [data-layout=close]').click()
+            assert source.exists()
+        page.locator('[data-layout=preview]').click()
+        page.context.grant_permissions(['clipboard-read','clipboard-write'])
+        page.locator('[data-copy=content]').click()
+        assert '人工编辑保留' in page.evaluate('navigator.clipboard.readText()')
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_final_ui_parent_child_selection_deduplicates_before_processing(live_server):
+    base, _ = live_server
+    playwright, browser, page, errors = browser_session(base, legacy=False)
+    try:
+        page.wait_for_function('window.V2Workbench')
+        result = page.evaluate('''async () => {
+          const api=V2Workbench.api;
+          const refs=await Promise.all(['Media','Media/episode01.mp4'].map(relative_path=>api.request('/api/v2/resources/reference',{root_key:'downloads',relative_path})));
+          await V2Workbench.select([refs[0],refs[1],refs[1]]);
+          return {resources:V2Workbench.resources,files:V2Workbench.context.files};
+        }''')
+        assert len(result['resources']) == 1
+        assert result['resources'][0]['relative_path'] == 'Media'
+        paths = [item['ref']['relative_path'] for item in result['files']]
+        assert paths == ['Media/episode01.mp4']
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
