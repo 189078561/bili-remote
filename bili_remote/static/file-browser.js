@@ -14,10 +14,17 @@
   ];
 
   function icon(kind, isDir) {
-    const node = element("span", `file-icon ${isDir ? "folder" : "document"}`);
-    node.setAttribute("aria-hidden", "true");
-    node.textContent = isDir ? "▰" : kind === "image" ? "▧" : kind === "video" ? "▶" : "▤";
+    const node = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    node.setAttribute("class", `ws-icon file-icon ${isDir ? "folder" : "document"}`);
+    node.setAttribute("viewBox", "0 0 24 24"); node.setAttribute("aria-hidden", "true");
+    const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    const name = isDir ? "folder" : kind === "image" ? "image" : kind === "video" ? "film" : "file";
+    use.setAttribute("href", `/static/v2/shared/icons.svg#${name}`); node.append(use);
     return node;
+  }
+
+  function chevron() {
+    const node = icon("file", false); node.querySelector("use").setAttribute("href", "/static/v2/shared/icons.svg#chevron"); return node;
   }
 
   function itemKey(rootKey, relativePath) {
@@ -88,6 +95,9 @@
       if (!host) throw new Error("文件浏览器缺少挂载节点");
       this.host = host;
       this.mode = options.mode || "full";
+      // Presentation is independent of selection/operation capabilities.
+      this.displayMode = options.displayMode || (this.mode === "full" ? "full" : "picker");
+      if (!["full", "compact", "picker"].includes(this.displayMode)) throw new Error("未知文件浏览展示模式");
       this.scope = options.scope || "browse";
       this.rootKeys = options.rootKeys || null;
       this.selectionType = options.selectionType || (this.mode === "full" ? "both" : "file");
@@ -122,12 +132,14 @@
       this.clipboard = null;
       this.taskTimer = null;
       this.el = {};
+      this.uiAbort = new AbortController(); this.detailVersion = 0; this.detailSignature = null;
       this.build();
     }
 
     build() {
       this.host.replaceChildren();
       const shell = element("div", "unified-file-browser fb-v2");
+      shell.dataset.displayMode = this.displayMode;
       const heading = element("div", "file-browser-heading");
       heading.append(element("strong", null, this.title));
       if (this.mode !== "full") {
@@ -157,8 +169,7 @@
       treeToggle.setAttribute("aria-controls", treePane.id);
       treeToggle.setAttribute("aria-expanded", "false");
       treeToggle.addEventListener("click", () => {
-        const open = shell.classList.toggle("fb-tree-open");
-        treeToggle.setAttribute("aria-expanded", String(open));
+        this.setTreeOpen(!shell.classList.contains("fb-tree-open"));
       });
       heading.append(treeToggle);
 
@@ -214,10 +225,14 @@
         toolbarActions.append(search);
       }
 
+      const batchActions = element("div", "file-batch-actions");
+      batchActions.setAttribute("aria-label", "文件操作");
       const operationButtons = {};
       const more = element("details", "file-more-menu");
       const summary = element("summary", "button ghost small", "更多操作");
       const moreItems = element("div", "file-more-items");
+      const dangerItems = element("div", "file-danger-actions");
+      dangerItems.setAttribute("aria-label", "危险操作");
       more.append(summary,moreItems);
       if (this.mode === "full") {
         for (const [key, label] of [
@@ -235,31 +250,36 @@
         ]) {
           if (key === "workbench" && !this.onOpenWorkbench) continue;
           const node = button(label, key === "delete" ? "button danger small" : "button ghost small");
-          node.addEventListener("click", () => this.runAction(key));
-          if (["copy","cut","paste","move","delete"].includes(key)) {
-            moreItems.append(node);
+          node.addEventListener("click", () => { more.open = false; this.runAction(key); });
+          if (!["preview","copy","cut","paste","rename","workbench"].includes(key)) {
+            (key === "delete" ? dangerItems : moreItems).append(node);
             node.addEventListener("click",()=>more.open=false);
-          } else toolbarActions.append(node);
+          } else batchActions.append(node);
           operationButtons[key] = node;
         }
       }
-      if (this.mode === "full") toolbarActions.append(more);
+      if (this.mode === "full") { moreItems.append(dangerItems); batchActions.append(more); }
       if (this.allowMultiple) {
         const selectAll = element("label", "inline-check");
         const selectAllInput = document.createElement("input");
         selectAllInput.type = "checkbox";
         selectAllInput.addEventListener("change", () => this.selectAll(selectAllInput.checked));
-        selectAll.append(selectAllInput, element("span", null, "全选当前页"));
-        toolbarActions.prepend(selectAll);
+        selectAll.append(selectAllInput, element("span", null, this.displayMode === "compact" ? "全选" : "全选当前页"));
+        selectAllInput.setAttribute("aria-label", "全选当前页");
+        batchActions.prepend(selectAll);
         this.el.selectAll = selectAllInput;
       }
       if (this.mode !== "full") {
         const confirm = button(this.confirmLabel, "button primary small");
         confirm.addEventListener("click", () => this.confirm());
-        toolbarActions.append(confirm);
+        // One persistent confirmation footer; moving it does not replace its listener.
+        this.el.confirmFooter = element("div", "file-confirm-footer");
+        this.el.confirmFooter.append(confirm);
         this.el.confirmButton = confirm;
       }
-      toolbar.append(pathBlock, toolbarActions);
+      batchActions.prepend(selectionCount);
+      batchActions.append(selectionHint);
+      toolbar.append(pathBlock, toolbarActions, batchActions);
 
       const listError = element("p", "form-error");
       listError.setAttribute("role", "alert");
@@ -285,7 +305,38 @@
       pager.append(prev, pageLabel, next);
       listPane.append(toolbar, listError, actionStatus, listHead, list, pager);
       browserShell.append(treePane, listPane);
-      shell.append(heading, roots, browserShell);
+      treePane.prepend(roots);
+      const treeClose = button("关闭目录", "button ghost fb-pane-close");
+      treeClose.addEventListener("click", () => this.setTreeOpen(false)); treeHeading.append(treeClose);
+      shell.append(heading, browserShell);
+      if (this.displayMode === "compact") {
+        shell.insertBefore(roots, browserShell);
+        // Move the existing tree, retaining its references and listeners. The
+        // directory disclosure leaves the file list as the only large scroller.
+        const disclosure = element("details", "file-tree-disclosure");
+        disclosure.append(element("summary", null, "目录树"), treePane);
+        pathBlock.append(disclosure);
+      }
+      if (this.el.confirmFooter) shell.append(this.el.confirmFooter);
+      const backdrop = button("", "fb-pane-backdrop"); backdrop.hidden = true;
+      backdrop.setAttribute("aria-label", "关闭侧栏");
+      backdrop.addEventListener("click", () => { this.setTreeOpen(false); this.setDetailsOpen(false); });
+      shell.append(backdrop);
+      Object.assign(this.el, {shell, browserShell, treePane, treeToggle, listPane, backdrop, heading});
+      if (this.displayMode === "full") {
+        const details = element("aside", "file-details-pane");
+        details.id = `${treePane.id}-details`; details.setAttribute("aria-label", "文件详情");
+        const detailHeading = element("div", "file-pane-heading");
+        const detailClose = button("收起", "button ghost");
+        detailClose.addEventListener("click", () => this.setDetailsOpen(false));
+        detailHeading.append(element("strong", null, "文件详情"), detailClose);
+        const detailBody = element("div", "file-details-body"); details.append(detailHeading, detailBody);
+        const detailToggle = button("文件详情", "button ghost fb-details-toggle");
+        detailToggle.setAttribute("aria-controls", details.id);
+        detailToggle.addEventListener("click", () => this.setDetailsOpen(details.hidden));
+        heading.append(detailToggle); browserShell.append(details);
+        Object.assign(this.el, {details, detailBody, detailToggle});
+      }
       this.host.append(shell);
 
       Object.assign(this.el, {
@@ -308,6 +359,133 @@
         directionButton
       });
       this.updateOperationButtons();
+      this.setupLayout();
+    }
+
+    setupLayout() {
+      this.narrowTree = matchMedia("(max-width: 900px)");
+      this.narrowDetails = matchMedia("(max-width: 1179px)");
+      const opts = {signal: this.uiAbort.signal};
+      this.setDetailsOpen(!this.narrowDetails.matches);
+      this.narrowTree.addEventListener("change", () => this.setTreeOpen(false), opts);
+      this.narrowDetails.addEventListener("change", () => this.setDetailsOpen(!this.narrowDetails.matches), opts);
+      this.el.shell.addEventListener("keydown", event => {
+        const pane = this.activePane;
+        if (!pane) return;
+        if (event.key === "Escape") { event.preventDefault(); this.setTreeOpen(false); this.setDetailsOpen(false); }
+        if (event.key === "Tab") {
+          const nodes = [...pane.querySelectorAll('button,input,select,textarea,a[href],[tabindex="0"]')].filter(node => !node.disabled && node.getClientRects().length);
+          if (event.shiftKey && document.activeElement === nodes[0]) { event.preventDefault(); nodes.at(-1)?.focus(); }
+          else if (!event.shiftKey && document.activeElement === nodes.at(-1)) { event.preventDefault(); nodes[0]?.focus(); }
+        }
+      }, opts);
+    }
+
+    setTreeOpen(open) {
+      this.el.shell.classList.toggle("fb-tree-open", open);
+      this.el.treeToggle.setAttribute("aria-expanded", String(open));
+      this.syncOverlay(open && this.narrowTree.matches ? this.el.treePane : null);
+    }
+
+    setDetailsOpen(open) {
+      if (!this.el.details) return;
+      this.el.details.hidden = !open;
+      this.el.shell.classList.toggle("fb-details-collapsed", !open);
+      this.el.detailToggle.setAttribute("aria-expanded", String(open));
+      this.syncOverlay(open && this.narrowDetails.matches ? this.el.details : null);
+      if (open) this.renderDetails();
+    }
+
+    syncOverlay(pane) {
+      const previous = this.activePane;
+      if (previous) { previous.removeAttribute("role"); previous.removeAttribute("aria-modal"); }
+      this.activePane = pane;
+      this.el.backdrop.hidden = !pane;
+      this.el.shell.classList.toggle("fb-overlay-open", !!pane);
+      this.el.listPane.inert = !!pane;
+      if (pane) {
+        if (!previous) this.paneReturnFocus = document.activeElement;
+        pane.setAttribute("role", "dialog"); pane.setAttribute("aria-modal", "true");
+        pane.querySelector('button')?.focus();
+      } else if (previous) { this.paneReturnFocus?.focus(); this.paneReturnFocus = null; }
+    }
+
+    async renderDetails() {
+      if (!this.el.detailBody) return;
+      const items = this.selectedItems(), rootKey = this.rootKey;
+      const signature = JSON.stringify([rootKey, items.map(item => [item.relative_path, item.fingerprint])]);
+      if (signature === this.detailSignature) return;
+      this.detailSignature = signature;
+      const version = ++this.detailVersion, body = this.el.detailBody;
+      const current = () => !this.destroyed && version === this.detailVersion;
+      body.replaceChildren();
+      this.el.details.dataset.selection = items.length > 1 ? "multiple" : items.length ? (items[0].is_dir ? "directory" : "single") : "empty";
+      if (!items.length) { body.append(element("p", "file-details-empty", "选择一个文件查看详情与预览；勾选多项进行批量操作。")); return; }
+      if (items.length > 1) {
+        const directories = items.filter(item => item.is_dir).length;
+        body.append(element("h3", null, `已选择 ${items.length} 项`), element("p", null, `${directories} 个目录，${items.length - directories} 个文件`), element("p", "muted", `文件合计 ${formatBytes(items.reduce((sum, item) => sum + (item.is_dir ? 0 : item.size_bytes || 0), 0))}；不含目录内容`));
+        const list = element("ul", "file-selection-list");
+        items.forEach(item => list.append(element("li", null, item.name))); body.append(list);
+      } else {
+        const item = items[0];
+        body.append(icon(item.kind, item.is_dir), element("h3", null, item.name));
+        const metadata = element("dl", "file-detail-metadata");
+        for (const [label, value] of [["类型", item.is_dir ? "目录" : ({image:"图片",text:"文本",video:"视频"}[item.kind] || item.extension || "文件")], ["大小", item.is_dir ? "目录内容未统计" : formatBytes(item.size_bytes)], ["修改时间", formatDate(item.mtime_ns)], ["路径", `${this.root()?.label || rootKey} / ${item.relative_path}`]]) metadata.append(element("dt", null, label), element("dd", null, value));
+        body.append(metadata);
+        if (item.is_dir) {
+          const enter = button("进入目录"); enter.onclick = () => { this.navigate(rootKey, item.relative_path); if (this.narrowDetails.matches) this.setDetailsOpen(false); }; body.append(enter);
+        } else if (item.kind === "image") {
+          const image = document.createElement("img"); image.className = "file-detail-image"; image.alt = item.name;
+          image.src = `/api/files/image?${new URLSearchParams({root_key: rootKey, path: item.relative_path, v: item.mtime_ns})}`;
+          image.onerror = () => { if (current()) image.replaceWith(element("p", "form-error", "图片加载失败")); }; body.append(image);
+        } else if (item.kind === "text") {
+          const preview = element("pre", "file-detail-text", "正在读取文本…"); body.append(preview);
+          api(`/api/files/text?${new URLSearchParams({root_key: rootKey, path: item.relative_path})}`)
+            .then(doc => { if (current()) preview.textContent = doc.content; })
+            .catch(error => { if (current()) preview.textContent = error.message; });
+        } else if (item.kind === "video") {
+          const media = element("div", "file-detail-media");
+          const read = button("读取媒体信息"); read.disabled = !this.onMediaInfo;
+          read.onclick = async () => {
+            read.disabled = true;
+            try { await this.onMediaInfo(item, rootKey, {render: panel => { if (current()) media.replaceChildren(panel); }}); }
+            catch (error) { if (current()) media.textContent = error.message; }
+            finally { read.disabled = false; }
+          };
+          const shots = element("div", "file-detail-shots");
+          const loadShots = button("查看已有截图");
+          loadShots.onclick = async () => {
+            loadShots.disabled = true; shots.textContent = "正在读取截图记录…";
+            try {
+              const response = await api("/api/files/screenshots/sessions?limit=200");
+              const matches = (source) => source?.root_key === rootKey && source.relative_path === item.relative_path && source.fingerprint === item.fingerprint;
+              const sessions = response.sessions.filter(session => session.image_count > 0 && (session.sources || []).some(matches));
+              let images = [];
+              // A newer queued/failed record must not hide an older available image.
+              for (const session of sessions) {
+                if (!current()) return;
+                const data = await api(`/api/files/screenshots/${encodeURIComponent(session.id)}`);
+                if (!current()) return;
+                images = (data.videos || []).filter(video => matches(video.source)).flatMap(video => video.items || []).filter(image => image.available && image.status === "completed");
+                if (images.length) break;
+              }
+              if (!current()) return;
+              shots.replaceChildren();
+              for (const entry of images) { const image = document.createElement("img"); image.alt = "已有截图"; image.loading = "lazy"; image.src = `/api/files/image?${new URLSearchParams({root_key: "images", path: entry.relative_path})}`; shots.append(image); }
+              if (!images.length) shots.textContent = "最近 200 条记录中暂无当前文件版本的可用截图";
+            } catch (error) { if (current()) shots.textContent = error.message; }
+            finally { loadShots.disabled = false; }
+          };
+          body.append(read, media, loadShots, shots);
+        }
+      }
+      const actions = element("div", "file-detail-actions"); actions.setAttribute("aria-label", "快捷操作");
+      for (const name of ["preview", "rename", "copy", "cut", "workbench", "collage", "report", "upload", "torrent"]) {
+        const original = this.el.operationButtons?.[name];
+        if (!original || original.disabled) continue;
+        const action = button(original.textContent); action.setAttribute("aria-label", `${original.textContent}（详情）`); action.onclick = () => { if (current() && !original.disabled) original.click(); }; actions.append(action);
+      }
+      body.append(actions);
     }
 
     async init() {
@@ -339,7 +517,7 @@
         const node = button("", "root-shortcut");
         node.classList.toggle("active", root.key === this.rootKey);
         node.title = root.path;
-        const marker = element("span", "root-marker");
+        const marker = this.displayMode === "compact" ? icon("file", true) : element("span", "root-marker");
         const text = element("span", "root-text");
         text.append(element("strong", null, root.label));
         text.append(element("small", null, root.available === false ? "目录不可访问" : root.path));
@@ -367,6 +545,7 @@
     }
 
     async navigate(rootKey, path, options = {}) {
+      if (this.narrowTree?.matches && this.el.shell.classList.contains("fb-tree-open")) this.setTreeOpen(false);
       this.rootKey = rootKey;
       this.path = path || "";
       this.page = 1;
@@ -611,7 +790,7 @@
 
     updateSelection(notify = true) {
       const count = this.selected.size;
-      this.el.selectionCount.textContent = count ? `已选择 ${count} 项` : "未选择";
+      this.el.selectionCount.textContent = count || this.displayMode === "compact" ? `已选择 ${count} 项` : "未选择";
       if (this.el.selectionHint) {
         const items = this.selectedItems();
         const protectedItems = items.filter(item => item.protection_reason);
@@ -636,6 +815,7 @@
         if (check) check.checked = selected;
       }
       this.updateOperationButtons();
+      this.renderDetails();
       if (notify) this.onSelectionChange?.(this.selectedItems().map(item => ({...item, root_key: this.rootKey})));
     }
 
@@ -763,7 +943,7 @@
       const items = this.selectedItems();
       if (!items.length) return;
       if (["report", "upload", "torrent", "publish"].includes(action) && this.onTool) {
-        this.onTool(action, items, this.rootKey); return;
+        await this.onTool(action, items, this.rootKey); return;
       }
       if (action === "workbench" && this.onOpenWorkbench) await this.onOpenWorkbench(items, this.rootKey);
       else if (action === "preview") await this.openPreview(items[0]);
@@ -777,7 +957,7 @@
       else if (action === "mediaRename" && this.onOpenNaming) await this.onOpenNaming(items, this.rootKey);
       else if (action === "mediaRename" && this.onMediaRename) this.onMediaRename(this.selectedVideos());
       else if (action === "collage" && this.onCollage) {
-        this.onCollage(this.selectedCollageVideos(), this.rootKey);
+        await this.onCollage(this.selectedCollageVideos(), this.rootKey);
       }
     }
 
@@ -1180,13 +1360,14 @@
       showModal(panel);
     }
 
-    confirm() {
+    async confirm() {
       if (!this.onConfirm) return;
-      if (this.selectionType === "directory") {
-        this.onConfirm({root_key: this.rootKey, relative_path: this.path});
-      } else {
-        this.onConfirm(this.selectedItems().map(item => ({root_key: this.rootKey, ...item})));
-      }
+      try {
+        const selection = this.selectionType === "directory"
+          ? {root_key: this.rootKey, relative_path: this.path}
+          : this.selectedItems().map(item => ({root_key: this.rootKey, ...item}));
+        return await this.onConfirm(selection);
+      } catch (error) { if (!this.destroyed) this.el.listError.textContent = error.message; }
     }
 
     treeKey(rootKey, path) {
@@ -1254,7 +1435,7 @@
       row.style.setProperty("--tree-depth", "0");
       const key = this.treeKey(root.key, "");
       const expanded = this.expanded.has(key);
-      const toggle = button(expanded ? "▾" : "▸", "tree-toggle");
+      const toggle = button("", "tree-toggle"); toggle.append(chevron());
       toggle.addEventListener("click", async event => {
         event.stopPropagation();
         if (expanded) this.expanded.delete(key);
@@ -1297,7 +1478,7 @@
       row.style.setProperty("--tree-depth", String(depth));
       const key = this.treeKey(root.key, item.relative_path);
       const expanded = this.expanded.has(key);
-      const toggle = button(item.is_dir ? (expanded ? "▾" : "▸") : "·", "tree-toggle");
+      const toggle = button("", "tree-toggle"); if (item.is_dir) toggle.append(chevron());
       toggle.disabled = !item.is_dir || !item.allowed;
       toggle.addEventListener("click", async event => {
         event.stopPropagation();
@@ -1361,6 +1542,7 @@
     }
 
     destroy() {
+      this.uiAbort.abort(); this.detailVersion++;
       this.destroyed = true;
       ++this.loadSeq;
       clearTimeout(this.searchTimer);

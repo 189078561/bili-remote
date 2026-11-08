@@ -295,7 +295,7 @@
         } else {
           await api("/api/jobs", {method: "POST", body: JSON.stringify({url, api_mode: modeField.value, format_selector: formatField.value, all_parts: $(`[data-all-parts] input`).checked, output_template: template, output_dir: outputDir, title: state.resolved.title || null, uploader: state.resolved.uploader || null})});
         }
-        notice.textContent = "任务已加入现有下载队列；完成后可打开文件管理查看文件。";
+        notice.textContent = "任务已加入现有下载队列；完成后可进入工作台识别并预览命名。";
         await refreshJobs();
       } catch (error) { showError(error.message); }
       finally { submitButton.disabled = false; }
@@ -318,7 +318,9 @@
       if (["queued", "running"].includes(job.status)) addAction(actions, "取消", () => taskAction(job, "cancel"), "is-danger");
       if (["failed", "cancelled", "auth_required"].includes(job.status)) addAction(actions, "重试", () => taskAction(job, "retry"));
       addAction(actions, "查看日志", () => showLog(job.id));
-      if (job.status === "completed" && options.onOpenFile) addAction(actions, "文件管理", () => options.onOpenFile(job));
+      if (job.status === "completed" && options.onOpenFile) addAction(actions, "进入工作台", async () => {
+        try { await options.onOpenFile(job); } catch (error) { showError(error.message); }
+      });
       card.append(actions);
       return card;
     }

@@ -8,6 +8,7 @@
   function safeURL(value, local = false) {
     try { const url = new URL(value, global.location.href); return ["http:", "https:"].includes(url.protocol) && (!local || url.origin === global.location.origin) && !url.username && !url.password ? url.href : null; } catch { return null; }
   }
+  const signature = (resources, fingerprints = true) => JSON.stringify(resources.map(item => [item.root_key, item.relative_path, item.kind, ...(fingerprints ? [item.fingerprint] : [])]).sort());
   const ref = item => {
     if (!["downloads", "torrents", "images", "release_info"].includes(item.root_key) || !item.relative_path || item.relative_path.startsWith("/") || item.relative_path.includes("\\") || item.relative_path.split("/").some(x => ["..", ".", ""].includes(x)) || item.relative_path.includes("\0") || !item.fingerprint) throw new Error("资源引用无效，请在文件浏览器中重新选择");
     return {root_key: item.root_key, relative_path: item.relative_path, kind: item.is_dir || item.kind === "directory" ? "directory" : "file", fingerprint: item.fingerprint};
@@ -16,19 +17,23 @@
     constructor(host, {api = new global.BiliWorkbenchAPI(), FileBrowser = global.FileBrowser, pollInterval = 2000} = {}) {
       if (!host) throw new Error("工作台缺少挂载节点");
       this.host = host; this.api = api; this.FileBrowser = FileBrowser; this.pollInterval = pollInterval;
-      this.context = null; this.resources = []; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
+      this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
       this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.content = ""; this.images = []; this.artifacts = []; this.links = [];
       this.fieldVersions = {}; this.tasks = new Map(); this.jobs = new Map(); this.notified = new Set(); this.applied = new Set(); this.pending = new Set(); this.timers = new Set(); this.abort = new AbortController(); this.destroyed = false;
-      this.listen(); this.setTab("content");
+      this.listen(); this.setTab("content"); this.setupLayout();
     }
     el(name) { return this.host.querySelector(`[data-wb="${name}"]`); }
     button(action) { return this.host.querySelector(`[data-action="${action}"]`); }
     async init() {
       if (this.FileBrowser) {
-        this.browser = new this.FileBrowser(this.el("browser"), {mode: "select-file", scope: "browse", rootKeys: ["downloads", "torrents", "images", "release_info"], selectionType: "both", allowMultiple: true, onSelectionChange: items => this.select(items), title: "资源文件"});
+        this.browser = new this.FileBrowser(this.el("browser"), {
+          mode: "select-file", displayMode: "picker", scope: "browse",
+          rootKeys: ["downloads", "torrents", "images", "release_info"], selectionType: "both", allowMultiple: true,
+          onSelectionChange: items => this.stageSelection(items),
+          onLoadStart: () => this.stageSelection(this.browser?.selectedItems() || []),
+          onConfirm: async items => { this.selecting = true; try { const accepted = await this.select(items); if (accepted) this.openPanel(null); return accepted; } finally { this.selecting = false; } }, confirmLabel: "使用所选资源", title: "资源文件"
+        });
         try { await this.browser.init(); } catch (error) { this.el("browser").textContent = error.message; this.notice(error.message, true); }
-        // The embedded selector uses live selection; no second confirmation step.
-        if (this.browser.el.confirmButton) this.browser.el.confirmButton.hidden = true;
       } else this.el("browser").textContent = "统一文件浏览器尚未加载，请由主页面加载共享组件。";
       await this.refreshTasks(true);
       return this;
@@ -36,6 +41,14 @@
     listen() {
       const opts = {signal: this.abort.signal};
       this.host.addEventListener("click", event => {
+        const layout = event.target.closest("[data-layout]");
+        if (layout) this.openPanel(layout.dataset.layout === "close" || layout.dataset.layout === "edit" ? null : layout.dataset.layout);
+        const previewMode = event.target.closest("[data-preview-mode]");
+        if (previewMode) {
+          const source = previewMode.dataset.previewMode === "source";
+          this.el("source").hidden = !source; this.el("effect").hidden = source;
+          this.host.querySelectorAll("[data-preview-mode]").forEach(button => button.setAttribute("aria-pressed", String(button === previewMode)));
+        }
         const tab = event.target.closest("[data-tab]"); if (tab) this.setTab(tab.dataset.tab);
         const copy = event.target.closest("[data-copy]"); if (copy) this.copy(copy.dataset.copy);
         const action = event.target.closest("[data-action]");
@@ -44,83 +57,174 @@
       this.host.addEventListener("input", event => {
         const name = event.target.dataset.edit;
         if (name) { this.fieldVersions[name] = (this.fieldVersions[name] || 0) + 1; this.dirty.add(name); this.setField(name, event.target.value); this.editVersion++; this.scheduleCompose(); }
-        if (["naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode"].includes(event.target.dataset.wb)) this.invalidateRename();
+        if (["naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode", "scope", "naming-type"].includes(event.target.dataset.wb)) this.scheduleAdjustment(event.target.dataset.wb);
       }, opts);
       this.el("query").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); this.run("search", this.button("search")); } }, opts);
-      this.el("file-search").addEventListener("input", () => {
-        this.cancelTimer(this.searchTimer);
-        this.searchTimer = this.later(() => { if (this.browser) { this.browser.search = this.el("file-search").value; this.browser.loadDirectory({page: 1, clearSelection: true}).catch(error => this.notice(error.message, true)); } }, 250);
-      }, opts);
-      this.el("subtitle-rule").addEventListener("change", () => this.invalidateRename(), opts);
-      this.el("cast-limit").addEventListener("change", () => this.invalidateRename(), opts);
       this.el("format").addEventListener("change", () => { this.editVersion++; this.scheduleCompose(); }, opts);
-      this.el("scope").addEventListener("change", () => { this.invalidateRename(); if (this.resources.length) this.run("overrides", this.button("overrides")); }, opts);
-      this.host.querySelector('[role="tablist"]').addEventListener("keydown", event => {
-        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-        event.preventDefault(); const tabs = [...this.host.querySelectorAll("[data-tab]")]; let index = tabs.indexOf(document.activeElement);
-        index = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-        this.setTab(tabs[index].dataset.tab); tabs[index].focus();
+      this.el("title-choice").addEventListener("change", () => {
+        const title = this.context?.titles?.find(item => item.id === this.el("title-choice").value);
+        if (title) { this.el("selected-title").value = title.text; this.scheduleAdjustment("selected-title"); }
       }, opts);
     }
+    // Only presentation state lives here. A sheet never mounts a new form/browser.
     setTab(name) {
-      this.host.querySelectorAll("[data-tab]").forEach(el => { const active = el.dataset.tab === name; el.setAttribute("aria-selected", String(active)); el.tabIndex = active ? 0 : -1; });
-      this.host.querySelectorAll("[data-panel]").forEach(el => el.hidden = el.dataset.panel !== name);
+      this.host.querySelectorAll("[data-panel]").forEach(el => el.hidden = el.dataset.panel !== "content" && el.dataset.panel !== name);
+      this.el("tool-heading").textContent = {images:"缩略图与图床",report:"媒体报告",torrent:"种子制作"}[name] || "辅助工具";
+      this.openPanel(name === "content" ? null : "tools");
+    }
+    setupLayout() {
+      this.host.addEventListener("keydown", event => {
+        if (!this.activePanel || document.querySelector('#modal:not(.hidden)') || document.querySelector('dialog[open]')) return;
+        if (event.key === "Escape") { event.preventDefault(); this.openPanel(null); }
+        if (event.key === "Tab") {
+          const sheet = this.host.querySelector(`[data-sheet="${this.activePanel}"]`);
+          const nodes = [...sheet.querySelectorAll('button,input,select,textarea,summary,a[href],[tabindex="0"]')].filter(el => !el.disabled && el.getClientRects().length);
+          if (event.shiftKey && document.activeElement === nodes[0]) { event.preventDefault(); nodes.at(-1)?.focus(); }
+          else if (!event.shiftKey && document.activeElement === nodes.at(-1)) { event.preventDefault(); nodes[0]?.focus(); }
+        }
+      }, {signal:this.abort.signal});
+    }
+    setLayoutView(view) { this.openPanel(view === "preview" ? "preview" : null); }
+    setResourceDrawer(open) { this.openPanel(open ? "resources" : null); }
+    openPanel(name) {
+      if (name && !this.host.querySelector(`[data-sheet="${name}"]`)) return;
+      if (!this.activePanel && name) this.panelReturnFocus = document.activeElement;
+      this.activePanel = name; this.drawerOpen = name === "resources";
+      this.host.classList.toggle("wb-panel-open", !!name);
+      this.host.querySelector('.wb-backdrop').hidden = !name;
+      this.host.querySelector('.wb-surface').inert = !!name;
+      this.host.querySelectorAll('[data-sheet]').forEach(el => el.hidden = el.dataset.sheet !== name);
+      this.host.querySelector('[data-layout="resources"]').setAttribute("aria-expanded", String(this.drawerOpen));
+      if (name) this.host.querySelector(`[data-sheet="${name}"] button`)?.focus();
+      else { this.panelReturnFocus?.focus(); this.panelReturnFocus = null; }
+    }
+    scheduleAdjustment(field) {
+      this.cancelTimer(this.adjustmentTimer);
+      if (field === "naming-type") {
+        this.namingType = this.el("naming-type").value;
+        this.el("naming-rule").value = this.context?.effective_rules?.naming_rule?.templates?.[this.namingType] || "";
+      }
+      if (["selected-title","season","episode","scope"].includes(field)) this.pendingAdjustmentEpoch = this.epoch;
+      if (["naming-rule","subtitle-rule","title-rule","cast-limit","naming-type"].includes(field)) this.rememberRules();
+      this.invalidateRename(); this.versions.context = (this.versions.context || 0) + 1;
+      const ticket = this.adjustmentVersion = (this.adjustmentVersion || 0) + 1, epoch = this.epoch;
+      this.contextChanged(); // Also invalidates in-flight advanced naming requests.
+      this.el("adjustment-status").textContent = "正在更新命名预览…";
+      this.adjustmentTimer = this.later(async () => {
+        if (ticket !== this.adjustmentVersion || epoch !== this.epoch || !this.context) return;
+        try {
+          if (this.pendingAdjustmentEpoch === this.epoch) await this.resolve(null, this.overrides());
+          else await this.applyRules();
+          if (ticket === this.adjustmentVersion && epoch === this.epoch) this.el("adjustment-status").textContent = "预览已更新；确认重命名前不会修改文件。";
+        } catch(error) {
+          if (ticket === this.adjustmentVersion && epoch === this.epoch) { this.el("adjustment-status").textContent = error.message; this.notice(error.message,true); }
+        }
+      }, 450);
+    }
+    renderPresentation() {
+      const ctx = this.context, identity = ctx?.identity, probe = ctx?.files?.[0]?.probe || {};
+      this.el("resource-status").textContent = !this.resources.length ? "尚未选择资源" : this.busy("resolve") ? "正在识别" : !ctx ? "等待识别结果" : identity?.confirmed ? "影视身份已确认" : "媒体已读取 · 影视身份待确认";
+      this.el("resource-media").textContent = [val(probe.resolution), val(probe.video_codec), ctx?.episode?.season ? `第 ${val(ctx.episode.season)} 季` : "", ctx?.episode?.episode ? `第 ${val(ctx.episode.episode)} 集` : "", ctx ? `${ctx.files?.length || 0} 个媒体文件` : ""].filter(Boolean).join(" · ");
+      this.el("identity-title").textContent = "影视识别与文件命名";
+      if (this.resources.length) { this.el("resource").textContent = val(ctx?.selected_title) || this.resources[0].relative_path.split("/").at(-1); this.el("context-summary").textContent = this.resources.length === 1 ? this.resources[0].relative_path : `${this.resources.length} 项工作资源 · ${this.resources[0].relative_path} 等`; }
+      this.el("provider-status").textContent = ctx ? [identity?.tmdb_id ? `TMDB #${identity.tmdb_id}` : "TMDB 未匹配", identity?.bangumi_id ? `Bangumi #${identity.bangumi_id}` : "Bangumi 未匹配", identity?.confirmed ? "身份已确认" : "可搜索资料或手动输入名称"].join(" · ") : "TMDB / Bangumi：等待识别";
+      if (this.preview?.context_revision === ctx?.revision && this.preview) this.el("adjustment-status").textContent = "预览已更新；确认重命名前不会修改文件。";
+      else if (this.advancedPreview) this.el("adjustment-status").textContent = "高级预览已更新；请在命名详情中确认执行。";
+      this.el("resource").title = this.resources.map(item => item.relative_path).join("\n");
+      for (const [name,count] of [["images",this.images.length],["report",this.artifacts.filter(x=>x.kind==="report").length],["torrent",this.el("torrents").children.length]]) this.el(`${name}-count`).textContent = count ? `${count} 项产物` : "";
     }
     notice(message, error = false) {
       if (this.destroyed) return;
       if ([...this.el("notices").children].some(item => item.querySelector("span")?.textContent === message)) return;
       const item = node("div", null, `wb-notice${error ? " wb-error" : ""}`); item.append(node("span", message));
-      const close = node("button", "×"); close.type = "button"; close.setAttribute("aria-label", "关闭通知"); close.onclick = () => item.remove(); item.append(close); this.el("notices").append(item);
+      const close = node("button", "关闭"); close.type = "button"; close.setAttribute("aria-label", "关闭通知"); close.onclick = () => item.remove(); item.append(close); this.el("notices").append(item);
       while (this.el("notices").children.length > 3) this.el("notices").firstChild.remove();
       if (!error) this.later(() => item.remove(), 4500);
     }
     later(fn, delay) { const timer = setTimeout(() => { this.timers.delete(timer); if (!this.destroyed) fn(); }, delay); this.timers.add(timer); return timer; }
     cancelTimer(timer) { clearTimeout(timer); this.timers.delete(timer); }
     stamp(channel) { const version = (this.versions[channel] || 0) + 1; this.versions[channel] = version; const epoch = this.epoch; return () => !this.destroyed && epoch === this.epoch && version === this.versions[channel]; }
+    busy(action) { return this.pending.has(`${this.epoch}:${action}`); }
+    contextChanged(reason = "update") { this.host.dispatchEvent(new CustomEvent("v2:context", {detail: {context: this.context, epoch: this.epoch, reason}})); }
     async run(action, button) {
-      if (this.pending.has(action)) return;
-      this.pending.add(action); if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
+      if (this.busy(action)) return;
+      if (["overrides","rules","naming","resolve"].includes(action)) this.cancelTimer(this.adjustmentTimer);
+      const epoch = this.epoch, pendingKey = `${epoch}:${action}`;
+      this.pending.add(pendingKey); if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
       try {
         const handlers = {resolve: () => this.resolve(), search: () => this.search(), overrides: () => this.resolve(null, this.overrides()), rules: () => this.applyRules(), naming: () => this.naming(), apply: () => this.applyRename(), title: () => this.generate("release_title", true), subtitle: () => this.generate("subtitle", true), probe: () => this.probe(), screenshots: () => this.screenshots(), report: () => this.report(), torrent: () => this.torrent(), upload: () => this.upload()};
-        await handlers[action]?.();
-      } catch (error) { this.notice(error.message, true); }
-      finally { this.pending.delete(action); button?.removeAttribute("aria-busy"); this.controls(); }
+        if (["rules", "naming"].includes(action) && this.pendingAdjustmentEpoch === this.epoch) await this.resolve(null, this.overrides());
+        else await handlers[action]?.();
+      } catch (error) { if (epoch === this.epoch) this.notice(error.message, true); }
+      finally { this.pending.delete(pendingKey); if (!this.busy(action)) button?.removeAttribute("aria-busy"); this.controls(); }
     }
     controls() {
       if (this.destroyed) return;
+      this.renderPresentation();
       const has = this.resources.length > 0, ctx = !!this.context;
-      for (const action of ["resolve", "overrides", "probe", "screenshots"]) this.button(action).disabled = !has || this.pending.has(action);
-      for (const action of ["naming", "title", "subtitle", "rules"]) this.button(action).disabled = !ctx || this.pending.has(action);
-      for (const action of ["report", "torrent"]) this.button(action).disabled = this.resources.length !== 1 || this.pending.has(action);
-      this.button("upload").disabled = !this.images.length || this.pending.has("upload");
-      this.button("search").disabled = this.pending.has("search");
-      this.button("apply").disabled = !this.preview?.can_apply || this.preview?.context_revision !== this.context?.revision || !this.preview?.preview_token || !this.preview?.operations?.length || this.preview?.conflicts?.length > 0 || !(Date.parse(this.preview?.expires_at) > Date.now()) || this.pending.has("apply");
+      for (const action of ["resolve", "overrides", "probe", "screenshots"]) this.button(action).disabled = !has || this.busy(action);
+      for (const action of ["naming", "title", "subtitle", "rules"]) this.button(action).disabled = !ctx || this.busy(action);
+      for (const action of ["report", "torrent"]) this.button(action).disabled = this.resources.length !== 1 || this.busy(action);
+      this.button("upload").disabled = !this.images.length || this.busy("upload");
+      this.button("search").disabled = this.busy("search");
+      this.button("apply").disabled = !this.preview?.can_apply || this.preview?.context_revision !== this.context?.revision || !this.preview?.preview_token || !this.preview?.operations?.length || this.preview?.conflicts?.length > 0 || !(Date.parse(this.preview?.expires_at) > Date.now()) || this.busy("apply");
       this.host.querySelectorAll("[data-copy]").forEach(el => el.disabled = !(el.dataset.copy === "content" ? this.content : this.fields[el.dataset.copy]));
     }
-    invalidateRename() { this.versions.naming = (this.versions.naming || 0) + 1; this.preview = null; this.el("rename").hidden = true; this.button("apply").disabled = true; }
+    invalidateRename() { this.advancedPreview = false; this.versions.naming = (this.versions.naming || 0) + 1; this.preview = null; this.el("rename").hidden = true; this.button("apply").disabled = true; this.el("naming-status").textContent = this.context ? "命名预览待更新；不会自动修改文件。" : "选择资源后，将显示服务返回的目标文件名。"; }
     invalidateContent() {
       this.content = ""; this.el("output").textContent = ""; this.el("rich-preview").replaceChildren(); this.el("html-preview").hidden = true; this.el("html-preview").removeAttribute("srcdoc");
       this.el("validation").textContent = this.context ? "正在更新预览…" : "等待识别服务返回上下文"; this.controls();
     }
+    stageSelection(items) {
+      this.pendingSelection = items.slice();
+      this.el("selection-status").textContent = `已勾选 ${items.length} 项，点击后正式切换工作资源。`;
+    }
     async select(items, {context = null, origins = []} = {}) {
-      this.epoch++; this.versions = {}; this.resources = []; this.context = null; this.origins = origins; this.dirty.clear(); this.editVersion++;
+      // Validate candidates before touching the active resource or any edited content.
+      let resources;
+      try {
+        if (!Array.isArray(items) || !items.length || items.length > 1000) throw new Error("请选择 1 至 1000 项资源");
+        if (items.some(item => !item.is_dir && !["directory", "video", "file"].includes(item.kind))) throw new Error("请选择视频文件或整季目录");
+        resources = items.map(ref);
+      } catch (error) { this.notice(error.message, true); return false; }
+      const selectedSignature = signature(resources), selectionVersion = ++this.selectionVersion, previousEpoch = this.epoch;
+      const includesDirectory = resources.some(item => item.kind === "directory");
+      if (!includesDirectory && (selectedSignature === signature(this.resources) || selectedSignature === this.selectionSignature)) return true;
+      if (includesDirectory || signature(resources, false) === signature(this.resources, false)) {
+        // Browse uses quick fingerprints; handoffs use canonical V2 references. Compare
+        // through the existing reference service before treating the same path as new.
+        try {
+          resources = await Promise.all(resources.map(resource => this.api.request("/api/v2/resources/reference", resource)));
+        } catch (error) {
+          if (selectionVersion === this.selectionVersion && previousEpoch === this.epoch) this.notice(error.message, true);
+          return false;
+        }
+        if (selectionVersion !== this.selectionVersion || previousEpoch !== this.epoch || this.destroyed) return false;
+        if (signature(resources) === signature(this.resources)) { this.selectionSignature = selectedSignature; return true; }
+      }
+      if (this.dirty.size && !global.confirm("当前资源有人工编辑的标题、副标题或简介。切换资源将清空这些编辑及当前发布产物。是否确认切换？取消可继续编辑和复制当前内容。")) return false;
+      const epoch = ++this.epoch;
+      this.versions = {}; this.resources = resources; this.selectionSignature = selectedSignature;
+      this.context = null; this.origins = origins; this.dirty.clear(); this.editVersion++;
+      this.cancelTimer(this.composeTimer); this.contextChanged("selection");
       this.images = []; this.artifacts = []; this.links = []; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
       for (const field of Object.keys(this.fields)) this.setField(field, "");
       ["images", "reports", "torrents", "upload-links", "issues", "candidates", "media"].forEach(name => this.el(name).replaceChildren());
       ["naming-rule", "subtitle-rule", "title-rule", "selected-title", "season", "episode"].forEach(name => this.el(name).value = "");
-      try {
-        if (items.some(item => !item.is_dir && item.kind !== "directory" && item.kind !== "video" && item.kind !== "file")) throw new Error("请选择视频文件或整季目录");
-        this.resources = items.map(ref);
-        if (this.resources.length > 1000) throw new Error("一次最多选择 1000 个资源");
-      } catch (error) { this.resources = []; this.notice(error.message, true); }
-      this.el("scope").value = this.resources.some(item => item.kind === "directory") || this.resources.length > 1 ? "season" : "single";
-      this.el("resource").textContent = this.resources.length ? `${this.resources.length} 项资源 · ${this.resources[0].relative_path.split("/").at(-1)}` : "选择视频或整季目录";
+      this.el("scope").value = resources.some(item => item.kind === "directory") || resources.length > 1 ? "season" : "single";
+      this.el("resource").textContent = `${resources.length} 项资源 · ${resources[0].relative_path.split("/").at(-1)}`;
       this.el("context-summary").textContent = "资料和参数尚未识别";
       this.invalidateContent();
-      if (!this.resources.length) return;
-      if (context && JSON.stringify(context.resources) === JSON.stringify(this.resources)) { this.context = context; this.renderContext(); await this.generateAll(); }
-      else { try { await this.resolve(); } catch (error) { this.el("issues").textContent = error.message; this.notice(error.message, true); } }
+      try {
+        if (context && signature(context.resources) === signature(resources)) {
+          this.context = context; this.contextChanged(); this.renderContext(); await this.generateAll();
+          if (epoch === this.epoch && this.context) await this.naming();
+        } else await this.resolve();
+      } catch (error) {
+        if (epoch === this.epoch) { this.el("issues").textContent = error.message; this.notice(error.message, true); }
+      }
       this.controls();
+      return !this.destroyed && epoch === this.epoch;
     }
     overrides() {
       const result = {episode: {scope: this.el("scope").value}};
@@ -133,11 +237,32 @@
     }
     async resolve(selection = null, manual_overrides = {}) {
       if (!this.resources.length) throw new Error("请先选择资源");
+      if (this.pendingAdjustmentEpoch === this.epoch) { manual_overrides = {...this.overrides(), ...manual_overrides}; this.rememberRules(); }
       this.invalidateRename(); this.invalidateContent(); const current = this.stamp("context");
-      const response = await this.api.resolve({resources: this.resources, origins: this.origins, selection, context: this.context, manual_overrides});
+      const payload = {resources: this.resources, origins: this.origins, selection, context: this.context, manual_overrides};
+      const previous = this.resolveRequest, epoch = this.epoch;
+      const request = async () => {
+        try { return await this.api.resolve(payload); }
+        catch (error) {
+          // Resolve advances a server revision. If an earlier response is still
+          // in transit, use that revision only as the base for the latest input;
+          // never render the older fields or reset the user's publication text.
+          if (error.code !== "stale_context" || !previous || previous.epoch !== epoch || previous.contextId !== payload.context?.context_id) throw error;
+          const older = await previous.promise.catch(() => null);
+          if (!older?.context || older.context.context_id !== payload.context?.context_id || signature(older.context.resources) !== signature(payload.resources)) throw error;
+          if (!current()) return older;
+          return this.api.resolve({...payload, context:older.context});
+        }
+      };
+      const pending = {epoch, contextId:payload.context?.context_id, promise:request()};
+      this.resolveRequest = pending;
+      const response = await pending.promise;
       if (!current()) return;
       if (!response.context || !Number.isInteger(response.context.revision)) throw new Error("识别服务未返回有效上下文");
-      this.context = response.context; this.resources = response.context.resources;
+      this.context = response.context;
+      if (this.localNamingRule?.epoch === this.epoch) this.context.effective_rules = {...this.context.effective_rules, naming_rule:this.localNamingRule.rule, ...(this.localNamingRule.subtitle ? {subtitle_rule:this.localNamingRule.subtitle} : {})};
+      this.pendingAdjustmentEpoch = null;
+      this.resources = response.context.resources; this.contextChanged();
       for (const name of ["release_title", "subtitle"]) if (!this.dirty.has(name)) this.setField(name, "");
       this.renderContext(); await this.generateAll();
       const probeKey = JSON.stringify(this.resources);
@@ -145,18 +270,24 @@
         this.probedResources = probeKey;
         try { await this.probe(); } catch (error) { if (current()) this.notice(`媒体参数：${error.message}`, true); }
       }
+      if (current() && this.context) await this.naming();
     }
     renderContext() {
       const ctx = this.context; if (!ctx) return;
       this.el("context-summary").textContent = [val(ctx.selected_title) || "未确认影视身份", ctx.episode?.scope === "season" ? "整季" : "单集 / 单视频", `修订 ${ctx.revision}`, `${ctx.files?.length || 0} 个媒体文件`].join(" · ");
       this.el("selected-title").value = val(ctx.selected_title); this.el("season").value = val(ctx.episode?.season); this.el("episode").value = val(ctx.episode?.episode); this.el("scope").value = ctx.episode?.scope || this.el("scope").value;
-      this.el("issues").textContent = [...(ctx.warnings || []), ...(ctx.conflicts || [])].map(x => x.message).join("；");
-      this.namingType = ctx.episode?.scope === "season" ? "season" : ctx.identity?.media_type || "series";
+      this.el("issues").textContent = [...new Set([...(ctx.warnings || []), ...(ctx.conflicts || [])].map(x => x.message))].join("；");
+      this.namingType = ctx.effective_rules?.naming_rule?.template_id || ctx.identity?.media_type || "movie";
+      this.namingType = {anime_single:"anime",tv:"series"}[this.namingType] || this.namingType;
+      this.el("naming-type").value = this.namingType;
       this.el("naming-rule").value = ctx.effective_rules?.naming_rule?.templates?.[this.namingType] || "";
       this.el("naming-rule").disabled = !ctx.effective_rules?.naming_rule;
       this.el("subtitle-rule").value = ctx.effective_rules?.subtitle_rule?.template_id || "";
       this.el("cast-limit").value = String(ctx.effective_rules?.subtitle_rule?.cast_limit || 3);
       if (!this.dirty.has("overview")) this.setField("overview", val(ctx.metadata?.overview));
+      const choices = this.el("title-choice"); choices.replaceChildren(node("option", "选择中文、英文或其他译名")); choices.firstChild.value = "";
+      for (const title of ctx.titles || []) { const option = node("option", `${title.text} · ${title.language} / ${title.kind}`); option.value = title.id; option.selected = title.text === val(ctx.selected_title); choices.append(option); }
+      choices.disabled = !(ctx.titles || []).length;
       this.el("media").replaceChildren();
       for (const file of ctx.files || []) {
         const row = node("div", null, "wb-report"), probe = file.probe || {};
@@ -172,15 +303,29 @@
     readRule(name, fallback = {}) {
       const raw = this.el(name).value.trim();
       if (name === "title-rule") return raw ? {template: raw} : fallback;
-      if (name === "naming-rule") { const rule = this.context?.effective_rules?.naming_rule || fallback; return raw ? {...rule, templates: {...rule.templates, [this.namingType]: raw}} : rule; }
+      if (name === "naming-rule") {
+        const rule = this.context?.effective_rules?.naming_rule || fallback, kind = this.el("naming-type").value || this.namingType;
+        const templates = {...rule.templates};
+        if (raw) templates[kind] = raw; else delete templates[kind];
+        return {...rule, template_id:kind, templates};
+      }
       const rule = this.context?.effective_rules?.subtitle_rule || fallback;
       return {...rule, ...(raw ? {template_id: raw} : {}), cast_limit: this.el("cast-limit").value === "all" ? "all" : Number(this.el("cast-limit").value)};
     }
-    async applyRules() {
+    rememberRules() {
       if (!this.context) return;
       const naming = this.readRule("naming-rule"), subtitle = this.readRule("subtitle-rule"); this.readRule("title-rule");
+      if (this.pendingAdjustmentEpoch === this.epoch && this.el("selected-title").value.trim()) {
+        naming.custom_title = this.el("selected-title").value.trim(); delete naming.selected_title_id;
+      }
+      this.localNamingRule = {epoch:this.epoch, rule:naming, subtitle};
       this.context = {...this.context, effective_rules: {...this.context.effective_rules, naming_rule: naming, subtitle_rule: subtitle}};
-      this.invalidateRename(); this.invalidateContent(); await this.naming(); await this.generateAll();
+    }
+    async applyRules() {
+      if (!this.context) return;
+      this.rememberRules(); this.contextChanged();
+      const epoch = this.epoch;
+      this.invalidateRename(); this.invalidateContent(); await this.naming(); if (epoch === this.epoch) await this.generateAll();
     }
     async search() {
       const query = this.el("query").value.trim(); if (!query) throw new Error("请输入作品名称"); const current = this.stamp("search"), text = query;
@@ -189,14 +334,17 @@
       if (!result.items.length) container.append(node("p", "未找到候选，可以调整名称后重试。", "wb-note"));
       result.items.forEach(candidate => {
         const button = node("button", candidate.title || candidate.name || candidate.id); button.type = "button"; button.disabled = !this.resources.length;
-        button.onclick = () => this.withButton(button, () => this.resolve({provider: candidate.provider, id: String(candidate.id), media_type: candidate.media_type})); container.append(button);
+        button.onclick = () => this.withButton(button, async () => { const epoch = this.epoch; await this.resolve({provider: candidate.provider, id: String(candidate.id), media_type: candidate.media_type}); if (epoch === this.epoch && this.context?.identity) this.openPanel(null); }); container.append(button);
       });
     }
     setField(name, value) {
-      this.fields[name] = String(value ?? ""); this.host.querySelector(`[data-edit="${name}"]`).value = this.fields[name]; this.host.querySelector(`[data-preview="${name}"]`).textContent = this.fields[name]; this.host.querySelector(`[data-lock="${name}"]`).textContent = this.dirty.has(name) ? "人工编辑 · 自动识别会保留此内容" : ""; this.controls();
+      this.fields[name] = String(value ?? ""); this.host.querySelector(`[data-edit="${name}"]`).value = this.fields[name]; this.host.querySelector(`[data-lock="${name}"]`).textContent = this.dirty.has(name) ? "人工编辑 · 自动识别会保留此内容" : ""; this.controls();
     }
     async generateAll() {
-      const results = await Promise.allSettled([this.generate("release_title"), this.generate("subtitle")]); results.forEach(result => { if (result.status === "rejected") this.notice(result.reason.message, true); }); this.scheduleCompose();
+      const epoch = this.epoch;
+      const results = await Promise.allSettled([this.generate("release_title"), this.generate("subtitle")]);
+      if (epoch !== this.epoch || this.destroyed) return;
+      results.forEach(result => { if (result.status === "rejected") this.notice(result.reason.message, true); }); this.scheduleCompose();
     }
     async generate(name, explicit = false) {
       if (!this.context || (!explicit && this.dirty.has(name))) return;
@@ -228,15 +376,27 @@
         if (format !== "html") global.BiliWorkbenchPreview?.render(this.el("rich-preview"), result.content, format);
         const messages = [...(result.validation.errors || []), ...(result.validation.warnings || [])].map(x => typeof x === "string" ? x : x.message);
         this.el("validation").textContent = (result.validation.ready ? "发布内容已就绪" : "内容尚有缺项，可预览复制") + (messages.length ? ` · ${messages.join("；")}` : "");
-        if (format === "html") { this.el("html-preview").srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; img-src https: http:; style-src &#39;unsafe-inline&#39;"><style>body{font:14px/1.6 system-ui;overflow-wrap:anywhere}img{max-width:100%}pre{white-space:pre-wrap}</style>' + result.content; this.el("html-preview").hidden = false; }
+        if (format === "html") { this.el("html-preview").srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; img-src https: http:; style-src &#39;unsafe-inline&#39;"><style>body{font:14px/1.6 system-ui;overflow-wrap:anywhere;color-scheme:light dark;color:CanvasText;background:Canvas}img{max-width:100%}pre{white-space:pre-wrap}</style>' + result.content; this.el("html-preview").hidden = false; }
         this.controls();
       } catch (error) { if (current() && edit === this.editVersion) { this.el("validation").textContent = error.message; this.notice(error.message, true); } }
+    }
+    showAdvancedPreview(result) {
+      if (!result) { if (this.advancedPreview) this.invalidateRename(); return; }
+      // Display the actual advanced result; execution/undo remains owned by that
+      // component, with its original token, confirmation and task scope guards.
+      this.preview = null; this.advancedPreview = true;
+      this.el("rename-list").replaceChildren();
+      for (const op of result.operations || []) {
+        const row = node("div", null, "wb-rename-row"); row.append(node("span", op.source.relative_path), node("strong", `→ ${op.target_relative_path}`)); this.el("rename-list").append(row);
+      }
+      this.el("rename-warning").textContent = [result.undo ? "撤销预览：在命名详情中确认执行。" : "高级命名预览：在命名详情中确认执行。", ...(result.conflicts || []).map(x=>x.message)].join("；");
+      this.el("rename").hidden = false; this.controls();
     }
     async naming() {
       const current = this.stamp("naming"), revision = this.context.revision;
       const preview = await this.api.naming(this.context, this.readRule("naming-rule", this.context.effective_rules?.naming_rule || {}));
       if (!current() || this.context?.revision !== revision || preview.context_revision < revision) return;
-      this.context = {...this.context, revision: preview.context_revision};
+      this.context = {...this.context, revision: preview.context_revision}; this.contextChanged();
       this.invalidateContent(); this.scheduleCompose();
       this.preview = preview; this.applyKey = global.crypto.randomUUID(); this.el("rename-list").replaceChildren();
       preview.operations.forEach(op => { const row = node("div", null, "wb-rename-row"); row.append(node("span", op.source.relative_path), node("strong", `→ ${op.target_relative_path}`)); this.el("rename-list").append(row); });
@@ -265,7 +425,7 @@
     async report() {
       const epoch=this.epoch, source=this.resources[0];
       const result=await this.api.request('/api/v2/reports',source);
-      this.el('reports').textContent='正在后台生成媒体报告…';
+      if (epoch === this.epoch) this.el('reports').textContent='正在后台生成媒体报告…';
       this.track(result.task,{type:'report',epoch});
     }
     async torrent() {
@@ -312,7 +472,11 @@
     async applyTask(task, job) {
       if (job.epoch !== this.epoch) return;
       if (job.type === "rename") {
-        this.context = null; this.resources = []; this.invalidateRename(); this.invalidateContent();
+        // An in-place rename keeps task ownership, but invalidates every outstanding
+        // read/preview. Increment existing counters rather than reusing old versions.
+        for (const channel of Object.keys(this.versions)) this.versions[channel]++;
+        this.selectionVersion++; this.selectionSignature = null;
+        this.context = null; this.resources = []; this.contextChanged("rename"); this.invalidateRename(); this.invalidateContent();
         this.el("issues").textContent = "重命名已完成，正在核对新路径与指纹…";
         const current = this.stamp("renamed");
         try {
@@ -330,6 +494,7 @@
           await this.browser?.loadDirectory({clearSelection: true});
           if (current()) {
             await this.resolve();
+            if (!current()) return;
             this.host.dispatchEvent(new CustomEvent('v2:renamed'));
             document.dispatchEvent(new CustomEvent('app:files-refresh'));
           }

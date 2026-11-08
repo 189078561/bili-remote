@@ -54,7 +54,7 @@ h1, .files-header h1, .settings-page h1 { font-size: var(--font-heading); font-w
 h2, .card-heading h2 { font-size: 16px; }
 .eyebrow { letter-spacing: .09em; font-size: 10px; color: var(--muted); }
 .muted, .files-header p, .hero p { font-size: var(--font-small); line-height: 1.6; }
-.card, .assistant-column, .module-record, .file-browser-shell, .assistant-result-pane { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: none; }
+.card, .assistant-column, .module-record, .assistant-result-pane { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: none; }
 .card { padding: var(--space-5); margin-bottom: var(--space-4); }
 .card-heading { gap: var(--space-3); margin-bottom: var(--space-4); }
 .button, .assistant-config .button, .thumbnail-actions .button, .assistant-job .button { border-radius: var(--radius-sm); font-size: var(--font-body); min-height: 36px; padding: 7px 12px; box-shadow: none; }
@@ -88,12 +88,8 @@ progress { display: block; width: 100%; height: 6px; accent-color: var(--brand);
 .overview-link { padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .overview-link strong { color: var(--ink); font-size: 15px; }
 .overview-link:hover { border-color: var(--brand); background: #f6f9ff; }
-.file-row { min-height: 44px; }
-.file-name { font-size: var(--font-body); }
-.file-row:hover { background: #f5f8fe; }
-.file-list-head { background: var(--surface-2); }
-.root-shortcut { border-radius: var(--radius-sm); }
 /* Two primary columns: shared FileBrowser and a working area, with configuration above results. */
+
 .assistant-grid { display: grid; grid-template-columns: minmax(270px, .7fr) minmax(0, 1.7fr); gap: var(--space-5); }
 .workbench-area { min-width: 0; display: grid; gap: var(--space-4); }
 .assistant-column { min-height: 0; padding: var(--space-4); }
@@ -174,7 +170,8 @@ progress { display: block; width: 100%; height: 6px; accent-color: var(--brand);
   .task-center { top: var(--header-height); right: 0; bottom: 0; width: 100%; border-radius: 0; padding: 20px 16px; }
   .modal-panel { border-radius: 0; }
   .app-notifications { bottom: 12px; right: 12px; }
-  /* Download rows become touch-friendly cards, retaining all actions and values. */
+/* Download rows become touch-friendly cards, retaining all actions and values. */
+
   #download-view .table-wrap { border: 0; overflow: visible; }
   #download-view table, #download-view tbody { display: block; }
   #download-view thead { display: none; }

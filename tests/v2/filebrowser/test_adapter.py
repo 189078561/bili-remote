@@ -98,3 +98,62 @@ def test_open_editor_keeps_original_root_after_background_navigation(live_server
     finally:
         browser.close()
         playwright.stop()
+
+
+def test_media_preview_and_cancelled_handoff_do_not_commit_context(live_server):
+    base, app = live_server
+    (app.state.services.settings.download_root / 'Media' / 'episode02.mp4').write_bytes(b'synthetic-video-2')
+    playwright, browser, page, errors = browser_session(base)
+
+    def resolve(route):
+        refs = route.request.post_data_json['resources']
+        route.fulfill(json={'context': {
+            'schema_version': 1, 'context_id': refs[0]['relative_path'], 'revision': 1,
+            'resources': refs, 'warnings': [],
+            'files': [{'ref': refs[0], 'probe': {'video_codec': {'value': 'H.265', 'source': 'ffprobe'}}}],
+        }, 'changes': [], 'capabilities': []})
+
+    page.route('**/api/v2/resources/resolve', resolve)
+    try:
+        host = mount(page, adapter=True)
+        host.locator('.file-row[data-path="Media"]').click()
+        page.wait_for_function('fb.data?.relative_path === "Media"')
+        page.evaluate('''async () => {
+          const item = fb.data.items.find(item => item.relative_path.endsWith('episode01.mp4'));
+          await fbAdapter.handoff('workbench', [item], fb.rootKey);
+          window.originalContext = sharedContext;
+          const previewItem = fb.data.items.find(item => item.relative_path.endsWith('episode02.mp4'));
+          await fbAdapter.mediaInfo(previewItem, fb.rootKey);
+        }''')
+        expect(page.locator('.fb-media-info')).to_contain_text('episode02.mp4')
+        expect(page.locator('.fb-media-info')).to_contain_text('H.265（ffprobe）')
+        assert page.evaluate('sharedContext === originalContext && workbenchContext === originalContext')
+        assert page.evaluate('sharedContext.resources[0].relative_path') == 'Media/episode01.mp4'
+        page.locator('.fb-media-info').get_by_role('button', name='关闭', exact=True).click()
+
+        result = page.evaluate('''async () => {
+          let offeredContext = null, contextAtConfirmation = null;
+          fbAdapter.openWorkbench = async context => {
+            offeredContext = context;
+            contextAtConfirmation = sharedContext;
+            return false;
+          };
+          const item = fb.data.items.find(item => item.relative_path.endsWith('episode02.mp4'));
+          await fbAdapter.handoff('workbench', [item], fb.rootKey);
+          return {
+            offeredPath: offeredContext.resources[0].relative_path,
+            unchangedBeforeConfirmation: contextAtConfirmation === originalContext,
+            unchangedAfterCancellation: sharedContext === originalContext,
+            workbenchUnchanged: workbenchContext === originalContext
+          };
+        }''')
+        assert result == {
+            'offeredPath': 'Media/episode02.mp4',
+            'unchangedBeforeConfirmation': True,
+            'unchangedAfterCancellation': True,
+            'workbenchUnchanged': True,
+        }
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()

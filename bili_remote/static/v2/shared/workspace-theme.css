@@ -1,0 +1,48 @@
+/* Semantic tokens for the two workspaces and the shared browser only. */
+:where(.br-workbench, .fb-v2, #files-view, #publish-view, .fb-media-info, body:has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar), #modal:has(.file-picker-dialog,.operation-dialog,.text-editor-dialog,.preview-dialog,.fb-media-info)) {
+  --ws-bg: #f6f7f9; --ws-surface: #fff; --ws-subtle: #f0f3f7;
+  --ws-ink: #202b3d; --ws-muted: #5e6d82; --ws-line: #dde3eb;
+  --ws-accent: #2464d8; --ws-selected: #edf3ff; --ws-danger: #b72d43;
+  color-scheme: light; color: var(--ws-ink);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :where(.br-workbench, .fb-v2, #files-view, #publish-view, .fb-media-info, body:has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar), #modal:has(.file-picker-dialog,.operation-dialog,.text-editor-dialog,.preview-dialog,.fb-media-info)) {
+    --ws-bg: #141b26; --ws-surface: #1b2533; --ws-subtle: #253244;
+    --ws-ink: #e5ebf4; --ws-muted: #a9b7cb; --ws-line: #37465b;
+    --ws-accent: #91b8ff; --ws-selected: #263e60; --ws-danger: #ff9eaf;
+    color-scheme: dark;
+  }
+}
+[data-theme="dark"] :where(.br-workbench, .fb-v2, #files-view, #publish-view, .fb-media-info, body:has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar), #modal:has(.file-picker-dialog,.operation-dialog,.text-editor-dialog,.preview-dialog,.fb-media-info)) {
+  --ws-bg: #141b26; --ws-surface: #1b2533; --ws-subtle: #253244;
+  --ws-ink: #e5ebf4; --ws-muted: #a9b7cb; --ws-line: #37465b;
+  --ws-accent: #91b8ff; --ws-selected: #263e60; --ws-danger: #ff9eaf;
+  color-scheme: dark;
+}
+.app-main > :is(#files-view, #publish-view) {padding:16px; max-width:none; background:var(--ws-bg); min-height:calc(100dvh - var(--header-height, 64px));}
+:where(.br-workbench, .fb-v2) {font:14px/1.6 system-ui,-apple-system,"PingFang SC",sans-serif;}
+:where(.br-workbench, .fb-v2) *, :where(.br-workbench, .fb-v2) *::before {box-sizing:border-box;}
+:where(.br-workbench, .fb-v2) :is(button, input, textarea, select, summary) {font:inherit;}
+:where(.br-workbench, .fb-v2) :is(button, select, input:not([type=checkbox]), textarea, summary.button) {
+  color:var(--ws-ink); background:var(--ws-surface); border:1px solid var(--ws-line);
+  border-radius:6px; min-height:38px; padding:7px 10px; max-width:100%; box-shadow:none;
+}
+:where(.br-workbench, .fb-v2) button {cursor:pointer;}
+:where(.br-workbench, .fb-v2) button:disabled {opacity:.45; cursor:not-allowed;}
+:where(.br-workbench, .fb-v2) :is(button, summary):hover {border-color:var(--ws-accent);}
+:where(.br-workbench, .fb-v2) :focus-visible {outline:2px solid var(--ws-accent); outline-offset:2px;}
+:where(.br-workbench, .fb-v2) [hidden], :where(.br-workbench, .fb-v2) .hidden {display:none!important;}
+:where(.br-workbench, .fb-v2) a {color:var(--ws-accent); overflow-wrap:anywhere;}
+.ws-icon {width:18px; height:18px; flex-shrink:0; fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round;}
+/* Shell colors follow the active workspace without restyling other pages. */
+body:has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar) {background:var(--ws-surface); color:var(--ws-ink); border-color:var(--ws-line);}
+body:has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar) :is(.button,.app-tab,.app-page-label,.muted,.brand) {color:var(--ws-muted); border-color:var(--ws-line);}
+body:has(:is(#files-view,#publish-view):not(.hidden)) .topbar .button {background:var(--ws-surface);}
+body:has(:is(#files-view,#publish-view):not(.hidden)) .app-sidebar .app-tab.active {background:var(--ws-selected); color:var(--ws-accent);}
+#modal:has(.file-picker-dialog,.operation-dialog,.text-editor-dialog,.preview-dialog,.fb-media-info) .modal-panel {background:var(--ws-surface); color:var(--ws-ink); border-color:var(--ws-line);}
+#modal:has(.file-picker-dialog,.operation-dialog,.text-editor-dialog,.preview-dialog,.fb-media-info) :is(input,textarea,select,.button) {color:var(--ws-ink); background:var(--ws-surface); border-color:var(--ws-line);}
+@media (max-width:900px) {
+  .app-main > :is(#files-view, #publish-view) {padding:12px;}
+  :where(.br-workbench, .fb-v2) :is(button, select, input:not([type=checkbox]), summary) {min-height:44px;}
+  :where(.br-workbench, .fb-v2) :is(input, select, textarea) {font-size:16px;}
+}

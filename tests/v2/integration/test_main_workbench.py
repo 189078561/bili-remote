@@ -1,6 +1,7 @@
 import subprocess
 import re
 from playwright.sync_api import expect
+from tests.v2.workbench.test_browser import show_panel
 from test_browser_modules import browser_session, live_server
 
 
@@ -15,9 +16,8 @@ def test_main_page_real_resource_naming_publish_and_rule_memory(live_server):
         expect(page.locator('#file-browser-host .file-row[data-path="Media"]')).to_be_visible()
         page.locator('#file-browser-host .file-row[data-path="Media"]').click()
         page.locator('#file-browser-host .file-row[data-path="Media/episode01.mp4"] .file-check').check()
-        page.locator('#file-browser-host').get_by_role('button',name='进入发种工作台').click()
-        expect(page.locator('[data-wb="context-summary"]')).to_contain_text('1 个媒体文件',timeout=15000)
-        page.locator('.wb-adjust > summary',has_text='调整识别与规则').click()
+        page.locator('#file-browser-host').get_by_role('button',name='进入发种工作台',exact=True).click()
+        expect(page.locator('[data-wb="resource-media"]')).to_contain_text('1 个媒体文件',timeout=15000)
         page.locator('[data-wb="selected-title"]').fill('Synthetic Work')
         page.locator('[data-wb="season"]').fill('1')
         page.locator('[data-wb="episode"]').fill('1')
@@ -28,9 +28,11 @@ def test_main_page_real_resource_naming_publish_and_rule_memory(live_server):
         page.locator('[data-action="naming"]').click()
         expect(page.locator('[data-wb="rename-list"]')).to_contain_text('Synthetic.Work')
         assert path.exists()  # Preview never writes.
+        show_panel(page, 'naming')
         page.locator('[data-wb="save-rules"]').click()
         expect(page.locator('#app-notifications')).to_contain_text('规则已保存')
         assert app.state.services.v2.memory.get()['layers']
+        show_panel(page)
         page.locator('[data-edit="release_title"]').fill('Manual keeps this')
         page.locator('[data-action="resolve"]').click()
         expect(page.locator('[data-edit="release_title"]')).to_have_value('Manual keeps this')

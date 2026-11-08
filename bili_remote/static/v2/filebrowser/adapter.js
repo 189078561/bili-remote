@@ -5,8 +5,9 @@
 
   // Keep one page-owned context. Never create a second resolver or naming algorithm.
   class FileBrowserAdapter {
-    constructor({getContext = () => null, setContext, openWorkbench, openNaming, request = api} = {}) {
+    constructor({getContext = () => null, getContextVersion = () => null, setContext, openWorkbench, openNaming, request = api} = {}) {
       this.getContext = getContext;
+      this.getContextVersion = getContextVersion;
       this.setContext = setContext;
       this.openWorkbench = openWorkbench;
       this.openNaming = openNaming;
@@ -27,9 +28,9 @@
       }));
     }
 
-    async contextFor(items, rootKey) {
+    async contextFor(items, rootKey, {commit = true} = {}) {
       const sequence = ++this.sequence;
-      const previous = this.getContext();
+      const previous = this.getContext(), version = this.getContextVersion();
       const revision = previous?.revision;
       const refs = await this.select(items, rootKey);
       let context = previous;
@@ -46,8 +47,8 @@
           throw new Error("识别服务返回的资源上下文不匹配");
         }
       }
-      if (sequence !== this.sequence || this.getContext() !== previous || previous?.revision !== revision) throw new Error("资源选择已更新，请重试");
-      if (context !== previous) {
+      if (sequence !== this.sequence || this.getContext() !== previous || this.getContextVersion() !== version || previous?.revision !== revision) throw new Error("资源选择已更新，请重试");
+      if (commit && context !== previous) {
         if (!this.setContext) throw new Error("尚未连接共享资源上下文");
         this.setContext(context);
       }
@@ -57,13 +58,16 @@
     async handoff(destination, items, rootKey) {
       const callback = destination === "naming" ? this.openNaming : this.openWorkbench;
       if (!callback) throw new Error("尚未连接对应工作台入口");
-      const context = await this.contextFor(items, rootKey);
-      await callback(context);
+      const previous = this.getContext();
+      const context = await this.contextFor(items, rootKey, {commit: false});
+      if (await callback(context) === false) return false;
+      // The destination owns confirmation and may already have committed a newer context.
+      if (this.getContext() === previous && context !== previous) this.setContext?.(context);
       return context;
     }
 
-    async mediaInfo(item, rootKey) {
-      const context = await this.contextFor([item], rootKey);
+    async mediaInfo(item, rootKey, {render = null} = {}) {
+      const context = await this.contextFor([item], rootKey, {commit: false});
       const ref = context.resources[0];
       const file = (context.files || []).find(entry => entry.ref.root_key === ref.root_key && entry.ref.relative_path === ref.relative_path);
       const panel = element("div", "fb-media-info operation-dialog");
@@ -86,6 +90,7 @@
       if (file?.probe?.probe_error) panel.append(element("p", "form-error", String(file.probe.probe_error)));
       for (const warning of context.warnings || []) panel.append(element("p", "rename-warning", warning.message));
       if (!file?.probe) panel.append(element("p", "rename-warning", "尚无媒体探测结果，请在识别与命名区域重新探测。"));
+      if (render) { render(panel); return context; }
       const close = document.createElement("button");
       close.type = "button"; close.className = "button ghost"; close.textContent = "关闭";
       close.addEventListener("click", closeModal); panel.append(close);
@@ -106,7 +111,7 @@
         },
         onOpenWorkbench: (items, root) => this.handoff("workbench", items, root),
         onOpenNaming: (items, root) => this.handoff("naming", items, root),
-        onMediaInfo: (item, root) => this.mediaInfo(item, root)
+        onMediaInfo: (item, root, options) => this.mediaInfo(item, root, options)
       });
     }
   }

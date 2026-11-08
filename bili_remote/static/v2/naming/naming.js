@@ -1,17 +1,22 @@
 /* Session-memory-only UI. All recognition, mapping and names come from V2 APIs. */
-export function mount(container, { request, selectResources, onContextChange = () => {}, onTask = () => {}, context = null } = {}) {
+export function mount(container, { request, selectResources, onContextChange = () => {}, onTask = () => {}, onPreview = () => {}, getTaskScope = () => ({}), context = null } = {}) {
   if (typeof request !== "function" || typeof selectResources !== "function") throw new Error("Naming requires authenticated request and shared resource selector");
   let current = context ? structuredClone(context) : null;
   let resources = current?.resources || [];
   let preview = null;
   let generation = 0;
+  let resourceGeneration = 0;
   let lastBatch = null;
   let manualSidecars = [];
+  let editedControls = new WeakSet();
   let disposed = false;
   const root = document.createElement("section");
   root.className = "v2-naming";
   root.setAttribute("aria-label", "智能识别与命名");
   container.replaceChildren(root);
+  // Synchronize untouched controls from the shared context without overwriting
+  // unsubmitted advanced edits when the main workbench refreshes its preview.
+  for (const event of ["input", "change"]) root.addEventListener(event, e => editedControls.add(e.target));
   const el = (tag, text, parent = root) => {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
@@ -42,7 +47,7 @@ export function mount(container, { request, selectResources, onContextChange = (
   };
   function invalidate() {
     generation += 1; preview = null; apply.disabled = true;
-    output.replaceChildren();
+    output.replaceChildren(); onPreview(null, getTaskScope());
   }
   async function run(action) {
     try { await action(); } catch (error) {
@@ -60,9 +65,10 @@ export function mount(container, { request, selectResources, onContextChange = (
   }
   const type = select("资源类型", [["movie", "电影"], ["series", "电视剧"], ["anime", "动画"]], toolbar);
   button("选择视频 / 目录", async () => {
+    const ticket = generation;
     const selected = await selectResources();
-    if (!selected?.length || disposed) return;
-    resources = selected; current = null; manualSidecars = []; files.replaceChildren(); invalidate();
+    if (!selected?.length || ticket !== generation || disposed) return;
+    resources = selected; current = null; manualSidecars = []; lastBatch = null; resourceGeneration += 1; files.replaceChildren(); invalidate();
     status.textContent = `已选择 ${resources.length} 个资源，请识别或手动填写资料。`;
   });
   button("探测与识别", () => analyze());
@@ -109,9 +115,11 @@ export function mount(container, { request, selectResources, onContextChange = (
   const offset = input("季集偏移", "0", "number", memory);
   let memoryRevision = 0;
   button("读取规则", async () => {
+    const ticket = generation;
     const key = identityKey();
     const params = scope.value === "global" ? "" : `?identity_key=${encodeURIComponent(key)}&season_key=${season.value}`;
     const result = await api("/api/v2/naming/memory" + params);
+    if (ticket !== generation || disposed) return;
     memoryRevision = result.revision?.[scope.value] || 0;
     const saved = result.effective?.naming_rule || {};
     source.value = saved.source?.value ?? saved.source ?? "WEB-DL";
@@ -122,8 +130,10 @@ export function mount(container, { request, selectResources, onContextChange = (
   }, memory);
   scope.addEventListener("change", () => { memoryRevision = 0; });
   button("保存规则", async () => {
+    const ticket = generation;
     const result = await api("/api/v2/naming/memory", "PUT", { scope: scope.value, identity_key: scope.value === "global" ? "global" : identityKey(), season_key: scope.value === "season" ? number(season.value, 1) : -1,
       expected_revision: memoryRevision, ...(customTitle.value ? { selected_title: customTitle.value } : {}), naming_rule: collectRules(), episode_rules: { offset: number(offset.value, 0) } });
+    if (ticket !== generation || disposed) return;
     memoryRevision = result.revision;
     status.textContent = "已保存规则；仅保存偏好和映射，不保存生成文件名。";
   }, memory);
@@ -136,8 +146,10 @@ export function mount(container, { request, selectResources, onContextChange = (
   }
   const actions = el("div"); actions.className = "v2-naming__toolbar";
   button("生成命名预览", async () => {
-    if (!current) await analyze();
-    const ticket = generation;
+    if (!current && !await analyze()) return;
+    if (!current || disposed) return;
+    const ticket = ++generation, taskScope = {...getTaskScope()};
+    preview = null; apply.disabled = true; output.replaceChildren();
     const overrides = { file_values: {}, episode_overrides: {}, manual_names: {}, sidecars: manualSidecars };
     for (const row of files.querySelectorAll("[data-file]")) {
       const fields = {};
@@ -152,25 +164,39 @@ export function mount(container, { request, selectResources, onContextChange = (
     if (ticket !== generation || disposed) return;
     preview = result;
     current.revision = result.context_revision;
-    if (year.value) current.metadata.year = {value: year.value, source: "manual", source_ref: null, manual: true, confirmed: true, confidence: null, updated_at: new Date().toISOString()};
+    if (year.value) (current.metadata ||= {}).year = {value: year.value, source: "manual", source_ref: null, manual: true, confirmed: true, confidence: null, updated_at: new Date().toISOString()};
     const selected = (current.titles || []).find(item => item.id === titleChoice.value);
     const chosen = selected?.text || customTitle.value;
     if (chosen) current.selected_title = {value: chosen, source: "manual", source_ref: selected?.id || null, manual: true, confirmed: true, confidence: null, updated_at: new Date().toISOString()};
-    onContextChange(structuredClone(current));
+    current.effective_rules = {...current.effective_rules, naming_rule:collectRules()};
+    const accepted = await onContextChange(structuredClone(current), taskScope);
+    if (accepted === false || ticket !== generation || disposed) return;
     showPreview(result);
   }, actions);
   const apply = button("确认执行本次预览", async () => {
-    if (!preview?.can_apply) return;
-    const route = preview.undo ? "/api/v2/naming/undo/apply" : "/api/v2/naming/apply";
-    const result = await api(route, "POST", { preview_token: preview.preview_token, expected_revision: preview.context_revision, confirm: true, idempotency_key: preview.key });
-    lastBatch = result.batch_id;
-    onTask(result.task, {operations: structuredClone(preview.operations), resources: preview.operations.map(item => structuredClone(item.source))});
+    if (!preview?.can_apply || apply.disabled) return;
+    const ticket = generation, resourceTicket = resourceGeneration, submitted = structuredClone(preview), taskScope = {...getTaskScope()};
+    const operations = structuredClone(submitted.operations || []);
+    const route = submitted.undo ? "/api/v2/naming/undo/apply" : "/api/v2/naming/apply";
     apply.disabled = true;
-    status.textContent = "已交后台任务执行，请查看任务结果。完成后可预览撤销。";
+    try {
+      const result = await api(route, "POST", { preview_token: submitted.preview_token, expected_revision: submitted.context_revision, confirm: true, idempotency_key: submitted.key });
+      onTask(result.task, {...taskScope, operations, resources: operations.map(item => structuredClone(item.source))});
+      if (resourceTicket === resourceGeneration && !disposed) lastBatch = result.batch_id;
+      if (ticket !== generation || disposed) return;
+      status.textContent = "已交后台任务执行，请查看任务结果。完成后可预览撤销。";
+    } catch (error) {
+      if (ticket !== generation || disposed) return;
+      apply.disabled = !preview?.can_apply;
+      throw error;
+    }
   }, actions); apply.disabled = true;
   button("预览撤销", async () => {
     if (!lastBatch) throw new Error("还没有可撤销批次。");
-    const result = await api("/api/v2/naming/undo/preview", "POST", { batch_id: lastBatch });
+    const batch = lastBatch;
+    invalidate(); const ticket = generation;
+    const result = await api("/api/v2/naming/undo/preview", "POST", { batch_id: batch });
+    if (ticket !== generation || disposed) return;
     preview = { ...result, undo: true }; showPreview(preview);
   }, actions);
   const output = el("div"); output.className = "v2-naming__preview";
@@ -185,30 +211,44 @@ export function mount(container, { request, selectResources, onContextChange = (
   }
   async function analyze(selection) {
     if (!resources.length) throw new Error("请先选择视频或目录。");
-    const ticket = ++generation;
+    const ticket = ++generation, taskScope = {...getTaskScope()};
     preview = null; apply.disabled = true; output.replaceChildren();
     const manual = {};
     if (customTitle.value) manual.selected_title = customTitle.value;
     if (year.value) manual.year = year.value;
     const result = await api("/api/v2/resources/resolve", "POST", { resources, origins: current?.origins || [], context: current,
       selection: selection || null, manual_overrides: manual });
-    if (ticket !== generation || disposed) return;
+    if (ticket !== generation || disposed) return false;
     current = result.context; preview = null; apply.disabled = true;
-    renderContext(); onContextChange(structuredClone(current));
+    renderContext();
+    const accepted = await onContextChange(structuredClone(current), taskScope);
+    if (accepted === false || ticket !== generation || disposed) return false;
     status.textContent = (current.warnings || []).map(x => x.message).join("；") || "探测完成，请选择名称并检查逐文件参数。";
+    return true;
   }
   function renderContext() {
     if (!current) return;
+    const rules = current.effective_rules?.naming_rule || {};
+    const kind = rules.template_id || current.identity?.media_type || "movie";
+    const sync = (control, value) => { if (!editedControls.has(control)) control.value = value; };
+    sync(type, kind === "season" ? "series" : ({anime_single:"anime", tv:"series"}[kind] || kind));
+    sync(templateMode, kind === "season" ? "season" : "files");
+    sync(template, rules.templates?.[kind] || "");
+    sync(source, rules.source?.value ?? rules.source ?? "WEB-DL");
+    sync(group, rules.group?.value ?? rules.group ?? "HDVWEB");
+    sync(season, current.episode?.season?.value ?? rules.season_default ?? 1);
+    sync(customTitle, current.selected_title?.value || "");
+    sync(year, current.metadata?.year?.value || "");
+    const previousTitle = titleChoice.value;
     candidates.replaceChildren();
     for (const item of current.identity_candidates || []) button(`${item.title || item.original_title || item.id} (${item.provider} · ${item.media_type})`, () => analyze({provider: item.provider, id: item.id, media_type: item.media_type, ...(item.media_type === "movie" ? {} : {season: number(season.value, 1)})}), candidates);
     titleChoice.replaceChildren();
     const blank = el("option", "自定义名称 / 当前选择", titleChoice); blank.value = "";
     for (const candidate of current.titles || []) { const option = el("option", `${candidate.text} (${candidate.language} · ${candidate.kind})`, titleChoice); option.value = candidate.id; option.selected = !!candidate.selected; }
-    if (!customTitle.value) customTitle.value = current.selected_title?.value || "";
-    if (!year.value) year.value = current.metadata?.year?.value || "";
+    if (editedControls.has(titleChoice) && [...titleChoice.options].some(option => option.value === previousTitle)) titleChoice.value = previousTitle;
     files.replaceChildren();
     for (const file of current.files || []) {
-      const row = el("fieldset", undefined, files); row.dataset.file = file.ref.relative_path;
+      const row = el("fieldset", undefined, files); row.dataset.file = file.ref.relative_path; row.dataset.root = file.ref.root_key;
       el("legend", file.ref.relative_path, row);
       if (file.probe?.probe_error) el("p", file.probe.probe_error, row);
       for (const [key, label, kind, origin] of [["season", "季号", "number", file.episode], ["episode", "集号", "number", file.episode], ["resolution", "分辨率", "text", file.probe], ["video_codec", "视频编码", "text", file.probe], ["audio_codec", "音频编码", "text", file.probe], ["audio_channels", "声道", "text", file.probe], ["frame_rate", "帧率（分子/分母）", "text", file.probe], ["bit_depth", "位深", "number", file.probe], ["hdr", "HDR", "text", file.probe]]) {
@@ -223,7 +263,9 @@ export function mount(container, { request, selectResources, onContextChange = (
       const sidecarKind = select("关联类型", [["external_audio", "外置音轨"], ["subtitle", "字幕"]], row);
       const sidecarSuffix = input("关联文件尾缀（例如 eng.forced）", "", "text", row);
       button("选择并确认关联到本视频", async () => {
+        const ticket = generation;
         const refs = await selectResources({ kind: "sidecar" });
+        if (ticket !== generation || disposed) return;
         for (const ref of refs || []) manualSidecars.push({ ref, video_ref: file.ref, kind: sidecarKind.value, language: null, suffix_tokens: sidecarSuffix.value ? sidecarSuffix.value.split(".") : [], association: "manual", confirmed: true });
         invalidate(); status.textContent = "已确认人工关联，生成新预览后检查目标名。";
       }, row);
@@ -239,11 +281,43 @@ export function mount(container, { request, selectResources, onContextChange = (
     }
     for (const conflict of result.conflicts || []) el("p", conflict.message, output).className = "v2-naming__error";
     apply.disabled = !result.can_apply;
+    onPreview(result, getTaskScope());
     status.textContent = result.can_apply ? "预览已生成，尚未修改文件。请核对后确认执行。" : "存在冲突，请修正后重新预览。";
   }
   renderContext();
   return {
-    setContext(value) { invalidate(); current = structuredClone(value); resources = current.resources; renderContext(); },
+    setContext(value, {resourceSwitch = false} = {}) {
+      const locations = refs => JSON.stringify((refs || []).map(ref => [ref.root_key, ref.relative_path, ref.kind]).sort());
+      const sameResources = !resourceSwitch && value && current && locations(value.resources) === locations(current.resources);
+      const edited = new Map();
+      if (sameResources) for (const row of files.querySelectorAll('[data-file]')) {
+        for (const control of row.querySelectorAll('[data-field][data-dirty]')) {
+          edited.set(JSON.stringify([row.dataset.root, row.dataset.file, control.dataset.field]), control.value);
+        }
+      }
+      if (resourceSwitch || (value && current && value.context_id !== current.context_id)) {
+        resourceGeneration += 1; lastBatch = null;
+      }
+      invalidate(); current = value ? structuredClone(value) : null; resources = current?.resources || [];
+      if (!sameResources) {
+        editedControls = new WeakSet();
+        manualSidecars = []; memoryRevision = 0; customTitle.value = ""; year.value = ""; query.value = "";
+        candidates.replaceChildren(); files.replaceChildren(); titleChoice.replaceChildren();
+        source.value = current?.effective_rules?.naming_rule?.source?.value || "WEB-DL";
+        group.value = current?.effective_rules?.naming_rule?.group?.value || "HDVWEB";
+        season.value = String(current?.episode?.season?.value ?? 1);
+      }
+      if (current) {
+        renderContext();
+        for (const row of files.querySelectorAll('[data-file]')) {
+          for (const control of row.querySelectorAll('[data-field]')) {
+            const key = JSON.stringify([row.dataset.root, row.dataset.file, control.dataset.field]);
+            if (edited.has(key)) { control.value = edited.get(key); control.dataset.dirty = 'true'; }
+          }
+        }
+      }
+      else status.textContent = "选择视频或整季目录，识别后先预览，再确认改名。";
+    },
     setBatch(batchId) { lastBatch = batchId; },
     destroy() { disposed = true; generation += 1; root.remove(); }
   };

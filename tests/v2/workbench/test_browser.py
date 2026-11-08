@@ -17,13 +17,33 @@ def live_server(settings):
     yield from shared_live_server.__wrapped__(settings)
 
 
+def show_panel(page, name=None):
+    """Follow the visible sheet controls without mounting or changing business state."""
+    if name == 'content':
+        name = None
+    target = name if name in ('resources', 'naming', 'preview', 'identity') else ('tools' if name else None)
+    # Confirmation resolves asynchronously, then closes the picker itself.
+    page.wait_for_function('!(window.wb || window.V2Workbench || window.workbench)?.selecting')
+    active_name = page.evaluate('document.querySelector(".wb-sheet:not([hidden])")?.dataset.sheet || null')
+    active = page.locator(f'[data-sheet="{active_name}"]')
+    if active_name:
+        current = active_name
+        if current == target and (target != 'tools' or page.locator(f'[data-panel="{name}"]').is_visible()):
+            return
+        if active.is_visible():
+            active.locator('.wb-sheet-heading button').click()
+    if name:
+        key = 'data-tab' if target == 'tools' else 'data-layout'
+        page.locator(f'[{key}="{name}"]').click()
+
+
 def mount(page):
     token = page.locator('meta[name="csrf-token"]').get_attribute("content")
     template = (ROOT / "bili_remote/templates/v2/workbench/workbench.html").read_text()
     document = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' + '<meta name="csrf-token" content="' + token + '"><style>body{margin:0}</style>' + template + '</html>'
     page.route('**/__wb', lambda route: route.fulfill(content_type='text/html', body=document))
     page.goto(page.url.rstrip('/') + '/__wb')
-    page.add_style_tag(path=str(ROOT / "bili_remote/static/v2/workbench/workbench.css"))
+    page.add_style_tag(url="/static/v2/workbench/workbench.css")
     page.add_script_tag(path=str(ROOT / "bili_remote/static/v2/workbench/api.js"))
     # Existing FileBrowser expects these host utilities, supplied by app.js in the real shell.
     page.evaluate('''() => {
@@ -88,19 +108,25 @@ def test_contract_edit_copy_formats_responsive_and_no_draft(live_server):
         page.evaluate("wb.select([{root_key:'downloads',relative_path:'Media/episode01.mp4',kind:'video',fingerprint:'fixture'}])")
         expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
         expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
+        show_panel(page, None)
         page.locator('[data-edit="release_title"]').fill('人工主标题 <script>window.bad=true</script>')
+        show_panel(page, None)
         page.locator('[data-edit="subtitle"]').fill('人工副标题')
+        show_panel(page, None)
         page.locator('[data-edit="overview"]').fill('人工简介')
         expect(page.locator('[data-wb="output"]')).to_contain_text('人工简介')
+        show_panel(page, None)
         page.locator('[data-action="resolve"]').click()
-        expect(page.locator('[data-wb="context-summary"]')).to_contain_text('修订 3')
+        page.wait_for_function('wb.context.revision === 3')
         assert page.locator('[data-edit="release_title"]').input_value().startswith('人工主标题')
         assert page.locator('[data-edit="overview"]').input_value() == '人工简介'
         page.evaluate("navigator.clipboard.writeText = async value => {window.copied=value;}")
         for field in ('release_title', 'subtitle', 'overview', 'content'):
+            show_panel(page, 'preview' if field == 'content' else None)
             page.locator(f'[data-copy="{field}"]').click()
             assert page.evaluate('window.copied')
         for output in ('bbcode', 'html', 'markdown'):
+            show_panel(page, 'preview')
             page.locator('[data-wb="format"]').select_option(output)
             expect(page.locator('[data-wb="validation"]')).to_contain_text('内容尚有缺项')
             if output == 'html':
@@ -109,12 +135,12 @@ def test_contract_edit_copy_formats_responsive_and_no_draft(live_server):
         for width in (390, 768, 1440):
             page.set_viewport_size({"width": width, "height": 1000})
             for tab in ('content', 'images', 'report', 'torrent'):
-                page.locator(f'[data-tab="{tab}"]').click()
+                show_panel(page, tab)
                 expect(page.locator(f'[data-panel="{tab}"]')).to_be_visible()
-                expect(page.locator('[aria-label="识别与命名"]')).to_be_visible()
+                expect(page.locator('.wb-identification')).to_be_visible()
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (width, tab)
             if width in (390, 1440):
-                page.locator('[data-tab="content"]').click()
+                show_panel(page, 'content')
                 page.screenshot(path=str(ROOT / '.dev' / f'workbench-{width}.png'), full_page=True)
         assert all('project_id' not in payload and 'session_id' not in payload for _, payload in requests)
         assert page.evaluate("Object.keys(localStorage).filter(k=>k.includes('workbench'))") == []
@@ -129,11 +155,15 @@ def test_real_browser_unconfigured_metadata_is_honest(live_server):
     playwright, browser, page, errors = browser_session(base_url)
     try:
         mount(page)
+        show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media"]').click()
+        show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
+        page.get_by_role('button', name='使用所选资源', exact=True).click()
         expect(page.locator('[data-wb="issues"]')).to_contain_text('未配置 TMDB')
         assert page.evaluate('wb.context.identity') is None
         assert page.locator('[data-action="naming"]').is_enabled()
+        show_panel(page, None)
         page.locator('[data-action="naming"]').click()
         expect(page.locator('[data-wb="rename-warning"]')).to_contain_text('缺少')
         assert page.locator('[data-action="apply"]').is_disabled()
@@ -165,19 +195,25 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
     playwright, browser, page, errors = browser_session(base_url)
     try:
         mount(page)
+        show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media"]').click()
+        show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
-        expect(page.locator('[data-wb="context-summary"]')).to_contain_text('1 个媒体文件')
-        page.locator('.wb-adjust > summary',has_text='调整识别与规则').click()
+        page.get_by_role('button', name='使用所选资源', exact=True).click()
+        expect(page.locator('[data-wb="resource-media"]')).to_contain_text('1 个媒体文件')
+        show_panel(page, None)
         page.locator('[data-wb="selected-title"]').fill('Synthetic Tool Flow')
+        show_panel(page, None)
         page.locator('[data-action="overrides"]').click()
         expect(page.locator('[data-edit="release_title"]')).to_have_value(re.compile('Synthetic Tool Flow'))
+        show_panel(page, None)
         page.locator('[data-edit="overview"]').fill('Synthetic overview for complete publishing flow')
-        page.locator('[data-tab="images"]').click()
+        show_panel(page, 'images')
         for mode, total in [('single', '1'), ('collage', '4')]:
             page.locator('[data-wb="image-mode"]').select_option(mode)
             page.locator('[data-wb="image-count"]').fill(total)
             previous = page.evaluate('wb.images[0]?.path')
+            show_panel(page, 'images')
             page.locator('[data-action="screenshots"]').click()
             try:
                 page.wait_for_function('(previous) => wb.images.length > 0 && wb.images[0].path !== previous', arg=previous, timeout=30000)
@@ -190,22 +226,28 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
             with page.expect_download() as pending:
                 page.get_by_role('link', name='下载缩略图').first.click()
             assert pending.value.suggested_filename.endswith(('.jpg', '.png'))
+        show_panel(page, 'images')
+        page.screenshot(path=str(ROOT / '.dev/workbench-product-visual/tool-real-screenshots.png'))
         page.locator('[data-action="upload"]').click()
         expect(page.locator('[data-wb="upload-links"]')).to_contain_text('https://images.example/', timeout=30000)
         assert fake_upload.calls >= 1
-        page.locator('[data-tab="report"]').click()
+        show_panel(page, 'report')
+        show_panel(page, 'report')
         page.locator('[data-action="report"]').click()
         expect(page.locator('[data-wb="reports"]')).to_contain_text('MediaInfo', timeout=30000)
-        page.locator('[data-tab="torrent"]').click()
+        page.screenshot(path=str(ROOT / '.dev/workbench-product-visual/tool-real-report.png'))
+        show_panel(page, 'torrent')
+        show_panel(page, 'torrent')
         page.locator('[data-action="torrent"]').click()
         expect(page.get_by_role('link', name='下载种子')).to_be_visible(timeout=30000)
+        page.screenshot(path=str(ROOT / '.dev/workbench-product-visual/tool-real-torrent.png'))
         with page.expect_download() as pending:
             page.get_by_role('link', name='下载种子').click()
         assert pending.value.suggested_filename.endswith('.torrent')
         page.get_by_role('button', name='添加到 qBittorrent', exact=True).click()
         expect(page.locator('[data-wb="notices"]')).to_contain_text('种子已提交到 qBittorrent')
         assert '/api/v2/torrents/add' in qbit_calls
-        page.locator('[data-tab="content"]').click()
+        show_panel(page, 'content')
         expect(page.locator('[data-wb="output"]')).to_contain_text('Synthetic Tool Flow')
         expect(page.locator('[data-wb="output"]')).to_contain_text('Synthetic overview')
         expect(page.locator('[data-wb="output"]')).to_contain_text('https://images.example/')
@@ -241,6 +283,7 @@ def test_slow_responses_and_rename_confirmation(live_server):
         expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
         page.route('**/api/v2/release-title/render', lambda route: held.append(route))
         page.evaluate("void wb.generate('release_title')")
+        show_panel(page, None)
         page.locator('[data-edit="release_title"]').fill('人工锁定')
         assert held
         rev = page.evaluate('wb.context.revision')
@@ -249,10 +292,12 @@ def test_slow_responses_and_rename_confirmation(live_server):
         page.unroute('**/api/v2/release-title/render')
         # A composition response from before the edit may never become copyable.
         page.route('**/api/v2/publishing/preview', lambda route: held.append(route))
+        show_panel(page, None)
         page.locator('[data-edit="overview"]').fill('旧简介')
         page.wait_for_timeout(300)
         assert held
         old = held.pop()
+        show_panel(page, None)
         page.locator('[data-edit="overview"]').fill('最新简介')
         old.fulfill(json={"content": "过期发布内容", "context_revision": rev, "validation": {"ready": True, "errors": [], "warnings": []}})
         assert page.locator('[data-wb="output"]').inner_text() != '过期发布内容'
@@ -261,26 +306,31 @@ def test_slow_responses_and_rename_confirmation(live_server):
             route.fulfill(json={"content": "最新简介", "context_revision": rev, "validation": {"ready": False, "errors": [], "warnings": []}})
         held.clear()
         page.route('**/api/v2/naming/preview', lambda route: held.append(route))
+        show_panel(page, None)
         page.locator('[data-action="naming"]').click()
-        page.locator('.wb-adjust > summary', has_text='调整识别与规则').click()
+        show_panel(page, None)
         page.locator('[data-wb="selected-title"]').fill('新的选名')
         assert held
         held.pop().fulfill(json={"preview_token": "stale", "expires_at": "2099-01-01T00:00:00Z", "context_revision": rev, "can_apply": True, "operations": [], "conflicts": []})
         expect(page.locator('[data-wb="rename"]')).to_be_hidden()
         page.unroute('**/api/v2/naming/preview')
+        show_panel(page, None)
         page.locator('[data-action="naming"]').click()
         expect(page.locator('[data-wb="rename"]')).to_be_visible()
+        accepted_revision = page.evaluate('wb.preview.context_revision')
+        assert accepted_revision > rev  # The latest name was resolved before preview.
         assert not any(path == 'naming/apply' for path, _ in requests)
         def apply(route):
             requests.append(('naming/apply', route.request.post_data_json))
             route.fulfill(json={"task": {"kind": "processing", "id": 999, "status": "queued", "task_type": "naming_apply"}})
         page.route('**/api/v2/naming/apply', apply)
+        show_panel(page, None)
         page.locator('[data-action="apply"]').click()
         page.wait_for_timeout(100)
         payload = [payload for path, payload in requests if path == 'naming/apply'][0]
         assert set(payload) == {'preview_token', 'expected_revision', 'confirm', 'idempotency_key'}
         assert payload['preview_token'] == 'test-only-token'
-        assert payload['expected_revision'] == rev
+        assert payload['expected_revision'] == accepted_revision
         assert payload['confirm'] is True
         assert not errors, errors
     finally:
@@ -320,6 +370,7 @@ def test_task_identity_notifications_retry_cancel_and_refresh_without_content(li
         expect(page.locator('[data-wb="notices"]')).to_contain_text('已完成')
         page.wait_for_timeout(600)
         assert page.locator('.wb-notice', has_text='image_upload：已完成').count() == 1
+        show_panel(page, None)
         page.locator('[data-edit="release_title"]').fill('刷新后不得恢复的文案')
         mount(page)
         assert page.locator('[data-edit="release_title"]').input_value() == ''
@@ -339,15 +390,20 @@ def test_real_standalone_entry_authentication_search_and_no_storage(live_server)
         page.add_init_script("Storage.prototype.setItem = () => {throw Error('No frontend persistence allowed');}")
         page.goto(base_url + '/static/v2/workbench/index.html')
         expect(page.locator('[data-workbench]')).to_be_visible()
+        show_panel(page, 'resources')
         expect(page.locator('.file-row[data-path="Media"]')).to_be_visible()
-        page.locator('[data-wb="file-search"]').fill('no-such-file')
+        search = page.locator('[data-wb="browser"]').get_by_role('searchbox', name='搜索当前目录')
+        expect(page.get_by_role('searchbox')).to_have_count(1)
+        search.fill('no-such-file')
         expect(page.locator('[data-wb="browser"] .file-row')).to_have_count(0)
-        page.locator('[data-wb="file-search"]').fill('Media')
+        search.fill('Media')
         expect(page.locator('[data-wb="browser"] .file-row')).to_have_count(1)
         for width in (390, 768, 1440):
             page.set_viewport_size({'width': width, 'height': 1000})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media"] .file-check').check()
+        page.get_by_role('button', name='使用所选资源', exact=True).click()
         expect(page.locator('[data-wb="issues"]')).to_contain_text('未配置 TMDB')
         assert page.evaluate('workbench.resources[0].kind') == 'directory'
         assert page.locator('[data-wb="scope"]').input_value() == 'season'
@@ -380,7 +436,7 @@ def test_resource_switch_discards_old_identity_and_preview_markup_is_inert(live_
         newest['resources'] = [{'root_key': 'downloads', 'relative_path': 'B.mp4', 'kind': 'file', 'fingerprint': 'B'}]
         newest['selected_title']['value'] = '最新资源 B'
         held[1].fulfill(json={'context': newest, 'changes': [], 'capabilities': []})
-        expect(page.locator('[data-wb="context-summary"]')).to_contain_text('最新资源 B')
+        expect(page.locator('[data-wb="resource"]')).to_contain_text('最新资源 B')
         held[0].fulfill(json={'context': context(3), 'changes': [], 'capabilities': []})
         page.wait_for_timeout(100)
         assert page.evaluate('wb.context.revision') == 8
@@ -403,14 +459,38 @@ def test_completed_rename_reads_authoritative_paths_and_preserves_edits(live_ser
     playwright, browser, page, errors = browser_session(base_url)
     requests = []
     tasks = []
+    held_resolves, held_reports = [], []
     try:
         v2_fixture(page, requests)
         page.route('**/api/v2/tasks?*', lambda route: route.fulfill(json={'items': tasks}))
         mount(page)
+        show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media"]').click()
+        show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
+        page.get_by_role('button', name='使用所选资源', exact=True).click()
         expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
+        show_panel(page, None)
         page.locator('[data-edit="overview"]').fill('必须保留的人工简介')
+        original_epoch = page.evaluate('wb.epoch')
+        def hold_old_resolution(route):
+            if route.request.post_data_json['resources'][0]['relative_path'] == 'Media/episode01.mp4':
+                held_resolves.append(route)
+            else:
+                route.fallback()
+        page.route('**/api/v2/resources/resolve', hold_old_resolution)
+        page.route('**/api/v2/reports', lambda route: held_reports.append(route))
+        with page.expect_request('**/api/v2/resources/resolve'), page.expect_request('**/api/v2/reports'):
+            page.evaluate('''() => {
+                window.beforeRenameResolve = wb.resolve();
+                window.beforeRenameReport = wb.report();
+            }''')
+        for _ in range(100):
+            if held_resolves and held_reports:
+                break
+            page.wait_for_timeout(20)
+        assert held_resolves and held_reports
+        show_panel(page, None)
         page.locator('[data-action="naming"]').click()
         expect(page.locator('[data-wb="rename"]')).to_be_visible()
         # Test-only execution adapter: rename only a synthetic file in tmp_path.
@@ -421,14 +501,41 @@ def test_completed_rename_reads_authoritative_paths_and_preserves_edits(live_ser
             tasks.append(task)
             route.fulfill(json={'task': task, 'batch_id': 'synthetic-batch'})
         page.route('**/api/v2/naming/apply', execute)
+        show_panel(page, None)
         page.locator('[data-action="apply"]').click()
         expect(page.locator('[data-wb="rename"]')).to_be_hidden()
         tasks[0] = {**tasks[0], 'status': 'completed', 'finished_at': '2026-11-04T00:00:00Z'}
-        expect(page.locator('[data-wb="resource"]')).to_contain_text('Renamed.mp4')
+        expect(page.locator('[data-wb="context-summary"]')).to_contain_text('Renamed.mp4')
         expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
         assert page.locator('[data-edit="overview"]').input_value() == '必须保留的人工简介'
         assert page.evaluate('wb.resources[0].fingerprint')
         assert page.evaluate('wb.resources[0].relative_path') == 'Media/Renamed.mp4'
+        page.wait_for_function("wb.context?.resources[0]?.relative_path === 'Media/Renamed.mp4'")
+        renamed_context = page.evaluate('wb.context')
+        held_resolves.pop().fulfill(json={'context': context(50), 'changes': [], 'capabilities': []})
+        page.evaluate('beforeRenameResolve')
+        assert page.evaluate('wb.context') == renamed_context
+        assert page.evaluate('wb.epoch') == original_epoch
+
+        # An already submitted tool still belongs to the same logical resource
+        # after an in-place rename, including a submission response arriving late.
+        report_path = app.state.services.settings.release_info_root / 'rename-associated-report.txt'
+        report_path.write_text('同资源改名后仍保留的真实报告产物', encoding='utf-8')
+        report_task = {'kind': 'processing', 'id': 910, 'task_type': 'media_report', 'status': 'queued',
+                       'progress': None, 'cancel_allowed': False, 'retry_allowed': False}
+        tasks.append(report_task)
+        held_reports.pop().fulfill(json={'task': report_task})
+        page.evaluate('beforeRenameReport')
+        assert page.evaluate("wb.jobs.get('processing:910').epoch") == original_epoch
+        tasks[1] = {**report_task, 'status': 'completed', 'finished_at': '2026-11-05T00:00:00Z', 'result': {},
+                    'artifact_refs': [{'kind': 'report', 'id': '910', 'url': None,
+                                       'resource': {'root_key': 'release_info', 'relative_path': report_path.name,
+                                                    'kind': 'file', 'fingerprint': 'synthetic-report-reference'}}]}
+        show_panel(page, 'report')
+        expect(page.locator('[data-wb="reports"]')).to_contain_text('同资源改名后仍保留的真实报告产物')
+        assert page.evaluate("wb.artifacts.some(item => item.kind === 'report' && item.id === '910')")
+        assert page.evaluate('wb.resources[0].relative_path') == 'Media/Renamed.mp4'
+        expect(page.locator('[data-edit="overview"]')).to_have_value('必须保留的人工简介')
         assert not errors, errors
     finally:
         browser.close()
@@ -451,12 +558,315 @@ def test_v2_task_artifact_refs_feed_upload_links_and_composition(live_server):
         tasks.append(queued)
         page.evaluate('(task) => wb.track(task, {type:"upload", epoch:wb.epoch})', queued)
         tasks[0] = {**queued, 'status': 'completed', 'artifact_refs': [artifact], 'finished_at': '2026-11-04T00:00:00Z'}
-        page.locator('[data-tab="images"]').click()
+        show_panel(page, 'images')
         expect(page.locator('[data-wb="upload-links"] a')).to_have_attribute('href', artifact['url'])
         page.wait_for_timeout(350)
         compositions = [payload for path, payload in requests if path == 'publishing/preview']
         assert artifact in compositions[-1]['screenshots']
         assert artifact['url'] in compositions[-1]['links']
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_file_checks_stage_without_reset_and_resource_switch_requires_confirmation(live_server):
+    base_url, app = live_server
+    directory = app.state.services.settings.download_root / 'Media'
+    for name in ('episode02.mp4', 'episode03.mp4'):
+        (directory / name).write_bytes(b'synthetic-selection-only-video')
+    playwright, browser, page, errors = browser_session(base_url)
+    requests = []
+    snapshot = '''() => ({resources: wb.resources, context: wb.context, epoch: wb.epoch,
+        fields: wb.fields, dirty: [...wb.dirty], preview: wb.preview,
+        artifacts: wb.artifacts, links: wb.links, content: wb.content})'''
+    try:
+        v2_fixture(page, requests)
+        mount(page)
+        show_panel(page, 'resources')
+        page.locator('.file-row[data-path="Media"]').click()
+        show_panel(page, 'resources')
+        page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
+        assert page.evaluate('wb.resources.length') == 0
+        assert not any(path == 'resources/resolve' for path, _ in requests)
+        use_selection = page.get_by_role('button', name='使用所选资源', exact=True)
+        use_selection.click()
+        expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
+        for field, text in [('release_title', '保留人工主标题'), ('subtitle', '保留人工副标题'), ('overview', '保留人工简介')]:
+            show_panel(page, None)
+            page.locator(f'[data-edit="{field}"]').fill(text)
+        # Apply a synthetic task response through the actual artifact association path.
+        page.evaluate('''async () => {
+            await wb.applyTask({kind:'processing',id:771,status:'completed',result:{},
+                artifact_refs:[{kind:'upload',id:'771',resource:null,url:'https://images.example/keep.jpg'}]},
+                {type:'upload',epoch:wb.epoch});
+        }''')
+        show_panel(page, None)
+        page.locator('[data-action="naming"]').click()
+        expect(page.locator('[data-wb="rename"]')).to_be_visible()
+        expect(page.locator('[data-wb="output"]')).to_contain_text('保留人工简介')
+        before = page.evaluate(snapshot)
+        assert before['artifacts'] and before['preview']
+        for name in ('episode02.mp4', 'episode03.mp4'):
+            show_panel(page, 'resources')
+            page.locator(f'.file-row[data-path="Media/{name}"] .file-check').check()
+            assert page.evaluate(snapshot) == before
+        assert len([path for path, _ in requests if path == 'resources/resolve']) == 1
+
+        dialogs = []
+        def cancel_switch(dialog):
+            dialogs.append(dialog.message)
+            dialog.dismiss()
+        page.once('dialog', cancel_switch)
+        use_selection.click()
+        assert dialogs
+        assert page.evaluate(snapshot) == before
+        assert len([path for path, _ in requests if path == 'resources/resolve']) == 1
+
+        page.once('dialog', lambda dialog: dialog.accept())
+        use_selection.click()
+        expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
+        assert page.evaluate('wb.resources.map(item => item.relative_path).sort()') == [
+            'Media/episode01.mp4', 'Media/episode02.mp4', 'Media/episode03.mp4']
+        assert page.evaluate('[...wb.dirty]') == []
+        assert page.evaluate('wb.artifacts') == []
+        assert page.evaluate('wb.preview.context_revision === wb.context.revision')
+        assert page.evaluate('wb.epoch') > before['epoch']
+        assert len([path for path, _ in requests if path == 'resources/resolve']) == 2
+        expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
+
+        # Reusing the same resources, even reordered, must preserve current edits.
+        show_panel(page, None)
+        page.locator('[data-edit="overview"]').fill('同资源保留')
+        expect(page.locator('[data-wb="output"]')).to_contain_text('同资源保留')
+        same = page.evaluate(snapshot)
+        unexpected_dialogs = []
+        def reject_unexpected_switch(dialog):
+            unexpected_dialogs.append(dialog.message)
+            dialog.dismiss()
+        page.on('dialog', reject_unexpected_switch)
+        page.evaluate('wb.select([...wb.resources].reverse())')
+        assert page.evaluate(snapshot) == same
+        assert len([path for path, _ in requests if path == 'resources/resolve']) == 2
+        assert page.evaluate("wb.select([{root_key:'downloads',relative_path:'../escape.mp4',kind:'file',fingerprint:'invalid'}])") is False
+        assert page.evaluate(snapshot) == same
+        assert not unexpected_dialogs
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_old_resource_resolve_title_and_composition_cannot_overwrite_new_edits(live_server):
+    base_url, _ = live_server
+    playwright, browser, page, errors = browser_session(base_url)
+    requests, held = [], {}
+    try:
+        v2_fixture(page, requests)
+        mount(page)
+        page.evaluate("wb.select([{root_key:'downloads',relative_path:'A.mp4',kind:'file',fingerprint:'A'}])")
+        expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
+        revision = page.evaluate('wb.context.revision')
+        def hold_old_resource(route):
+            payload = route.request.post_data_json
+            resources = payload.get('resources') or payload.get('context', {}).get('resources', [])
+            if resources and resources[0]['relative_path'] == 'A.mp4':
+                held[route.request.url.split('/api/v2/')[1]] = route
+            else:
+                route.fallback()
+        for endpoint in ('resources/resolve', 'release-title/render', 'publishing/preview'):
+            page.route('**/api/v2/' + endpoint, hold_old_resource)
+        with page.expect_request('**/api/v2/resources/resolve'), page.expect_request('**/api/v2/release-title/render'), page.expect_request('**/api/v2/publishing/preview'):
+            page.evaluate('''() => {
+                window.oldWork = Promise.allSettled([wb.resolve(), wb.generate('release_title'), wb.compose()]);
+            }''')
+        # A request event can precede its Python route callback; pump events until
+        # every deliberately suspended response is available, with a bounded wait.
+        for _ in range(100):
+            if len(held) == 3:
+                break
+            page.wait_for_timeout(20)
+        assert set(held) == {'resources/resolve', 'release-title/render', 'publishing/preview'}
+        assert page.evaluate("wb.select([{root_key:'downloads',relative_path:'B.mp4',kind:'file',fingerprint:'B'}])") is True
+        for field, text in [('release_title', 'B 人工主标题'), ('subtitle', 'B 人工副标题'), ('overview', 'B 人工简介')]:
+            show_panel(page, None)
+            page.locator(f'[data-edit="{field}"]').fill(text)
+        expect(page.locator('[data-wb="output"]')).to_contain_text('B 人工简介')
+        new_context = page.evaluate('wb.context')
+
+        old_context = context(revision + 1)
+        old_context['resources'] = [{'root_key': 'downloads', 'relative_path': 'A.mp4', 'kind': 'file', 'fingerprint': 'A'}]
+        old_context['selected_title']['value'] = '迟到的 A 识别'
+        held['resources/resolve'].fulfill(json={'context': old_context, 'changes': [], 'capabilities': []})
+        held['release-title/render'].fulfill(json={'text': '迟到的 A 主标题', 'context_revision': revision, 'warnings': []})
+        held['publishing/preview'].fulfill(json={'content': '迟到的 A 完整内容', 'context_revision': revision,
+                                                'validation': {'ready': True, 'errors': [], 'warnings': []}})
+        page.evaluate('oldWork')
+        assert page.evaluate('wb.context') == new_context
+        assert page.evaluate('wb.resources[0].relative_path') == 'B.mp4'
+        for field, text in [('release_title', 'B 人工主标题'), ('subtitle', 'B 人工副标题'), ('overview', 'B 人工简介')]:
+            expect(page.locator(f'[data-edit="{field}"]')).to_have_value(text)
+        expect(page.locator('[data-wb="output"]')).to_contain_text('B 人工简介')
+        assert '迟到的 A' not in page.locator('[data-wb="output"]').inner_text()
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_same_resource_from_other_entry_normalizes_fingerprint_without_reset(live_server):
+    base_url, app = live_server
+    playwright, browser, page, errors = browser_session(base_url)
+    requests, reference_calls, dialogs = [], [], []
+    canonical = {'root_key': 'downloads', 'relative_path': 'Media/episode01.mp4',
+                 'kind': 'file', 'fingerprint': 'canonical-before-change'}
+    reference = dict(canonical)
+    snapshot = '''() => ({resources: wb.resources, context: wb.context, epoch: wb.epoch,
+        fields: wb.fields, dirty: [...wb.dirty], artifacts: wb.artifacts, preview: wb.preview})'''
+    def resolve_reference(route):
+        reference_calls.append(route.request.post_data_json)
+        route.fulfill(json=reference)
+    def dismiss_switch(dialog):
+        dialogs.append(dialog.message)
+        dialog.dismiss()
+    try:
+        v2_fixture(page, requests)
+        page.route('**/api/v2/resources/reference', resolve_reference)
+        mount(page)
+        supplied_context = context(7)
+        supplied_context['resources'] = [canonical]
+        supplied_context['files'][0]['ref'] = canonical
+        # File-manager/download handoffs supply canonical V2 fingerprints, while
+        # the shared browser still lists the original quick fingerprints.
+        assert page.evaluate('({resource, context}) => wb.select([resource], {context})',
+                             {'resource': canonical, 'context': supplied_context}) is True
+        show_panel(page, None)
+        page.locator('[data-edit="overview"]').fill('跨入口保留的人工简介')
+        expect(page.locator('[data-wb="output"]')).to_contain_text('跨入口保留的人工简介')
+        before = page.evaluate(snapshot)
+        page.on('dialog', dismiss_switch)
+        show_panel(page, 'resources')
+        page.locator('.file-row[data-path="Media"]').click()
+        show_panel(page, 'resources')
+        page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
+        raw = page.evaluate('wb.browser.selectedItems()[0].fingerprint')
+        assert raw != canonical['fingerprint']
+        with page.expect_response('**/api/v2/resources/reference'):
+            page.get_by_role('button', name='使用所选资源', exact=True).click()
+        assert reference_calls
+        assert not dialogs
+        assert page.evaluate(snapshot) == before
+        assert not any(path == 'resources/resolve' for path, _ in requests)
+
+        # A refreshed listing of a changed file must not be treated as the same
+        # resource merely because its path is unchanged.
+        (app.state.services.settings.download_root / canonical['relative_path']).write_bytes(b'changed-synthetic-video-content')
+        reference = {**canonical, 'fingerprint': 'canonical-after-change'}
+        page.evaluate('wb.browser.loadDirectory({clearSelection:true})')
+        show_panel(page, 'resources')
+        page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
+        assert page.evaluate('wb.browser.selectedItems()[0].fingerprint') != raw
+        with page.expect_response('**/api/v2/resources/reference'), page.expect_event('dialog'):
+            page.get_by_role('button', name='使用所选资源', exact=True).click()
+        assert len(dialogs) == 1
+        assert page.evaluate(snapshot) == before
+        assert not any(path == 'resources/resolve' for path, _ in requests)
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_season_reselection_detects_changed_child_with_unchanged_directory_fingerprint(live_server):
+    base_url, app = live_server
+    directory = app.state.services.settings.download_root / 'Media'
+    playwright, browser, page, errors = browser_session(base_url)
+    requests, dialogs = [], []
+    def dismiss_switch(dialog):
+        dialogs.append(dialog.message)
+        dialog.dismiss()
+    try:
+        v2_fixture(page, requests)
+        # Exercise the real reference service and its recursive directory
+        # fingerprint; only metadata/text generation uses the contract fixture.
+        page.route('**/api/v2/resources/reference', lambda route: route.continue_())
+        mount(page)
+        show_panel(page, 'resources')
+        page.locator('.file-row[data-path="Media"] .file-check').check()
+        quick = page.evaluate('wb.browser.selectedItems()[0].fingerprint')
+        use_selection = page.get_by_role('button', name='使用所选资源', exact=True)
+        use_selection.click()
+        expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
+        strong = page.evaluate('wb.resources[0].fingerprint')
+        assert strong != quick
+        show_panel(page, None)
+        page.locator('[data-edit="overview"]').fill('整季人工简介需要保留')
+        expect(page.locator('[data-wb="output"]')).to_contain_text('整季人工简介需要保留')
+        snapshot = '''() => ({resources: wb.resources, context: wb.context,
+            epoch: wb.epoch, fields: wb.fields, dirty: [...wb.dirty]})'''
+        before = page.evaluate(snapshot)
+        directory_mtime = directory.stat().st_mtime_ns
+        (directory / 'episode01.mp4').write_bytes(b'changed-existing-child-without-changing-directory-entry')
+        assert directory.stat().st_mtime_ns == directory_mtime
+        page.evaluate('wb.browser.loadDirectory({clearSelection:true})')
+        show_panel(page, 'resources')
+        page.locator('.file-row[data-path="Media"] .file-check').check()
+        assert page.evaluate('wb.browser.selectedItems()[0].fingerprint') == quick
+
+        page.on('dialog', dismiss_switch)
+        with page.expect_response('**/api/v2/resources/reference') as checked, page.expect_event('dialog'):
+            use_selection.click()
+        assert checked.value.json()['fingerprint'] != strong
+        assert len(dialogs) == 1
+        assert page.evaluate(snapshot) == before
+        assert len([path for path, _ in requests if path == 'resources/resolve']) == 1
+
+        page.remove_listener('dialog', dismiss_switch)
+        page.once('dialog', lambda dialog: dialog.accept())
+        use_selection.click()
+        expect(page.locator('[data-edit="overview"]')).to_have_value('合成简介')
+        assert page.evaluate('wb.resources[0].fingerprint') != strong
+        assert page.evaluate('wb.resources[0].kind') == 'directory'
+        assert len([path for path, _ in requests if path == 'resources/resolve']) == 2
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_late_report_submission_tracks_old_task_without_changing_current_resource(live_server):
+    base_url, _ = live_server
+    playwright, browser, page, errors = browser_session(base_url)
+    requests, tasks, held = [], [], []
+    try:
+        v2_fixture(page, requests)
+        page.route('**/api/v2/tasks?*', lambda route: route.fulfill(json={'items': tasks}))
+        page.route('**/api/v2/reports', lambda route: held.append(route))
+        mount(page)
+        page.evaluate("wb.select([{root_key:'downloads',relative_path:'A.mp4',kind:'file',fingerprint:'A'}])")
+        with page.expect_request('**/api/v2/reports'):
+            page.evaluate('() => { window.oldReport = wb.report(); }')
+        old_epoch = page.evaluate('wb.epoch')
+        page.evaluate("wb.select([{root_key:'downloads',relative_path:'B.mp4',kind:'file',fingerprint:'B'}])")
+        show_panel(page, None)
+        page.locator('[data-edit="overview"]').fill('B 的人工简介')
+        task = {'kind': 'processing', 'id': 881, 'task_type': 'media_report', 'status': 'queued',
+                'progress': None, 'artifact_refs': [], 'cancel_allowed': False, 'retry_allowed': False}
+        tasks.append(task)
+        held.pop().fulfill(json={'task': task})
+        page.evaluate('oldReport')
+        assert page.evaluate("wb.jobs.get('processing:881').epoch") == old_epoch
+        assert page.evaluate('wb.epoch') != old_epoch
+        show_panel(page, 'report')
+        expect(page.locator('[data-wb="reports"]')).to_be_empty()
+        tasks[0] = {**task, 'status': 'completed', 'finished_at': '2026-11-05T00:00:00Z',
+                    'artifact_refs': [{'kind': 'report', 'id': '881', 'url': None,
+                                       'resource': {'root_key': 'release_info', 'relative_path': 'old-report.txt', 'kind': 'file', 'fingerprint': 'old'}}]}
+        page.wait_for_function("wb.tasks.get('processing:881')?.status === 'completed'")
+        expect(page.locator('[data-wb="reports"]')).to_be_empty()
+        assert page.evaluate('wb.artifacts') == []
+        assert page.evaluate('wb.resources[0].relative_path') == 'B.mp4'
+        expect(page.locator('[data-edit="overview"]')).to_have_value('B 的人工简介')
         assert not errors, errors
     finally:
         browser.close()

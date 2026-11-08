@@ -25,9 +25,14 @@ def live_server(settings) -> Iterator[tuple[str, object]]:
         )
     )
     app = create_app(settings)
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
+    # Some hosts allocate ephemeral ports below 10000, including Chromium's
+    # restricted ports (e.g. 3659). Keep isolated browser services above 20000.
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        if port >= 20000:
+            break
     server = uvicorn.Server(
         uvicorn.Config(
             app,
@@ -170,6 +175,7 @@ def test_screenshot_workbench_sampling_mode_browser_flow(live_server):
         artifacts = Path("/tmp/bili-ui-validation")
         artifacts.mkdir(exist_ok=True)
         page.screenshot(path=str(artifacts / "files-desktop.png"), full_page=True)
+        page.locator("#file-browser-host .file-more-menu > summary").click()
         page.get_by_role("button", name="生成缩略图", exact=True).click()
         page.locator("#assistant-generate").wait_for()
         # Existing advanced screenshot sessions remain compatible for older callers.

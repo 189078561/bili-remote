@@ -1,32 +1,166 @@
-/* All layout rules are scoped to the shared component or its own dialogs. */
-.fb-v2, .fb-v2 * {box-sizing: border-box;}
-.fb-v2 {min-width: 0; max-width: 100%;}
-.fb-v2 .file-browser-shell, .fb-v2 .file-list-pane, .fb-v2 .file-toolbar-actions {min-width: 0;}
-.fb-v2 .file-toolbar-actions {flex-wrap: wrap;}
-.fb-v2 .file-breadcrumbs {flex-wrap: wrap; overflow-wrap: anywhere;}
-.fb-v2 .crumb {max-width: 100%; white-space: normal; overflow-wrap: anywhere;}
-.fb-v2 .fb-tree-toggle {display: none;}
-.fb-v2 .file-row:focus-visible {outline: 2px solid var(--brand, #167baa); outline-offset: -2px;}
-.fb-v2 .file-search-input {max-width: 100%; min-width: 0;}
-.fb-media-info {max-width: 100%; overflow-wrap: anywhere;}
-.fb-media-info dl {display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 16px;}
-.fb-media-info dd {margin: 0; white-space: pre-wrap;}
-@media (max-width: 768px) {
-  .fb-v2 .file-browser-shell {display: grid; grid-template-columns: minmax(0, 1fr);}
-  .fb-v2 .fb-tree-toggle {display: inline-flex;}
-  .fb-v2 .file-tree-pane {display: none;}
-  .fb-v2.fb-tree-open .file-tree-pane {display: block; max-height: 40vh; overflow: auto;}
-  .fb-v2 .file-list-toolbar {display: grid; grid-template-columns: minmax(0, 1fr);}
-  .fb-v2 .file-toolbar-actions {width: 100%; justify-content: flex-start;}
-  .fb-v2 .root-shortcuts {display: grid; grid-template-columns: minmax(0, 1fr);}
-  .fb-v2 .root-shortcut {width: 100%; min-width: 0;}
-  .fb-v2 .root-text {min-width: 0;}
-  .fb-v2 .root-text small {max-width: 100%; overflow-wrap: anywhere;}
-  .fb-v2 .file-list-head {display: none;}
-  .fb-v2 .file-row {grid-template-columns: 32px 36px minmax(0, 1fr); min-width: 0; gap: 6px; padding: 8px;}
-  .fb-v2 .file-row .file-date, .fb-v2 .file-row .file-size {display: none;}
-  .fb-v2 .file-name {white-space: normal; overflow-wrap: anywhere;}
-  .fb-v2 button, .fb-v2 summary, .fb-v2 .inline-check {min-height: 44px;}
-  .fb-v2 .file-check {width: 22px; height: 22px;}
-  .fb-v2 .file-pager {flex-wrap: wrap;}
+@import url('../shared/workspace-theme.css');
+/* One component owns full, compact and picker presentation. Operation dialogs
+   continue using the existing workspace dialog styles and handlers. */
+.fb-v2 {min-width:0; max-width:100%; color:var(--ws-ink);}
+.fb-v2 button,.fb-v2 .button,.fb-v2 select,.fb-v2 input:not([type=checkbox]),.fb-v2 summary.button {font:inherit; color:var(--ws-ink); background:var(--ws-surface); border:1px solid var(--ws-line); border-radius:6px; min-height:38px; padding:7px 10px; box-shadow:none;}
+.fb-v2 button.primary {background:var(--ws-accent); color:var(--ws-surface); border-color:var(--ws-accent); font-weight:650;}
+.fb-v2 button.danger {color:var(--ws-danger); background:var(--ws-subtle);}
+.fb-v2 .muted {color:var(--ws-muted); font-size:12px;}
+.fb-v2 .file-browser-heading {display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:10px;}
+.fb-v2 .file-browser-heading > strong {font-size:14px; font-weight:500; color:var(--ws-muted); margin-right:auto;}
+.fb-v2 .file-browser-shell {display:grid; grid-template-columns:minmax(190px,210px) minmax(0,1fr); gap:12px; align-items:start; border:0; background:transparent; box-shadow:none;}
+.fb-v2[data-display-mode=full] .file-browser-shell {grid-template-columns:minmax(190px,210px) minmax(0,1fr) minmax(270px,300px);}
+.fb-v2[data-display-mode=full].fb-details-collapsed .file-browser-shell {grid-template-columns:minmax(190px,210px) minmax(0,1fr);}
+.fb-v2 :is(.file-tree-pane,.file-list-pane,.file-details-pane) {min-width:0; border:1px solid var(--ws-line); border-radius:10px; background:var(--ws-surface); box-shadow:none;}
+.fb-v2 :is(.file-tree-pane,.file-details-pane) {position:sticky; top:calc(var(--header-height,0px) + 12px); max-height:calc(100dvh - var(--header-height,0px) - 24px); overflow:auto; scrollbar-width:thin;}
+.fb-v2 .file-tree-pane {padding:10px;}
+.fb-v2 .file-pane-heading {display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0;}
+.fb-v2 .file-pane-heading .muted {display:none;}
+.fb-v2 .file-pane-heading strong {font-size:14px;}
+.fb-v2 .root-shortcuts {display:grid; gap:4px; margin:0 0 8px;}
+.fb-v2 .root-shortcut {display:flex; gap:8px; align-items:center; width:100%; text-align:left; min-width:0; border:0; background:transparent;}
+.fb-v2 .root-shortcut.active {background:var(--ws-selected); color:var(--ws-accent);}
+.fb-v2 .root-marker {width:8px; height:8px; border:2px solid currentColor; border-radius:2px; flex-shrink:0;}
+.fb-v2 .root-text {min-width:0;}
+.fb-v2 .root-text strong {font-size:14px; font-weight:550;}
+.fb-v2 .root-text small {display:none;}
+.fb-v2 .file-tree {min-width:0; overflow:auto; max-height:55vh;}
+.fb-v2 .tree-row {display:flex; align-items:center; gap:2px; padding-left:calc(var(--tree-depth,0) * 12px); border-radius:6px;}
+.fb-v2 .tree-toggle {width:26px; min-width:26px; min-height:34px; padding:3px; border:0; background:transparent;}
+.fb-v2 .tree-toggle svg {width:16px; height:16px; transition:transform .1s;}
+.fb-v2 .tree-toggle[aria-expanded=true] svg {transform:rotate(90deg);}
+.fb-v2 .tree-label {flex:1; min-width:0; min-height:34px; padding:4px; border:0; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:transparent;}
+.fb-v2 .tree-label.active {color:var(--ws-accent); background:var(--ws-selected);}
+.fb-v2 .file-list-toolbar {display:grid; grid-template-columns:minmax(0,1fr); padding:12px; gap:10px; border-bottom:1px solid var(--ws-line);}
+.fb-v2 .file-path-block {min-width:0;}
+.fb-v2 .file-path-block .muted {margin:4px 0 0;}
+.fb-v2 .file-breadcrumbs {display:flex; flex-wrap:wrap; gap:2px; align-items:center; overflow-wrap:anywhere;}
+.fb-v2 .crumb {border:0; background:transparent; padding:2px 4px; min-height:32px; white-space:normal; overflow-wrap:anywhere; color:var(--ws-accent);}
+.fb-v2 .crumb-separator {color:var(--ws-muted);}
+.fb-v2 .file-toolbar-actions {display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:0;}
+.fb-v2 .file-search-input {order:-1; width:100%; flex:1 1 160px; min-width:0;}
+.fb-v2 .file-sort-select {min-width:0; max-width:140px; width:auto;}
+.fb-v2 .file-batch-actions {display:flex; align-items:center; flex-wrap:wrap; gap:6px; border-top:1px solid var(--ws-line); padding-top:10px; min-width:0;}
+.fb-v2 .inline-check {display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ws-muted); min-height:38px; margin-right:auto;}
+.fb-v2 .selection-count {font-size:12px; color:var(--ws-muted);}
+.fb-v2 .file-selection-hint {width:100%; color:var(--ws-danger); font-size:12px;}
+.fb-v2 .file-selection-hint:empty {display:none;}
+.fb-v2 .file-more-menu {position:relative;}
+.fb-v2 .file-more-menu > summary {list-style:none; cursor:pointer;}
+.fb-v2 .file-more-items {position:absolute; right:0; top:calc(100% + 4px); min-width:180px; display:grid; gap:4px; z-index:20; padding:8px; border:1px solid var(--ws-line); border-radius:8px; background:var(--ws-surface); box-shadow:0 8px 24px #0002; max-height:55vh; overflow:auto;}
+.fb-v2 .file-more-items button {width:100%; text-align:left;}
+.fb-v2 .file-danger-actions {border-top:1px solid var(--ws-line); padding-top:8px; margin-top:4px;}
+.fb-v2 :is(.file-list-head,.file-row) {display:grid; grid-template-columns:24px 24px minmax(0,1fr) 65px; gap:8px; align-items:center; padding:10px;}
+.fb-v2 .file-list-head {background:var(--ws-subtle); color:var(--ws-muted); font-size:12px; border-bottom:1px solid var(--ws-line);}
+.fb-v2 .file-list-head span:last-child,.fb-v2 .file-date {display:none;}
+.fb-v2 .file-list {min-height:300px;}
+.fb-v2 .file-row {min-height:50px; border-bottom:1px solid var(--ws-line); cursor:pointer; font-size:14px;}
+.fb-v2 .file-row:hover,.fb-v2 .tree-row:hover {background:var(--ws-subtle);}
+.fb-v2 .file-row.selected {background:var(--ws-selected);}
+.fb-v2 .file-row.blocked {opacity:.5; cursor:not-allowed;}
+.fb-v2 .file-row:focus-visible {outline-offset:-2px;}
+.fb-v2 .file-check {width:18px; height:18px; accent-color:var(--ws-accent); margin:0;}
+.fb-v2 .file-name {min-width:0; overflow-wrap:anywhere; white-space:normal; font-size:14px;}
+.fb-v2 .file-size {display:block; color:var(--ws-muted); font-size:12px; white-space:nowrap;}
+.fb-v2 .file-icon {width:20px; height:20px; color:var(--ws-muted);}
+.fb-v2 .file-icon.folder {color:var(--ws-accent);}
+.fb-v2 .file-preview-thumb {width:24px; height:24px; object-fit:cover; border-radius:3px;}
+.fb-v2 :is(.file-protected-note,.file-blocked-note) {display:block; font-size:12px; color:var(--ws-danger);}
+.fb-v2 .file-action-status {margin:0; padding:8px 12px; color:var(--ws-accent); font-size:12px; overflow-wrap:anywhere;}
+.fb-v2 .file-action-status:empty {display:none;}
+.fb-v2 .form-error {color:var(--ws-danger); padding:0 12px; overflow-wrap:anywhere;}
+.fb-v2 .file-pager {display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px; padding:12px 4px; border-top:1px solid var(--ws-line);}
+.fb-v2 .file-details-pane {padding:12px;}
+.fb-v2 .file-details-body {display:grid; gap:12px; overflow-wrap:anywhere;}
+.fb-v2 .file-details-body :is(h3,p,dl) {margin:0;}
+.fb-v2 .file-details-body h3 {font-size:16px;}
+.fb-v2 .file-details-empty {padding:24px 0; color:var(--ws-muted);}
+.fb-v2 .file-detail-metadata {display:grid; grid-template-columns:60px minmax(0,1fr); gap:8px; font-size:12px;}
+.fb-v2 .file-detail-metadata dt {color:var(--ws-muted);}
+.fb-v2 .file-detail-metadata dd {margin:0;}
+.fb-v2 :is(.file-detail-image,.file-detail-shots img) {display:block; max-width:100%; max-height:300px; object-fit:contain; background:var(--ws-subtle); border-radius:6px;}
+.fb-v2 .file-detail-text {white-space:pre-wrap; overflow-wrap:anywhere; max-height:400px; overflow:auto; background:var(--ws-subtle); padding:12px; margin:0; font:13px/1.6 ui-monospace,monospace;}
+.fb-v2 .file-detail-actions {display:flex; flex-wrap:wrap; gap:6px; padding-top:12px; border-top:1px solid var(--ws-line);}
+.fb-v2 .file-selection-list {padding-left:20px; max-height:300px; overflow:auto; font-size:12px;}
+.fb-media-info {max-width:100%; overflow-wrap:anywhere;}
+.fb-media-info dl {display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; font-size:12px;}
+.fb-media-info dd {margin:0; white-space:pre-wrap;}
+.fb-media-info h2 {font-size:14px;}
+.fb-v2 :is(.fb-tree-toggle,.fb-pane-close,.fb-pane-backdrop) {display:none;}
+.fb-v2 .file-confirm-footer {position:sticky; bottom:0; padding:10px 0 0; background:var(--ws-surface); z-index:2;}
+.fb-v2 .file-confirm-footer button {width:100%;}
+/* Compact reuses the same nodes: fixed roots/controls/footer, scrolling list.
+   The tree is a disclosure inside the path block, never a second browser. */
+.fb-v2[data-display-mode=compact] {display:flex; flex-direction:column; height:100%; min-height:0;}
+.fb-v2[data-display-mode=compact] .file-browser-shell {display:flex; flex-direction:column; flex:1; min-height:0; gap:0; overflow:hidden;}
+.fb-v2[data-display-mode=compact] .file-browser-heading {display:none;}
+.fb-v2[data-display-mode=compact] :is(.file-tree-pane,.file-list-pane) {border:0; border-radius:0; position:static; padding:0; max-height:none; min-height:0;}
+.fb-v2[data-display-mode=compact] .file-list-pane {display:flex; flex-direction:column; flex:1; overflow:hidden;}
+.fb-v2[data-display-mode=compact] .root-shortcuts {grid-template-columns:repeat(2,minmax(0,1fr)); flex:none; margin-bottom:4px;}
+.fb-v2[data-display-mode=compact] .root-shortcut {height:36px; min-height:36px; padding:4px 2px; gap:3px; border-radius:7px;}
+.fb-v2[data-display-mode=compact] .root-text strong {font-size:12px; white-space:nowrap;}
+.fb-v2[data-display-mode=compact] .file-icon {width:16px; height:16px;}
+.fb-v2[data-display-mode=compact] .file-tree-disclosure > summary {padding:2px 0; min-height:28px; color:var(--ws-muted); font-size:12px; cursor:pointer;}
+.fb-v2[data-display-mode=compact] .file-tree {max-height:130px;}
+.fb-v2[data-display-mode=compact] .file-list-toolbar {flex:none; padding:4px 0; gap:4px;}
+.fb-v2[data-display-mode=compact] .file-path-block > .muted {display:none;}
+.fb-v2[data-display-mode=compact] .file-breadcrumbs {flex-wrap:nowrap; overflow:auto; scrollbar-width:thin;}
+.fb-v2[data-display-mode=compact] .crumb {white-space:nowrap; min-height:28px; font-size:12px; padding:2px;}
+.fb-v2[data-display-mode=compact] .file-batch-actions {padding:0; min-height:32px; justify-content:space-between; gap:2px;}
+.fb-v2[data-display-mode=compact] .inline-check {margin:0; min-height:32px; white-space:nowrap;}
+.fb-v2[data-display-mode=compact] .file-list {flex:1; min-height:44px; max-height:none; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin;}
+.fb-v2[data-display-mode=compact] .file-list-head {display:none;}
+.fb-v2[data-display-mode=compact] .file-row {grid-template-columns:18px 16px minmax(0,1fr); min-height:44px; height:44px; padding:8px 2px; gap:6px;}
+.fb-v2[data-display-mode=compact] .file-name {white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.fb-v2[data-display-mode=compact] :is(.file-blocked-note,.file-protected-note) {display:inline; margin-left:4px;}
+.fb-v2[data-display-mode=compact] .file-size {display:none;}
+.fb-v2[data-display-mode=compact] .file-search-input {flex-basis:100%; height:36px; min-height:36px; padding:5px 8px;}
+.fb-v2[data-display-mode=compact] :is(.file-sort-select,.file-direction-button) {height:36px; min-height:36px; padding:5px 8px;}
+.fb-v2[data-display-mode=compact] .file-sort-select {flex:1; max-width:none;}
+.fb-v2[data-display-mode=compact] .form-error {margin:0; padding:0; flex:none;}
+.fb-v2[data-display-mode=compact] .form-error:empty {display:none;}
+.fb-v2[data-display-mode=compact] .file-confirm-footer {position:static; flex:none; padding-top:8px;}
+.fb-v2[data-display-mode=compact] .file-confirm-footer button {height:40px; min-height:40px; border-radius:7px;}
+.fb-v2[data-display-mode=compact] .file-pager {flex:none; gap:4px; padding:4px 0; font-size:12px;}
+.fb-v2[data-display-mode=compact] .file-pager button {min-height:32px; padding:4px;}
+.fb-v2[data-display-mode=picker] .file-list {max-height:45vh; overflow:auto;}
+.fb-v2[data-display-mode=picker] .file-browser-heading {display:flex;}
+#files-view .files-header {margin-bottom:12px; align-items:center; gap:12px;}
+#files-view .files-header h1 {font-size:22px; margin:0; color:var(--ws-ink);}
+#files-view .files-header p {color:var(--ws-muted); margin:4px 0 0;}
+#files-view .files-header-actions .button {color:var(--ws-ink); background:var(--ws-surface); border-color:var(--ws-line);}
+#files-view .file-history-items {background:var(--ws-surface);}
+@media (min-width:1600px) {
+  .fb-v2[data-display-mode=full] :is(.file-row,.file-list-head) {grid-template-columns:24px 24px minmax(0,1fr) 75px 125px;}
+  .fb-v2[data-display-mode=full] .file-date,.fb-v2[data-display-mode=full] .file-list-head span:last-child {display:block; font-size:12px; color:var(--ws-muted);}
+}
+@media (max-width:1179px) {
+  .fb-v2[data-display-mode=full] .file-browser-shell {grid-template-columns:200px minmax(0,1fr);}
+  .fb-v2 .file-details-pane {position:fixed; inset:0 0 0 auto; width:min(360px,100vw); max-height:100dvh; z-index:92; border-radius:0; padding:16px;}
+  .fb-v2 .fb-pane-backdrop {display:block; position:fixed; inset:0; width:100%; height:100%; max-width:none; background:#101b2e80; border:0; border-radius:0; z-index:91;}
+  body:has(.fb-overlay-open) {overflow:hidden;}
+}
+@media (max-width:900px) {
+  .fb-v2[data-display-mode=compact] :is(button,select,input:not([type=checkbox]),summary,.inline-check) {min-height:44px; height:auto;}
+  .fb-v2[data-display-mode=compact] .file-row {grid-template-columns:22px 16px minmax(0,1fr);}
+  #files-view .files-header {align-items:flex-start;}
+  .fb-v2[data-display-mode=full] .file-browser-shell,.fb-v2[data-display-mode=full].fb-details-collapsed .file-browser-shell,.fb-v2[data-display-mode=picker] .file-browser-shell {grid-template-columns:minmax(0,1fr);}
+  .fb-v2:not([data-display-mode=compact]) .file-tree-pane {display:none;}
+  .fb-v2:not([data-display-mode=compact]).fb-tree-open .file-tree-pane {display:block; position:fixed; inset:0 auto 0 0; width:min(320px,calc(100vw - 24px)); max-height:100dvh; padding:16px; border-radius:0; z-index:92;}
+  .fb-v2:not([data-display-mode=compact]) :is(.fb-tree-toggle,.fb-pane-close) {display:block;}
+  .fb-v2 :is(button,select,input:not([type=checkbox]),summary.button,.inline-check) {min-height:44px;}
+  .fb-v2 :is(input,select) {font-size:16px;}
+  .fb-v2 .file-check {width:22px; height:22px;}
+  .fb-v2 .file-list-head {display:none;}
+  .fb-v2 .file-row {grid-template-columns:24px 24px minmax(0,1fr) 65px; min-height:60px;}
+  .fb-v2 .file-toolbar-actions {width:100%;}
+  .fb-v2 .file-search-input {flex-basis:100%;}
+  .fb-v2 .file-more-items {right:auto; left:0;}
+  .fb-v2 .file-pane-heading {flex-wrap:wrap;}
+}
+@media (max-width:480px) {
+  .fb-v2 .file-details-pane {width:100%;}
+  .fb-v2 .file-browser-heading > strong {display:none;}
+  .fb-v2 .file-browser-heading {justify-content:space-between;}
+  .fb-v2 .file-batch-actions > button {flex:1 1 auto;}
 }

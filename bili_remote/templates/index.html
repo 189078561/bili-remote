@@ -44,8 +44,8 @@
     <aside id="app-navigation" class="app-sidebar">
       <nav class="app-tabs" aria-label="功能导航">
         <button class="app-tab active" type="button" data-view="home"><span aria-hidden="true">⌂</span>首页</button>
-        <button class="app-tab" type="button" data-view="files"><span aria-hidden="true">▤</span>文件管理</button>
-        <button class="app-tab" type="button" data-view="publish"><span aria-hidden="true">✦</span>发种工作台</button>
+        <button class="app-tab" type="button" data-view="files"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#folder"/></svg>文件管理</button>
+        <button class="app-tab" type="button" data-view="publish"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"/></svg>发种工作台</button>
         <button class="app-tab" type="button" data-view="download"><span aria-hidden="true">↓</span>B站下载</button>
         <button id="settings-entry" class="app-tab settings-entry" type="button" aria-label="打开全局设置"><span aria-hidden="true">⚙</span>设置</button>
       </nav>
@@ -258,9 +258,8 @@
   <main id="files-view" class="page app-view files-page hidden">
     <section class="files-header">
       <div>
-        <p class="eyebrow">LOCAL MEDIA BROWSER</p>
         <h1>文件管理</h1>
-        <p class="muted">选择资源后使用工具栏处理，所有默认参数在设置中管理。</p>
+        <p class="muted">浏览本地资源，选择文件查看详情或批量处理。</p>
       </div>
       <div class="button-row files-header-actions">
         <button id="screenshot-sessions-button" class="button secondary small" type="button">缩略图记录</button>
@@ -559,7 +558,7 @@
   </main>
 
   {% if v2_enabled %}
-  <main id="publish-view" class="page app-view hidden">{% include "v2/workbench/workbench.html" %}<a href="/legacy">打开旧版兼容界面</a></main>
+  <main id="publish-view" class="page app-view hidden">{% include "v2/workbench/workbench.html" %}</main>
   <main id="download-view" class="page app-view hidden">{% include "v2/download/workbench.html" %}</main>
   {% endif %}
     </div>

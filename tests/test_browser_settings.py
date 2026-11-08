@@ -315,6 +315,7 @@ def test_file_checkbox_selection_enables_available_actions(live_server) -> None:
                 ),
             ),
         )
+        page.locator("#file-browser-host .file-more-menu > summary").click()
         page.get_by_role("button", name="生成缩略图", exact=True).click()
         page.locator("#assistant-generate").wait_for()
         # Verify the retained legacy workbench independently of the new main workflow.

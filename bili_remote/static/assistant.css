@@ -489,6 +489,7 @@
   display: none;
 }
 /* Both contexts use FileBrowser; only density and optional controls differ. */
+
 #assistant-browser .file-tree-pane,
 #assistant-browser .file-browser-heading,
 #assistant-browser .root-shortcuts,
@@ -604,18 +605,6 @@
   padding: 3px 7px;
   font-size: 12px;
   min-height: 30px;
-}
-.file-preview-thumb {
-  width: 27px;
-  height: 24px;
-  object-fit: cover;
-  border-radius: 3px;
-}
-.file-search-input {
-  width: 150px !important;
-}
-.file-name {
-  font-size: 12px;
 }
 @media (min-width: 1600px) {
   .assistant-grid {
@@ -848,19 +837,7 @@
   background: #ffd675;
   border-radius: 2px;
 }
-@media (max-width: 640px) {
-  #file-browser-host .file-row {
-    grid-template-columns: 24px 32px minmax(0, 1fr) 65px;
-    gap: 6px;
-  }
-  #file-browser-host .file-size {
-    display: block;
-    font-size: 10px;
-  }
-  .file-search-input {
-    width: 120px !important;
-  }
-}
+
 @media (min-width: 901px) {
   .topbar {
     width: 156px;
@@ -982,12 +959,4 @@
   #assistant-browser .file-name {
     font-size: 11px;
   }
-}
-/* Context actions must remain clickable even when an empty folder is short. */
-.file-list-pane:has(.file-more-menu[open]) {
-  overflow: visible;
-}
-.file-list-toolbar:has(.file-more-menu[open]) {
-  position: relative;
-  z-index: 5;
 }

@@ -36,8 +36,10 @@ def mount(page, *, adapter=False, page_size=20):
 
 
 def more_action(host, label):
-    host.locator('.file-more-menu > summary').click()
-    host.get_by_role('button', name=label, exact=True).click()
+    action = host.get_by_role('button', name=label, exact=True)
+    if not action.is_visible():
+        host.locator('.file-more-menu > summary').click()
+    action.click()
 
 
 def select(host, path):
@@ -176,7 +178,7 @@ def test_shared_context_handoff_and_media_values(live_server):
         select(host, 'Media/episode01.mp4')
         host.get_by_role('button', name='进入发种工作台', exact=True).click()
         page.wait_for_function('window.workbenchContext?.revision === 7')
-        host.get_by_role('button', name='智能命名', exact=True).click()
+        more_action(host, '智能命名')
         page.wait_for_function('window.namingContext === window.workbenchContext')
         host.get_by_role('button', name='预览/编辑', exact=True).click()
         expect(page.locator('.fb-media-info')).to_contain_text('H.265（ffprobe）')
