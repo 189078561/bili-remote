@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="/static/media-tools.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/ui.css?v={{ asset_version }}">
   <link rel="stylesheet" href="/static/assistant.css?v={{ asset_version }}">
-  <link rel="stylesheet" href="/static/v2/shared/design-system.css?v={{ asset_version }}">
+  {% if not v2_enabled %}<link rel="stylesheet" href="/static/v2/shared/design-system.css?v={{ asset_version }}">{% endif %}
   <script>window.BILI_V2 = {{ 'true' if v2_enabled else 'false' }};</script>
   {% if v2_enabled %}
   <script src="/static/v2/shared/theme.js?v={{ asset_version }}"></script>
@@ -19,8 +19,33 @@
   <link rel="stylesheet" href="/static/v2/shared/product.css?v={{ asset_version }}">
   {% endif %}
 </head>
-<body>
+<body{% if v2_enabled %} class="final-ui"{% endif %}>
   <a class="skip-link" href="#app-content">跳转到内容</a>
+  {% if v2_enabled %}
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#" aria-label="Bili Remote 首页" data-home-link>
+        <span class="brand-mark small"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#play"/></svg></span>
+        <strong>{{ app_name }}</strong>
+      </a>
+      <div id="app-navigation">{% include "v2/shared/navigation.html" %}</div>
+      <span id="app-page-label" class="sr-only" aria-live="polite">首页</span>
+      <div class="account-actions">
+        <button id="task-center-toggle" class="button ghost" type="button" aria-controls="task-center" aria-expanded="false"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#bell"/></svg><span class="task-label">任务</span><span id="task-center-count" class="count-badge">…</span></button>
+        <details class="account-menu">
+          <summary class="button ghost" aria-label="用户与外观"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#user"/></svg></summary>
+          <div class="account-menu-items">
+            <strong>{{ username }}</strong>
+            <span id="service-state" class="muted">服务在线</span>
+            <button id="theme-toggle" class="button ghost" type="button"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#sun"/></svg><span id="theme-label">跟随系统</span></button>
+            <button id="app-logout" class="button ghost" type="button">退出登录</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </header>
+  <div class="app-shell">
+  {% else %}
   <header class="topbar">
     <div class="topbar-inner">
       <button id="nav-toggle" class="button ghost small" type="button" aria-label="切换导航" aria-controls="app-navigation" aria-expanded="false"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#menu"/></svg></button>
@@ -56,6 +81,7 @@
         <span class="muted sidebar-note">媒体处理与发布辅助</span>
       </div>
     </aside>
+  {% endif %}
     <div id="app-content" class="app-main" tabindex="-1">
 
   {% if v2_enabled %}{% include "v2/shared/home.html" %}{% else %}

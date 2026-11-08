@@ -38,6 +38,7 @@
   const nav = $("app-navigation"), toggle = $("nav-toggle"), backdrop = $("nav-backdrop");
   const mobile = matchMedia("(max-width: 900px)");
   function syncNavigation() {
+    if (window.BILI_V2) { nav.inert = false; return; }
     const opened = document.body.classList.contains("nav-open") && mobile.matches;
     backdrop.hidden = !opened;
     toggle.setAttribute("aria-expanded", String(opened));
@@ -46,9 +47,16 @@
   function closeNavigation(restore = false) {
     document.body.classList.remove("nav-open");
     syncNavigation();
-    if (restore) toggle.focus();
+    if (restore) toggle?.focus();
   }
-  backdrop.onclick = () => closeNavigation(true);
+  if (backdrop) backdrop.onclick = () => closeNavigation(true);
+  document.querySelector("[data-home-link]")?.addEventListener("click", event => {
+    event.preventDefault(); nav.querySelector('[data-view="home"]').click();
+  });
+  document.addEventListener("click", event => {
+    const menu = document.querySelector(".account-menu");
+    if (menu && !menu.contains(event.target)) menu.open = false;
+  });
   // ui.js retains the existing toggle handler; observe its state rather than double-toggle.
   new MutationObserver(syncNavigation).observe(document.body, {attributes: true, attributeFilter: ["class"]});
   mobile.addEventListener("change", () => closeNavigation());

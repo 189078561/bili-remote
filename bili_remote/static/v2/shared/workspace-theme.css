@@ -1,23 +1,9 @@
-/* Semantic tokens for the two workspaces and the shared browser only. */
-:where(.br-workbench, .fb-v2, #files-view, #publish-view, .fb-media-info, body:has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar), #modal:has(.file-picker-dialog,.operation-dialog,.text-editor-dialog,.preview-dialog,.fb-media-info)) {
-  --ws-bg: #f6f7f9; --ws-surface: #fff; --ws-subtle: #f0f3f7;
-  --ws-ink: #202b3d; --ws-muted: #5e6d82; --ws-line: #dde3eb;
-  --ws-accent: #2464d8; --ws-selected: #edf3ff; --ws-danger: #b72d43;
-  color-scheme: light; color: var(--ws-ink);
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) :where(.br-workbench, .fb-v2, #files-view, #publish-view, .fb-media-info, body:has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar), #modal:has(.file-picker-dialog,.operation-dialog,.text-editor-dialog,.preview-dialog,.fb-media-info)) {
-    --ws-bg: #141b26; --ws-surface: #1b2533; --ws-subtle: #253244;
-    --ws-ink: #e5ebf4; --ws-muted: #a9b7cb; --ws-line: #37465b;
-    --ws-accent: #91b8ff; --ws-selected: #263e60; --ws-danger: #ff9eaf;
-    color-scheme: dark;
-  }
-}
-[data-theme="dark"] :where(.br-workbench, .fb-v2, #files-view, #publish-view, .fb-media-info, body:has(:is(#files-view,#publish-view):not(.hidden)) :is(.topbar,.app-sidebar), #modal:has(.file-picker-dialog,.operation-dialog,.text-editor-dialog,.preview-dialog,.fb-media-info)) {
-  --ws-bg: #141b26; --ws-surface: #1b2533; --ws-subtle: #253244;
-  --ws-ink: #e5ebf4; --ws-muted: #a9b7cb; --ws-line: #37465b;
-  --ws-accent: #91b8ff; --ws-selected: #263e60; --ws-danger: #ff9eaf;
-  color-scheme: dark;
+/* Shared component aliases. The host owns the palette and theme. */
+:where(.br-workbench,.fb-v2,#files-view,#publish-view,.fb-media-info,#modal,.topbar) {
+ --ws-bg:var(--bg,#f5f5f1); --ws-surface:var(--surface,#fff); --ws-subtle:var(--surface-2,#f1f4ef);
+ --ws-ink:var(--ink,#23342f); --ws-muted:var(--muted,#6e7b74); --ws-line:var(--line,#e0e5de);
+ --ws-accent:var(--brand,#2e6653); --ws-selected:var(--selected,#e7f0e8); --ws-danger:var(--danger,#ac4d3e);
+ color:var(--ws-ink);
 }
 .app-main > :is(#files-view, #publish-view) {padding:16px; max-width:none; background:var(--ws-bg); min-height:calc(100dvh - var(--header-height, 64px));}
 :where(.br-workbench, .fb-v2) {font:14px/1.6 system-ui,-apple-system,"PingFang SC",sans-serif;}
