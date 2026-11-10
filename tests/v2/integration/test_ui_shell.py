@@ -5,7 +5,7 @@ from playwright.sync_api import expect
 from test_browser_modules import browser_session, live_server
 
 
-def test_shell_navigation_drawer_and_layout(live_server, tmp_path):
+def test_shell_navigation_and_responsive_layout(live_server, tmp_path):
     base, app = live_server
     playwright, browser, page, errors = browser_session(base, legacy=False)
     output = tmp_path / 'screenshots'
@@ -14,18 +14,20 @@ def test_shell_navigation_drawer_and_layout(live_server, tmp_path):
         for width in [390, 768, 1440]:
             page.set_viewport_size({'width': width, 'height': 1000})
             for view in ['home', 'files', 'publish', 'download', 'settings']:
-                if width <= 900:
-                    page.locator('#nav-toggle').click()
                 page.locator('#settings-entry' if view == 'settings' else f'.app-tab[data-view="{view}"]').click()
                 expect(page.locator(f'#{view}-view')).to_be_visible()
                 expect(page.locator('#app-page-label')).to_have_text({'home':'首页','files':'文件管理','publish':'发种工作台','download':'B站下载','settings':'设置'}[view])
                 page.wait_for_timeout(150)
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (width, view)
                 assert page.locator(f'#app-content > #{view}-view').count()==1
-                if width>900:
-                    content=page.locator(f'#{view}-view').bounding_box()
-                    sidebar=page.locator('#app-navigation').bounding_box()
-                    assert content['x']>=sidebar['x']+sidebar['width'],(width,view,content,sidebar)
+                content=page.locator(f'#{view}-view').bounding_box()
+                nav=page.locator('#app-navigation').bounding_box()
+                if width <= 600:
+                    # Mobile: navigation is a fixed bottom bar below the page body.
+                    assert nav['y'] >= content['y'], (width, view, content, nav)
+                else:
+                    # Desktop: navigation is the fixed top bar above the page body.
+                    assert nav['y'] + nav['height'] <= content['y'] + 1, (width, view, content, nav)
                 page.screenshot(path=str(output / f'{view}-{width}.png'), full_page=True)
             page.locator('#task-center-toggle').click()
             expect(page.locator('#task-center')).to_be_visible()
