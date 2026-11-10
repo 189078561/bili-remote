@@ -5,7 +5,7 @@
 ## 基线
 
 - 起点提交：`7ac7ca6`
-- 当前 HEAD：`8b3a186f6e7fb72fa3946eac20a3a9962446f4c3`
+- 当前 HEAD：`c485eb0be476483c0e4cc9366a39c9052d77e3ab`（实体交付提交；其后的元数据提交只修正本报告）
 - 分支：`codex/final-ui-v2`（仅在该分支提交，未推送、未合并、未部署）
 - 原工作区 `/opt/bili-remote`：`v2-integration` / `679b7c733fa136a8f6467dc37f6bd9fa22049af7`，178 个原未提交条目指纹无差异，未改动。
 - 视觉基线：`docs/v2/final-ui/reference/01-home.png` … `05-workbench.png`，SHA-256 锁定于 `docs/v2/final-ui/reference/sha256.json`。
@@ -20,9 +20,10 @@
 4a4c652633e4ded60f751e55cd3c757175d7a39b feat(final-ui): rebuild download selection with real per-episode quality and task states
 b6db23ba9856751caff3fe16c4876e106012a58a feat(ui): implement resource home and inline settings inspectors
 8b3a186f6e7fb72fa3946eac20a3a9962446f4c3 feat(ui): complete tool previews, settings search and safe workflow handoffs
+c485eb0be476483c0e4cc9366a39c9052d77e3ab docs(final-ui): deliver functional matrix, visual acceptance and integration report
 ```
 
-提交尚未包含本次收尾阶段的以下新增文件（与下一个阶段提交一并落地）：
+最后一个提交包含本次收尾阶段的以下文件：
 
 - `tests/v2/integration/test_ui_shell.py`（更新为顶栏/底栏结构断言）
 - `tests/v2/integration/test_final_ui_edges.py`
