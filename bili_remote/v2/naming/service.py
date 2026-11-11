@@ -194,8 +194,15 @@ class NamingService:
         effective.update(deepcopy(rules or {}))
         for name in ("source", "group"):
             if isinstance(effective.get(name), str):
-                source = "manual" if name in context_manual_rules or name in (rules or {}) else "memory"
+                explicit = name in context_manual_rules or name in (rules or {})
+                source = "manual" if explicit else "memory"
                 effective[name] = {**manual_field(effective[name]), "source": source, "manual": source == "manual"}
+                if explicit:
+                    remembered_sources[f"naming_rule.{name}"] = {
+                        "scope": "manual",
+                        "reason": "explicit_rule",
+                        "source_ref": None,
+                    }
         result["effective_rules"] = {
             "naming_rule": {k: v for k, v in effective.items() if k != "episode_rules"},
             "episode_rules": effective.get("episode_rules", {}),

@@ -182,6 +182,46 @@ def test_template_precedence_explicit_manual_memory_identity_then_fallback(setup
     assert fallback["effective_rules"]["sources"]["naming_rule.template_id"]["reason"] == "movie_fallback"
 
 
+def test_explicit_source_and_group_override_remembered_provenance(setup):
+    service, root, _ = setup
+    (root / "Motion.Study.S01E01.mp4").write_bytes(b"episode")
+
+    class Memory:
+        def get(self, identity, season):
+            return {
+                "effective": {
+                    "naming_rule": {"source": "WEBRip", "group": "REMEMBERED"},
+                    "episode_rules": {},
+                    "subtitle_rule": {},
+                    "selected_title": None,
+                    "sources": {
+                        "naming_rule.source": {"scope": "season", "revision": 2},
+                        "naming_rule.group": {"scope": "series", "revision": 3},
+                    },
+                }
+            }
+
+    service.memory = Memory()
+    context = analyze(
+        service,
+        [service.files.reference("downloads", "Motion.Study.S01E01.mp4")],
+        rules={"source": "BluRay"},
+        manual_overrides={"selected_title": "Motion Study", "year": 2024},
+    )
+
+    assert context["effective_rules"]["naming_rule"]["source"]["value"] == "BluRay"
+    assert context["effective_rules"]["naming_rule"]["source"]["source"] == "manual"
+    assert context["effective_rules"]["sources"]["naming_rule.source"] == {
+        "scope": "manual",
+        "reason": "explicit_rule",
+        "source_ref": None,
+    }
+    assert context["effective_rules"]["sources"]["naming_rule.group"] == {
+        "scope": "series",
+        "revision": 3,
+    }
+
+
 def test_directory_scan_season_preview_and_undo(setup):
     service, root, _ = setup
     season = root / "old-season"
