@@ -140,6 +140,48 @@ def test_batch_episodes_manual_fix_and_duplicate_detection(setup):
     assert any(x["code"] == "duplicate_episode" for x in duplicate["conflicts"])
 
 
+def test_filename_episode_selects_series_template_and_records_provenance(setup):
+    service, root, _ = setup
+    (root / "Motion.Study.S01E01.mp4").write_bytes(b"media")
+    path = root / "Motion.Study.S01E01.mp4"
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+    context = analyze(
+        service,
+        [service.files.reference("downloads", path.name)],
+        manual_overrides={"selected_title": "Motion Study", "year": 2024},
+    )
+    assert context["files"][0]["episode"]["season"]["value"] == 1
+    assert context["files"][0]["episode"]["episode"]["value"] == 1
+    assert context["effective_rules"]["naming_rule"]["template_id"] == "series"
+    assert context["effective_rules"]["sources"]["naming_rule.template_id"]["reason"] == "filename_episode"
+    preview = service.preview(context)
+    assert ".S01E01." in preview["operations"][0]["target_relative_path"]
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+def test_template_precedence_explicit_manual_memory_identity_then_fallback(setup):
+    service, root, _ = setup
+    (root / "Motion.Study.S01E01.mp4").write_bytes(b"episode")
+    (root / "plain.mkv").write_bytes(b"plain")
+
+    explicit = analyze(
+        service,
+        [service.files.reference("downloads", "Motion.Study.S01E01.mp4")],
+        rules={"template_id": "anime"},
+        manual_overrides={"selected_title": "Motion Study", "year": 2024},
+    )
+    assert explicit["effective_rules"]["naming_rule"]["template_id"] == "anime"
+    assert explicit["effective_rules"]["sources"]["naming_rule.template_id"]["reason"] == "explicit_rule"
+
+    fallback = analyze(
+        service,
+        [service.files.reference("downloads", "plain.mkv")],
+        manual_overrides={"selected_title": "Plain", "year": 2024},
+    )
+    assert fallback["effective_rules"]["naming_rule"]["template_id"] == "movie"
+    assert fallback["effective_rules"]["sources"]["naming_rule.template_id"]["reason"] == "movie_fallback"
+
+
 def test_directory_scan_season_preview_and_undo(setup):
     service, root, _ = setup
     season = root / "old-season"

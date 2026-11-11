@@ -173,10 +173,13 @@ class NamingService:
             else:
                 raise NamingError("unknown_field", "不支持的人工资料字段", fields=[name])
         from .memory import DEFAULT_RULES
-        effective = {**deepcopy(DEFAULT_RULES), **deepcopy(rules or {})}
+        context_manual_rules = self.manual_rules.get(result["context_id"], {})
+        remembered_sources = {}
+        effective = deepcopy(DEFAULT_RULES)
         if self.memory:
             remembered = self.memory.get(result.get("identity"), _value((result.get("episode") or {}).get("season")))
-            effective = {**deepcopy(DEFAULT_RULES), **remembered.get("effective", {}).get("naming_rule", {}), **deepcopy(rules or {})}
+            effective = {**deepcopy(DEFAULT_RULES), **remembered.get("effective", {}).get("naming_rule", {})}
+            remembered_sources = deepcopy(remembered.get("effective", {}).get("sources", {}))
             episode_rules = remembered.get("effective", {}).get("episode_rules", {})
             effective["episode_rules"] = episode_rules
             remembered_title = remembered.get("effective", {}).get("selected_title")
@@ -185,16 +188,19 @@ class NamingService:
             for mapping in episode_rules.get("mappings", []):
                 if mapping not in result["episode_mappings"]:
                     result["episode_mappings"].append(mapping)
-        effective.update(deepcopy(self.manual_rules.get(result["context_id"], {})))
+        # Explicit request rules outrank rules retained by this work context;
+        # remembered series/season rules remain below both.
+        effective.update(deepcopy(context_manual_rules))
+        effective.update(deepcopy(rules or {}))
         for name in ("source", "group"):
             if isinstance(effective.get(name), str):
-                source = "manual" if name in self.manual_rules.get(result["context_id"], {}) or name in (rules or {}) else "memory"
+                source = "manual" if name in context_manual_rules or name in (rules or {}) else "memory"
                 effective[name] = {**manual_field(effective[name]), "source": source, "manual": source == "manual"}
         result["effective_rules"] = {
             "naming_rule": {k: v for k, v in effective.items() if k != "episode_rules"},
             "episode_rules": effective.get("episode_rules", {}),
             "subtitle_rule": remembered.get("effective", {}).get("subtitle_rule", {}) if self.memory else {},
-            "sources": remembered.get("effective", {}).get("sources", {}) if self.memory else {},
+            "sources": remembered_sources,
         }
         old_files = {(x["ref"]["root_key"], x["ref"]["relative_path"]): x for x in result.get("files", [])}
         result["files"] = []
@@ -233,6 +239,43 @@ class NamingService:
             result["episode"]["scope"] = episode_override.get("scope", "single")
         elif any(ref.get("kind") == "directory" for ref in resources) or len(result["files"]) > 1:
             result["episode"]["scope"] = "season"
+        naming_rule = result["effective_rules"]["naming_rule"]
+        template_id = naming_rule.get("template_id")
+        if not template_id:
+            identity = result.get("identity") or {}
+            media_type = identity.get("media_type")
+            filename_file = next((item for item in result["files"] if (
+                item.get("episode", {}).get("episode", {}).get("source") == "filename"
+                or item.get("episode", {}).get("season", {}).get("source") == "filename"
+            )), None)
+            if identity.get("confirmed") and media_type in {"movie", "series", "anime"}:
+                template_id = media_type
+                rule_source = {"scope": "default", "reason": "confirmed_identity",
+                               "source_ref": identity.get("tmdb_id") or identity.get("bangumi_id")}
+            elif filename_file:
+                template_id = "series"
+                rule_source = {"scope": "default", "reason": "filename_episode",
+                               "source_ref": filename_file["ref"]["relative_path"]}
+            elif any(ref.get("kind") == "directory" for ref in resources):
+                template_id = "season"
+                rule_source = {"scope": "default", "reason": "directory_scope",
+                               "source_ref": resources[0].get("relative_path")}
+            elif len(result["files"]) > 1:
+                template_id = "series"
+                rule_source = {"scope": "default", "reason": "multi_file_scope",
+                               "source_ref": None}
+            else:
+                template_id = "movie"
+                rule_source = {"scope": "default", "reason": "movie_fallback",
+                               "source_ref": result["files"][0]["ref"]["relative_path"]}
+            naming_rule["template_id"] = template_id
+            result["effective_rules"]["sources"]["naming_rule.template_id"] = rule_source
+        elif "naming_rule.template_id" not in result["effective_rules"]["sources"]:
+            scope = "manual" if "template_id" in (rules or {}) or "template_id" in context_manual_rules else "memory"
+            result["effective_rules"]["sources"]["naming_rule.template_id"] = {
+                "scope": scope, "reason": "explicit_rule" if scope == "manual" else "remembered_rule",
+                "source_ref": None,
+            }
         media_type = (result.get("identity") or {}).get("media_type")
         default_template = "movie" if media_type == "movie" else "anime" if media_type == "anime" else "tv_season" if result["episode"].get("scope") == "season" else "tv_episode"
         result["effective_rules"]["subtitle_rule"].setdefault("template_id", default_template)

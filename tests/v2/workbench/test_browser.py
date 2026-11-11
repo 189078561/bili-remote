@@ -66,7 +66,8 @@ def context(revision=1):
                 "probe": {"resolution": {"value": "1080p", "source": "ffprobe"}, "video_codec": {"value": "H.265", "source": "ffprobe"}, "audio_codec": {"value": "AAC", "source": "ffprobe"}},
             }], "warnings": [], "conflicts": [],
             "episode": {"scope": "single", "season": {"value": 1}, "episode": {"value": 1}},
-            "effective_rules": {"naming_rule": {"templates": {"series": "{Title}.{Episode}"}}, "subtitle_rule": {"template_id": "tv_episode"}}}
+            "effective_rules": {"naming_rule": {"template_id": "series", "templates": {"series": "{Title}.{Episode}"}}, "subtitle_rule": {"template_id": "tv_episode"},
+                                "sources": {"naming_rule.template_id": {"scope": "default", "reason": "filename_episode", "source_ref": "Media/episode01.mp4"}}}}
 
 
 def v2_fixture(page, requests):
@@ -107,6 +108,7 @@ def test_contract_edit_copy_formats_responsive_and_no_draft(live_server):
         mount(page)
         page.evaluate("wb.select([{root_key:'downloads',relative_path:'Media/episode01.mp4',kind:'video',fingerprint:'fixture'}])")
         expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
+        expect(page.locator('[data-wb="template-source"]')).to_contain_text('规则来源：文件名 episode01.mp4')
         expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
         show_panel(page, None)
         page.locator('[data-edit="release_title"]').fill('人工主标题 <script>window.bad=true</script>')

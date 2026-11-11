@@ -317,6 +317,19 @@
       this.namingType = ctx.effective_rules?.naming_rule?.template_id || ctx.identity?.media_type || "movie";
       this.namingType = {anime_single:"anime",tv:"series"}[this.namingType] || this.namingType;
       this.el("naming-type").value = this.namingType;
+      const templateSource = ctx.effective_rules?.sources?.["naming_rule.template_id"];
+      const sourceLabels = {
+        explicit_rule: "规则来源：本次人工规则",
+        remembered_rule: "规则来源：已记住的系列或季度规则",
+        confirmed_identity: "规则来源：已确认影视身份",
+        directory_scope: "规则来源：整季目录",
+        multi_file_scope: "规则来源：多文件资源",
+        movie_fallback: "规则来源：单视频默认"
+      };
+      const sourceName = templateSource?.source_ref ? String(templateSource.source_ref).split("/").at(-1) : "";
+      this.el("template-source").textContent = templateSource?.reason === "filename_episode"
+        ? `规则来源：文件名${sourceName ? ` ${sourceName}` : ""}`
+        : (sourceLabels[templateSource?.reason] || "");
       this.el("naming-rule").value = ctx.effective_rules?.naming_rule?.templates?.[this.namingType] || "";
       for(const key of ['source','group']){const rule=ctx.effective_rules?.naming_rule?.[key];this.el(`${key}-rule`).value=(typeof rule==='object'?rule?.value:rule)||(key==='source'?'WEB-DL':'HDVWEB');}
       this.el("naming-rule").disabled = !ctx.effective_rules?.naming_rule;
