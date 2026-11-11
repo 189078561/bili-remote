@@ -407,6 +407,72 @@ class TorrentService:
             record["download_url"] = f"/api/torrents/{record['id']}/file"
         return records
 
+    def _validate_source_snapshot(
+        self, record: dict[str, Any], torrent_path: Path
+    ) -> None:
+        """Reject downloads when the payload no longer matches the torrent layout.
+
+        A rename leaves the historical build record and .torrent file intact, but
+        downloading that file after the source moved would produce a torrent that
+        cannot seed. Validate the cheap filesystem snapshot and torrent file list
+        at download/import time; content hashing remains part of torrent creation.
+        """
+        try:
+            source, _ = self.files.resolve(
+                str(record["source_root_key"]),
+                str(record["source_relative_path"]),
+                must_exist=True,
+                allow_empty=False,
+            )
+            _, current_files, single_file = self._collect_files(source)
+        except (FileServiceError, OSError) as exc:
+            raise TorrentError("源资源已变化，请重新制种") from exc
+
+        current_total = sum(item.size for item in current_files)
+        if (
+            len(current_files) != int(record.get("file_count") or 0)
+            or current_total != int(record.get("total_size_bytes") or 0)
+        ):
+            raise TorrentError("源资源已变化，请重新制种")
+
+        try:
+            torrent = bdecode(torrent_path.read_bytes())
+            info = torrent[b"info"]
+            if not isinstance(info, dict):
+                raise ValueError("种子缺少 info")
+            if hashlib.sha1(bencode(info)).hexdigest() != str(record["info_hash"]):
+                raise ValueError("种子 info hash 不一致")
+            if single_file:
+                if info.get(b"length") != current_total or b"files" in info:
+                    raise ValueError("单文件结构不一致")
+            else:
+                raw_files = info.get(b"files")
+                if not isinstance(raw_files, list):
+                    raise ValueError("目录结构不一致")
+                actual_layout: list[tuple[tuple[str, ...], int]] = []
+                for item in raw_files:
+                    if not isinstance(item, dict):
+                        raise ValueError("文件条目无效")
+                    parts = item.get(b"path")
+                    length = item.get(b"length")
+                    if (
+                        not isinstance(parts, list)
+                        or not parts
+                        or not all(isinstance(part, bytes) for part in parts)
+                        or not isinstance(length, int)
+                    ):
+                        raise ValueError("文件条目无效")
+                    actual_layout.append(
+                        (tuple(part.decode("utf-8") for part in parts), length)
+                    )
+                expected_layout = sorted(
+                    (item.relative_parts, item.size) for item in current_files
+                )
+                if sorted(actual_layout) != expected_layout:
+                    raise ValueError("文件路径或大小不一致")
+        except (KeyError, OSError, UnicodeDecodeError, ValueError) as exc:
+            raise TorrentError("源资源已变化，请重新制种") from exc
+
     def file_path(self, build_id: int) -> Path:
         record = self.database.get_torrent_build(build_id)
         if record is None:
@@ -419,4 +485,5 @@ class TorrentService:
         )
         if path.is_symlink() or not path.is_file() or path.suffix.lower() != ".torrent":
             raise TorrentError("种子文件不存在或状态异常")
+        self._validate_source_snapshot(record, path)
         return path

@@ -167,6 +167,54 @@ def test_torrent_build_and_conflict_detection(settings) -> None:
         raise AssertionError("同名种子应被拒绝")
 
 
+def test_torrent_download_rejects_build_after_source_rename(settings) -> None:
+    settings.ensure_directories()
+    source = settings.download_root / "Old.Package"
+    (source / "Sub").mkdir(parents=True)
+    (source / "episode.mkv").write_bytes(b"video-data" * 1000)
+    (source / "Sub" / "readme.txt").write_text("说明", encoding="utf-8")
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        login(client)
+        created = client.post(
+            "/api/torrents",
+            json={
+                "source_root_key": "downloads",
+                "source_relative_path": "Old.Package",
+                "output_relative_path": "builds",
+                "filename": "old-package.torrent",
+                "piece_length": "16K",
+                "trackers": ["https://tracker.example/announce"],
+            },
+        )
+        assert created.status_code == 200, created.text
+        build = created.json()
+        assert client.get(build["download_url"]).status_code == 200
+
+        renamed = settings.download_root / "New.Package"
+        source.rename(renamed)
+
+        stale = client.get(build["download_url"])
+        assert stale.status_code == 422, stale.text
+        assert "源资源已变化，请重新制种" in stale.json()["detail"]
+        assert (settings.torrents_root / "builds" / "old-package.torrent").is_file()
+
+        rebuilt = client.post(
+            "/api/torrents",
+            json={
+                "source_root_key": "downloads",
+                "source_relative_path": "New.Package",
+                "output_relative_path": "builds",
+                "filename": "new-package.torrent",
+                "piece_length": "16K",
+                "trackers": ["https://tracker.example/announce"],
+            },
+        )
+        assert rebuilt.status_code == 200, rebuilt.text
+        assert client.get(rebuilt.json()["download_url"]).status_code == 200
+
+
 def test_release_info_torrent_and_publish_api(settings) -> None:
     settings.ensure_directories()
     package = settings.download_root / "Show"
