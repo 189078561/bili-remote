@@ -18,7 +18,7 @@ Bili Remote 2.0 是以真实文件为入口、以识别和标准命名为基础�
 | file_service.py、filebrowser.py | 四类浏览根、八挂载配置、分页搜索、编辑、复制移动删除、改名预览 | 复用现有安全能力，不建立第二套文件系统 |
 | naming.py | 旧项目命名、预览、改名记录及回滚；关联 release_projects | 新服务与项目解耦；复用可独立的校验算法，不能复用项目生命周期 |
 | metadata.py | TMDB 中英文、PT-Gen 搜索/详情及资料保存接口 | 新 Resolver 复用只读适配器，补名称候选、演员、季集和 Bangumi；不调用旧保存接口 |
-| media_probe.py | ffprobe、技术参数归一化 | 同一探测入口扩展，不让前端推断参数；旧 H265 输出通过 V2 标签适配输出 H.265 |
+| media_probe.py | ffprobe、技术参数归一化 | 同一探测入口扩展，不让前端推断参数；旧 H265 输出通过 V2 标签适配输出 H265 |
 | publishing.py:PublishService | 主标题/副标题混合及发布会话持久化 | V2 拆分三种职责，新组合服务无草稿存储依赖 |
 | screenshots/collage/release_info/torrents/image_hosts/qbittorrent | 截图、拼图、媒体报告、图床、制种和添加下载器 | 保留实际文件结果和任务引用，不以发布草稿串联 |
 | processing.py、tool_jobs.py、jobs | 两类现有持久化执行队列 | TaskCenter 统一视图与通知，不创建第三个队列 |
@@ -67,7 +67,7 @@ flowchart TD
 
 ## 命名和数据可信性
 
-正式模板、字段和默认值见 data-model.md。Source 默认 WEB-DL、Group 默认 HDVWEB、Season 默认 1 都是规则值，必须标注 default/memory/manual，不能标为探测事实。视频参数逐文件来自真实 ffprobe/MediaInfo；不能由分辨率推导片源、由 H.264 推导 x264。未知值为空、可手动补充，缺项与默认项在预览中明确显示。
+正式模板、字段和默认值见 data-model.md。Source 默认 WEB-DL、Group 默认 HDVWEB、Season 默认 1 都是规则值，必须标注 default/memory/manual，不能标为探测事实。视频参数逐文件来自真实 ffprobe/MediaInfo；不能由分辨率推导片源、由 H264 推导 x264。未知值为空、可手动补充，缺项与默认项在预览中明确显示。
 
 自动集数证据优先 B站结构化信息 > TMDB 季集 > 文件名解析 > 未解决时提示人工指定；已明确选择的人工修正为锁定覆盖值，不被后续低优先级结果冲掉。映射键至少含 season_id/ep_id/cid 和 TMDB 系列/季/集。整季集数来自选中季的真实剧集列表；不是全剧 episode_count。动漫展示 TMDB/Bangumi 多语言候选和声优，不固定选择首个英文名。
 

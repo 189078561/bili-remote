@@ -11,7 +11,7 @@ from bili_remote.v2.naming.probe import MediaProbeAdapter, probe_from_payload
 def test_hdr_depth_exact_rate_and_unknowns():
     payload = {"streams": [{"codec_type": "video", "codec_name": "hevc", "width": 1920, "height": 1080, "pix_fmt": "yuv420p10le", "avg_frame_rate": "24000/1001", "color_transfer": "smpte2084", "side_data_list": [{"side_data_type": "Mastering display metadata"}, {"side_data_type": "DOVI configuration record"}]}, {"codec_type": "audio", "codec_name": "aac", "channels": 2}], "format": {"format_name": "matroska", "duration": "1.5"}}
     result = probe_from_payload(payload)
-    assert result["video_codec"]["value"] == "H.265"
+    assert result["video_codec"]["value"] == "H265"
     assert result["frame_rate"]["value"] == {"numerator": 24000, "denominator": 1001}
     assert result["bit_depth"]["value"] == 10
     assert result["hdr"]["value"] == ["DV", "HDR10"]

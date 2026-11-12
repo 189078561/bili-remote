@@ -17,10 +17,32 @@ DEFAULT_TEMPLATES = {
 }
 FIELDS = {"Title", "Year", "Season", "Episode", "Resolution", "Source", "VideoCodec", "AudioCodec", "Group", "Extension", "HDR", "AudioChannels", "FrameRate", "BitDepth", "OriginalName"}
 FIELD_MAP = {"Resolution": "resolution", "VideoCodec": "video_codec", "AudioCodec": "audio_codec", "HDR": "hdr", "AudioChannels": "audio_channels", "FrameRate": "frame_rate", "BitDepth": "bit_depth"}
+_VIDEO_CODEC_ALIASES = {
+    "H.264": "H264", "H-264": "H264", "AVC": "H264", "X264": "H264",
+    "H.265": "H265", "H-265": "H265", "HEVC": "H265", "X265": "H265",
+}
+_AUDIO_CODEC_ALIASES = {
+    "AC-3": "AC3", "AC 3": "AC3", "DOLBY DIGITAL": "AC3",
+    "E-AC-3": "EAC3", "EAC-3": "EAC3", "E AC 3": "EAC3",
+    "DOLBY DIGITAL PLUS": "EAC3", "DDP": "EAC3", "DD+": "EAC3",
+}
 
 
 def value(item):
     return item.get("value") if isinstance(item, dict) and "value" in item else item
+
+
+def normalize_codec_value(field, item):
+    """Return the canonical PT filename codec label, preserving unknowns."""
+    if item in (None, ""):
+        return item
+    text = unicodedata.normalize("NFKC", str(item)).strip()
+    key = text.upper().replace("_", "-")
+    if field == "VideoCodec":
+        return _VIDEO_CODEC_ALIASES.get(key, text.upper())
+    if field == "AudioCodec":
+        return _AUDIO_CODEC_ALIASES.get(key, text.upper())
+    return item
 
 
 def validate_template(template):
@@ -80,7 +102,8 @@ def render_filename(context, media_file, rules=None, overrides=None, template_id
               "Extension": path.suffix.lstrip("."), "OriginalName": path.stem}
     probe = media_file.get("probe") or {}
     values.update({field: value(probe.get(key)) for field, key in FIELD_MAP.items()})
-    values["VideoCodec"] = {"H264": "H.264", "H265": "H.265"}.get(values["VideoCodec"], values["VideoCodec"])
+    values["VideoCodec"] = normalize_codec_value("VideoCodec", values["VideoCodec"])
+    values["AudioCodec"] = normalize_codec_value("AudioCodec", values["AudioCodec"])
     if isinstance(values["HDR"], list):
         values["HDR"] = ".".join(values["HDR"])
     rate = values["FrameRate"]

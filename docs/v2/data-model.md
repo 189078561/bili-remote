@@ -43,7 +43,7 @@ MediaFile = {ref:ResourceRef, episode:EpisodeSelection, probe:MediaProbe, sideca
 
 MediaProbe 包含逐文件的 width/height、resolution、video_codec、audio_codec、audio_channels、frame_rate（精确分子/分母）、bit_depth、hdr（SDR/HDR10/HLG/DV 等实测标签[]）、duration_seconds、container、probe_tool/version、probe_error。技术字段均为 FieldValue，可人工修正但须标 manual，原实测值作为当前上下文证据保留；失败不沿用首文件参数。source 和 group 属命名规则，不是探测字段。
 
-V2 显示命名标签明确规范为 H.264/H.265、AAC 等；旧探测值 H264/H265 在边界转换，不能反向改旧接口。codec 与 encoder 独立，未经证实不能输出 x264/x265；HDR、DV、声道、帧率、位深仅在模板开启且有可靠值时输出。
+V2 显示命名标签明确规范为 H264/H265、AAC 等；旧探测值 H264/H265 在边界转换，不能反向改旧接口。codec 与 encoder 独立，未经证实不能输出 x264/x265；HDR、DV、声道、帧率、位深仅在模板开启且有可靠值时输出。
 
 SidecarRef = {ref, video_ref, kind:subtitle/external_audio, language:string/null, suffix_tokens:string[], association:exact_stem/manual, confirmed:bool}。只同步同 stem 明确关系或人工确认关系；模糊前缀不匹配。保留 chs/cht/eng、forced/SDH 等语言/用途尾缀，不改字幕内容、不烧录。
 
@@ -67,7 +67,7 @@ NamingRule = {template_id, templates:{movie,series,anime,season}, selected_title
 模板对外保持正式方案大写变量和 `:00`。V2 专用解析器将 :00 映射为至少两位十进制，不要求用户改为 Python 语法；旧接口 `{title}`、`{season:02d}` 按兼容 adapter 继续有效。省略缺失字段时合并多余分隔符；不得去掉导致媒体身份歧义的信息后静默执行。缺失 Source/Group 可使用明确标注的规则默认，技术参数未知则省略并提示。
 
 示例（参数来自探测，片源/组为已显示规则值）：
-`The.Last.of.Us.2023.S01E01.1080p.WEB-DL.H.265.AAC-HDVWEB.mkv`。
+`The.Last.of.Us.2023.S01E01.1080p.WEB-DL.H265.AAC-HDVWEB.mkv`。
 
 ## SubtitleRule（不含实际副标题文本）
 

@@ -218,13 +218,13 @@ def test_real_h264_hevc_probe_and_mediainfo_reports(settings, tmp_path):
     h264_probe, hevc_probe = asyncio.run(
         _probe_both(adapter, h264, hevc)
     )
-    assert h264_probe["video_codec"]["value"] == "H.264"
+    assert h264_probe["video_codec"]["value"] == "H264"
     assert h264_probe["audio_codec"]["value"] == "AAC"
     assert h264_probe["resolution"]["value"] == "180p"
     assert h264_probe["bit_depth"]["value"] == 8
     assert h264_probe["probe_tool"] == "ffprobe"
     assert h264_probe["probe_version"]
-    assert hevc_probe["video_codec"]["value"] == "H.265"
+    assert hevc_probe["video_codec"]["value"] == "H265"
     assert hevc_probe["resolution"]["value"] == "360p"
     assert hevc_probe["audio_codec"]["value"] == "AAC"
 
@@ -476,7 +476,7 @@ def test_long_movie_and_unrecognized_episode_have_explicit_resolutions(
     movie_preview = service.preview(movie_context)
     assert movie_preview["can_apply"]
     assert (
-        "Unrecognized.Source.2025.180p.WEB-DL.H.264.AAC-HDVWEB.mp4"
+        "Unrecognized.Source.2025.180p.WEB-DL.H264.AAC-HDVWEB.mp4"
         == Path(movie_preview["operations"][0]["target_relative_path"]).name
     )
 

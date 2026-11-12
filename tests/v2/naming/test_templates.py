@@ -6,11 +6,11 @@ from bili_remote.v2.naming.errors import NamingError
 
 def fixture(media_type="series"):
     context = {"identity": {"media_type": media_type}, "selected_title": {"value": "The Last of Us"}, "metadata": {"year": {"value": 2023}}}
-    file = {"ref": {"relative_path": "original.mkv"}, "episode": {"season": {"value": 1}, "episode": {"value": 1}}, "probe": {key: {"value": value, "confirmed": True} for key, value in {"resolution": "1080p", "video_codec": "H.265", "audio_codec": "AAC"}.items()}}
+    file = {"ref": {"relative_path": "original.mkv"}, "episode": {"season": {"value": 1}, "episode": {"value": 1}}, "probe": {key: {"value": value, "confirmed": True} for key, value in {"resolution": "1080p", "video_codec": "H265", "audio_codec": "AAC"}.items()}}
     return context, file
 
 
-@pytest.mark.parametrize("kind,expected", [("series", "The.Last.of.Us.2023.S01E01.1080p.WEB-DL.H.265.AAC-HDVWEB.mkv"), ("anime", "The.Last.of.Us.2023.S01E01.1080p.WEB-DL.H.265.AAC-HDVWEB.mkv"), ("movie", "The.Last.of.Us.2023.1080p.WEB-DL.H.265.AAC-HDVWEB.mkv")])
+@pytest.mark.parametrize("kind,expected", [("series", "The.Last.of.Us.2023.S01E01.1080p.WEB-DL.H265.AAC-HDVWEB.mkv"), ("anime", "The.Last.of.Us.2023.S01E01.1080p.WEB-DL.H265.AAC-HDVWEB.mkv"), ("movie", "The.Last.of.Us.2023.1080p.WEB-DL.H265.AAC-HDVWEB.mkv")])
 def test_official_templates(kind, expected):
     assert render_filename(*fixture(kind))["filename"] == expected
 
@@ -44,11 +44,11 @@ def test_candidates_custom_optional_fields_and_large_episode():
 def test_mixed_season_omits_unshared_values():
     context, first = fixture()
     _, second = fixture()
-    second["probe"]["video_codec"]["value"] = "H.264"
+    second["probe"]["video_codec"]["value"] = "H264"
     common, warnings = season_common_probe([first, second])
     assert common["video_codec"] is None
     assert common["resolution"]["value"] == "1080p"
     first["probe"] = common
     result = render_filename(context, first, template_id="season")
-    assert "H.265" not in result["filename"]
+    assert "H265" not in result["filename"]
     assert warnings

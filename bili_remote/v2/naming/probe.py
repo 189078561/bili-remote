@@ -103,7 +103,6 @@ def probe_from_payload(payload: dict, *, source_ref: str | None = None,
     audio = next((item for item in audios if (item.get("disposition") or {}).get("default")), audios[0] if audios else {})
     width, height = _positive_int(video.get("width")), _positive_int(video.get("height"))
     codec = media_probe.normalize_video_codec(video.get("codec_name")) or None
-    codec = {"H264": "H.264", "H265": "H.265"}.get(codec, codec)
     # The shared legacy normalizer labels MPEG-4 ASP as XviD. That encoder
     # cannot be established from codec_name, so V2 keeps the codec identity.
     if str(video.get("codec_name") or "").lower() in {"mpeg4", "msmpeg4v3"}:

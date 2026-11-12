@@ -168,7 +168,7 @@ def test_shared_context_handoff_and_media_values(live_server):
         calls.append(payload)
         refs = payload['resources']
         context = {'schema_version': 1, 'context_id': 'shared', 'revision': 7, 'resources': refs,
-                   'files': [{'ref': refs[0], 'probe': {'video_codec': {'value': 'H.265', 'source': 'ffprobe'},
+                   'files': [{'ref': refs[0], 'probe': {'video_codec': {'value': 'H265', 'source': 'ffprobe'},
                                                       'audio_codec': {'value': None, 'source': 'ffprobe'}}}], 'warnings': []}
         route.fulfill(json={'context': context, 'changes': [], 'capabilities': []})
     page.route('**/api/v2/resources/resolve', resolve)
@@ -181,7 +181,7 @@ def test_shared_context_handoff_and_media_values(live_server):
         more_action(host, '智能命名')
         page.wait_for_function('window.namingContext === window.workbenchContext')
         host.get_by_role('button', name='预览/编辑', exact=True).click()
-        expect(page.locator('.fb-media-info')).to_contain_text('H.265（ffprobe）')
+        expect(page.locator('.fb-media-info')).to_contain_text('H265（ffprobe）')
         expect(page.locator('.fb-media-info')).to_contain_text('未知')
         assert len(calls) == 1
         assert calls[0]['resources'][0]['kind'] == 'file'

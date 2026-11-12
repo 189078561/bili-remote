@@ -84,7 +84,7 @@ def test_real_workspace_visual_matrix(live_server, width, height, theme):
         expect(page.locator('[data-edit=release_title]')).not_to_have_value('')
         expect(page.locator('[data-edit=subtitle]')).not_to_have_value('')
         page.locator('[data-edit=release_title]').fill('Color Study S01E02 · 色彩与运动')
-        page.locator('[data-edit=subtitle]').fill('本地合成短片 / 320×180 / H.264')
+        page.locator('[data-edit=subtitle]').fill('本地合成短片 / 320×180 / H264')
         overview = '这段短片展示色彩图形的运动，用于验证真实媒体制作流程。\n\n画面由本地工具生成，不对应真实影视作品。媒体参数来自实际文件，影视身份尚未匹配。\n\n发布信息可以独立编辑；截图、报告和种子使用同一份工作资源。'
         page.locator('[data-edit=overview]').fill(overview)
         expect(page.locator('[data-wb=output]')).to_contain_text(overview)

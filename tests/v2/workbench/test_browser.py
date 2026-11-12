@@ -63,7 +63,7 @@ def context(revision=1):
             "identity": {"media_type": "series"}, "selected_title": {"value": "合成测试作品"},
             "metadata": {"overview": {"value": "合成简介"}}, "files": [{
                 "ref": {"root_key": "downloads", "relative_path": "Media/episode01.mp4", "kind": "file", "fingerprint": "fixture"},
-                "probe": {"resolution": {"value": "1080p", "source": "ffprobe"}, "video_codec": {"value": "H.265", "source": "ffprobe"}, "audio_codec": {"value": "AAC", "source": "ffprobe"}},
+                "probe": {"resolution": {"value": "1080p", "source": "ffprobe"}, "video_codec": {"value": "H265", "source": "ffprobe"}, "audio_codec": {"value": "AAC", "source": "ffprobe"}},
             }], "warnings": [], "conflicts": [],
             "episode": {"scope": "single", "season": {"value": 1}, "episode": {"value": 1}},
             "effective_rules": {"naming_rule": {"template_id": "series", "templates": {"series": "{Title}.{Episode}"}}, "subtitle_rule": {"template_id": "tv_episode"},

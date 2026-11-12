@@ -2,7 +2,7 @@
 import re
 from string import Formatter
 from ..naming.errors import NamingError
-from ..naming.templates import FIELD_MAP, value, season_common_probe
+from ..naming.templates import FIELD_MAP, normalize_codec_value, value, season_common_probe
 
 class ReleaseTitleBuilder:
     def build(self, context, rule=None):
@@ -36,6 +36,8 @@ class ReleaseTitleBuilder:
                 values[key]=value(item)
             elif isinstance(item,(str,int)) and not isinstance(item,bool): values[key]=item
             else: raise NamingError('invalid_release_title_rule','覆盖值无效')
+        values['VideoCodec']=normalize_codec_value('VideoCodec',values.get('VideoCodec'))
+        values['AudioCodec']=normalize_codec_value('AudioCodec',values.get('AudioCodec'))
         series=(context.get('identity') or {}).get('media_type') in {'series','anime'}
         default='{Title} {Year}'+(' S{Season:00}'+('' if season else 'E{Episode:00}') if series else '')+' {Resolution} {Source} {VideoCodec} {AudioCodec}-{Group}'
         template=rule.get('template',default)

@@ -51,7 +51,7 @@ def test_naming_browser_preview_confirm_undo_responsive_no_storage(settings):
             page.get_by_role("button", name="探测与识别", exact=True).click()
             expect(page.locator(".v2-naming__files legend")).to_have_text("a.mkv")
             page.get_by_role("button", name="生成命名预览", exact=True).click()
-            expect(page.locator(".v2-naming__preview")).to_contain_text("Browser.Film.2023.1080p.WEB-DL.H.265.AAC-HDVWEB.mkv")
+            expect(page.locator(".v2-naming__preview")).to_contain_text("Browser.Film.2023.1080p.WEB-DL.H265.AAC-HDVWEB.mkv")
             assert path.exists() and not service.tasks.calls
             for width in (390, 768, 1440):
                 page.set_viewport_size({"width": width, "height": 900})

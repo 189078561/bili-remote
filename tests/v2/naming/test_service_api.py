@@ -73,11 +73,11 @@ def test_preview_zero_writes_technical_overrides_sidecars_apply_and_undo(setup, 
     monkeypatch.setattr(database, "connect", observed_connection)
     context = analyze(service, [ref], manual_overrides={"selected_title": "Movie", "year": 2023})
     sound = service.files.reference("downloads", "sound.flac")
-    overrides = {"file_values": {"a.mkv": {"video_codec": "H.264", "frame_rate": "24000/1001"}}, "sidecars": [{"ref": sound, "video_ref": ref, "kind": "external_audio", "suffix_tokens": ["eng"], "association": "manual", "confirmed": True}]}
+    overrides = {"file_values": {"a.mkv": {"video_codec": "H264", "frame_rate": "24000/1001"}}, "sidecars": [{"ref": sound, "video_ref": ref, "kind": "external_audio", "suffix_tokens": ["eng"], "association": "manual", "confirmed": True}]}
     preview = service.preview(context, overrides)
     assert preview["can_apply"]
     assert len(preview["operations"]) == 5
-    assert preview["operations"][0]["target_relative_path"] == "Movie.2023.1080p.WEB-DL.H.264.AAC-HDVWEB.mkv"
+    assert preview["operations"][0]["target_relative_path"] == "Movie.2023.1080p.WEB-DL.H264.AAC-HDVWEB.mkv"
     assert any(x["target_relative_path"].endswith(".chs.forced.srt") for x in preview["operations"])
     assert any(x["target_relative_path"].endswith(".eng.flac") for x in preview["operations"])
     assert {p.name: p.read_bytes() for p in root.iterdir()} == before
@@ -380,7 +380,7 @@ def test_processing_handlers_receive_minimal_inputs_and_return_real_results(setu
     async def run():
         handlers = NamingTaskHandlers(service)
         result = await handlers.handle("v2_media_probe", {"resources": [ref], "expected_fingerprints": {"a.mkv": ref["fingerprint"]}})
-        assert result["files"][0]["probe"]["video_codec"]["value"] == "H.265"
+        assert result["files"][0]["probe"]["video_codec"]["value"] == "H265"
         assert "context" not in result and "metadata" not in result
         with pytest.raises(NamingError):
             await handlers.handle("v2_rename_apply", {"batch_id": "a", "overview": "draft"})

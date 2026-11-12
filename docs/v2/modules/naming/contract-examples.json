@@ -102,7 +102,7 @@
                 "updated_at": "2026-11-04T00:00:00+00:00"
               },
               "video_codec": {
-                "value": "H.265",
+                "value": "H265",
                 "source": "ffprobe",
                 "source_ref": null,
                 "manual": false,
@@ -170,7 +170,7 @@
             "kind": "file",
             "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
           },
-          "target_relative_path": "Show/Show.2023.S01E01.1080p.WEB-DL.H.265.AAC-HDVWEB.mkv",
+          "target_relative_path": "Show/Show.2023.S01E01.1080p.WEB-DL.H265.AAC-HDVWEB.mkv",
           "temporary_required": true,
           "sidecar_of": null,
           "source_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",

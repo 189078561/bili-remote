@@ -110,7 +110,7 @@ def test_media_preview_and_cancelled_handoff_do_not_commit_context(live_server):
         route.fulfill(json={'context': {
             'schema_version': 1, 'context_id': refs[0]['relative_path'], 'revision': 1,
             'resources': refs, 'warnings': [],
-            'files': [{'ref': refs[0], 'probe': {'video_codec': {'value': 'H.265', 'source': 'ffprobe'}}}],
+            'files': [{'ref': refs[0], 'probe': {'video_codec': {'value': 'H265', 'source': 'ffprobe'}}}],
         }, 'changes': [], 'capabilities': []})
 
     page.route('**/api/v2/resources/resolve', resolve)
@@ -126,7 +126,7 @@ def test_media_preview_and_cancelled_handoff_do_not_commit_context(live_server):
           await fbAdapter.mediaInfo(previewItem, fb.rootKey);
         }''')
         expect(page.locator('.fb-media-info')).to_contain_text('episode02.mp4')
-        expect(page.locator('.fb-media-info')).to_contain_text('H.265（ffprobe）')
+        expect(page.locator('.fb-media-info')).to_contain_text('H265（ffprobe）')
         assert page.evaluate('sharedContext === originalContext && workbenchContext === originalContext')
         assert page.evaluate('sharedContext.resources[0].relative_path') == 'Media/episode01.mp4'
         page.locator('.fb-media-info').get_by_role('button', name='关闭', exact=True).click()
