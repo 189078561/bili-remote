@@ -788,9 +788,13 @@
           if (artifact.kind !== 'report' || !artifact.resource) continue;
           const report=await this.api.request('/api/files/text?'+new URLSearchParams({root_key:artifact.resource.root_key,path:artifact.resource.relative_path}));
           if (job.epoch !== this.epoch) return;
-          const text=report.content || report.text || '', copy=node('button','复制报告');
+          const text=report.content || report.text || '', copy=node('button','复制报告'), download=node('a','下载报告');
           copy.type='button'; copy.onclick=()=>this.copyValue(text);
-          this.el('reports').append(copy,node('pre',text));
+          download.href=(artifact.url && safeURL(artifact.url)) || `/api/v2/reports/${encodeURIComponent(artifact.id)}/file`;
+          download.setAttribute('download','');
+          const card=node('div',null,'wb-report-card');
+          card.append(copy,download,node('pre',text));
+          this.el('reports').append(card);
         }
       }
       if (job.type === "torrent") {
@@ -802,7 +806,11 @@
     renderUploadLinks() {
       this.el("upload-links").replaceChildren();
       this.links.forEach(url => {
-        const row = node("p"), link = node("a", url); link.href = safeURL(url); link.target = "_blank"; link.rel = "noopener noreferrer"; row.append(link); this.el("upload-links").append(row);
+        const row = node("div", null, "wb-upload-link"), link = node("a", url);
+        link.href = safeURL(url); link.target = "_blank"; link.rel = "noopener noreferrer";
+        const copyUrl = node("button", "复制链接"); copyUrl.type = "button"; copyUrl.onclick = () => this.copyValue(url);
+        const copyBBCode = node("button", "复制 BBCode"); copyBBCode.type = "button"; copyBBCode.onclick = () => this.copyValue(`[img]${url}[/img]`);
+        row.append(link, copyUrl, copyBBCode); this.el("upload-links").append(row);
       });
     }
     renderImages() {
