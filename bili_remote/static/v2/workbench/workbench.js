@@ -18,7 +18,7 @@
       if (!host) throw new Error("工作台缺少挂载节点");
       this.host = host; this.api = api; this.FileBrowser = FileBrowser; this.pollInterval = pollInterval;
       this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
-      this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.content = ""; this.images = []; this.artifacts = []; this.links = [];
+      this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.previewKey = null; this.previewUndo = false; this.renameBatch = null; this.content = ""; this.images = []; this.artifacts = []; this.links = [];
       this.fieldVersions = {}; this.tasks = new Map(); this.jobs = new Map(); this.notified = new Set(); this.applied = new Set(); this.pending = new Set(); this.timers = new Set(); this.abort = new AbortController(); this.destroyed = false;
       this.listen(); this.setTab("content"); this.setupLayout();
     }
@@ -188,7 +188,7 @@
       const epoch = this.epoch, pendingKey = `${epoch}:${action}`;
       this.pending.add(pendingKey); if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
       try {
-        const handlers = {resolve: () => this.resolve(), search: () => this.search(), overrides: () => this.resolve(null, this.overrides()), rules: () => this.applyRules(), naming: () => this.naming(), apply: () => this.applyRename(), title: () => this.generate("release_title", true), subtitle: () => this.generate("subtitle", true), probe: () => this.probe(), screenshots: () => this.screenshots(), report: () => this.report(), torrent: () => this.torrent(), upload: () => this.upload()};
+        const handlers = {resolve: () => this.resolve(), search: () => this.search(), overrides: () => this.resolve(null, this.overrides()), rules: () => this.applyRules(), naming: () => this.naming(), undo: () => this.showUndoPreview(), apply: () => this.applyRename(), title: () => this.generate("release_title", true), subtitle: () => this.generate("subtitle", true), probe: () => this.probe(), screenshots: () => this.screenshots(), report: () => this.report(), torrent: () => this.torrent(), upload: () => this.upload()};
         if (["rules", "naming"].includes(action) && this.pendingAdjustmentEpoch === this.epoch) await this.resolve(null, this.overrides());
         else await handlers[action]?.();
       } catch (error) { if (epoch === this.epoch) this.notice(error.message, true); }
@@ -203,10 +203,17 @@
       for (const action of ["report", "torrent"]) this.button(action).disabled = this.resources.length !== 1 || this.busy(action);
       this.button("upload").disabled = !this.images.length || this.busy("upload");
       this.button("search").disabled = this.busy("search");
-      this.button("apply").disabled = !this.preview?.can_apply || this.preview?.context_revision !== this.context?.revision || !this.preview?.preview_token || !this.preview?.operations?.length || this.preview?.conflicts?.length > 0 || !(Date.parse(this.preview?.expires_at) > Date.now()) || this.busy("apply");
+      this.button("apply").disabled = !this.applyable() || this.busy("apply");
+      this.button("undo").disabled = !this.renameBatch || this.busy("undo");
       this.host.querySelectorAll("[data-copy]").forEach(el => el.disabled = !(el.dataset.copy === "content" ? this.content : this.fields[el.dataset.copy]));
     }
-    invalidateRename() { this.advancedPreview = false; this.versions.naming = (this.versions.naming || 0) + 1; this.preview = null; this.el("rename").hidden = true; this.button("apply").disabled = true; this.el("naming-status").textContent = this.context ? "命名预览待更新；不会自动修改文件。" : "选择资源后，将显示服务返回的目标文件名。"; }
+    applyable() {
+      const preview = this.preview;
+      if (!preview?.can_apply || !preview.preview_token || !preview.operations?.length || preview.conflicts?.length > 0 || !(Date.parse(preview.expires_at) > Date.now())) return false;
+      if (preview.undo) return true;
+      return preview.context_revision === this.context?.revision;
+    }
+    invalidateRename() { this.advancedPreview = false; this.versions.naming = (this.versions.naming || 0) + 1; this.preview = null; this.previewKey = null; this.previewUndo = false; this.el("rename").hidden = true; this.button("apply").disabled = true; this.el("naming-status").textContent = this.context ? "命名预览待更新；不会自动修改文件。" : "选择资源后，将显示服务返回的目标文件名。"; }
     invalidateContent() {
       this.content = ""; this.el("output").textContent = ""; this.el("rich-preview").replaceChildren(); this.el("html-preview").hidden = true; this.el("html-preview").removeAttribute("srcdoc");
       this.el("validation").textContent = this.context ? "正在更新预览…" : "等待识别服务返回上下文"; this.controls();
@@ -457,23 +464,54 @@
       this.el("rename-warning").textContent = [result.undo ? "撤销预览：在命名详情中确认执行。" : "高级命名预览：在命名详情中确认执行。", ...(result.conflicts || []).map(x=>x.message)].join("；");
       this.el("rename").hidden = false; this.controls();
     }
+    newKey() {
+      if (global.crypto?.randomUUID) return global.crypto.randomUUID();
+      const bytes = global.crypto?.getRandomValues ? global.crypto.getRandomValues(new Uint8Array(24)) : null;
+      return bytes ? Array.from(bytes, x => x.toString(16).padStart(2, "0")).join("") : `naming-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    renderPreview(preview) {
+      this.el("rename-list").replaceChildren();
+      for (const op of preview.operations || []) {
+        const row = node("div", null, "wb-rename-row");
+        row.append(node("span", op.source.relative_path), node("strong", `→ ${op.target_relative_path}`));
+        this.el("rename-list").append(row);
+      }
+      const undo = !!preview.undo;
+      const conflicts = (preview.conflicts || []).map(x => x.message).join("；");
+      this.el("rename-warning").textContent = (undo ? "撤销预览：确认后将恢复最近一次命名。" : "") + (conflicts || (undo ? "" : "请核对全部目标路径。确认后由服务端复核指纹与冲突，再执行原地改名。"));
+      this.el("rename").hidden = false; this.controls();
+    }
     async naming() {
+      if (!this.context) return;
       const current = this.stamp("naming"), revision = this.context.revision;
-      const preview = await this.api.naming(this.context, this.readRule("naming-rule", this.context.effective_rules?.naming_rule || {}));
+      const preview = await this.api.naming(this.context, {}, this.readRule("naming-rule", this.context.effective_rules?.naming_rule || {}));
       if (!current() || this.context?.revision !== revision || preview.context_revision < revision) return;
       this.context = {...this.context, revision: preview.context_revision}; this.contextChanged();
       this.invalidateContent(); this.scheduleCompose();
-      this.preview = preview; this.applyKey = global.crypto.randomUUID(); this.el("rename-list").replaceChildren();
-      preview.operations.forEach(op => { const row = node("div", null, "wb-rename-row"); row.append(node("span", op.source.relative_path), node("strong", `→ ${op.target_relative_path}`)); this.el("rename-list").append(row); });
-      this.el("rename-warning").textContent = (preview.conflicts || []).map(x => x.message).join("；") || "请核对全部目标路径。确认后由服务端复核指纹与冲突，再执行原地改名。";
-      this.el("rename").hidden = false; this.controls();
-      const delay = Date.parse(preview.expires_at) - Date.now(); if (Number.isFinite(delay) && delay > 0) this.later(() => { if (this.preview === preview) { this.invalidateRename(); this.notice("命名预览已过期，请重新预览"); } }, Math.min(delay, 2147483647));
+      this.preview = {...preview, undo: false}; this.previewKey = this.newKey(); this.previewUndo = false;
+      this.renderPreview(this.preview);
+      const token = preview.preview_token, delay = Date.parse(preview.expires_at) - Date.now();
+      if (Number.isFinite(delay) && delay > 0) this.later(() => { if (this.preview?.preview_token === token) { this.invalidateRename(); this.notice("命名预览已过期，请重新预览"); } }, Math.min(delay, 2147483647));
+    }
+    async showUndoPreview() {
+      if (!this.renameBatch) throw new Error("还没有可撤销的命名批次，请先执行一次重命名。");
+      const current = this.stamp("undo");
+      const preview = await this.api.undoPreview(this.renameBatch);
+      if (!current()) return;
+      this.preview = {...preview, undo: true}; this.previewKey = this.newKey(); this.previewUndo = true;
+      this.renderPreview(this.preview);
+      const token = preview.preview_token, delay = Date.parse(preview.expires_at) - Date.now();
+      if (Number.isFinite(delay) && delay > 0) this.later(() => { if (this.preview?.preview_token === token) { this.invalidateRename(); this.notice("撤销预览已过期，请重新预览"); } }, Math.min(delay, 2147483647));
     }
     async applyRename() {
-      if (!this.preview?.can_apply || !this.preview.preview_token || !this.preview.operations?.length || this.preview.conflicts?.length > 0 || this.preview.context_revision !== this.context?.revision || !(Date.parse(this.preview.expires_at) > Date.now())) throw new Error("命名预览已失效，请重新预览");
-      const preview = this.preview, epoch = this.epoch, resources = this.resources, response = await this.api.apply(preview, this.applyKey);
-      this.track(response.task, {type: "rename", epoch, resources, operations: preview.operations});
-      if(epoch===this.epoch && response.batch_id)this.host.dispatchEvent(new CustomEvent("v2:naming-accepted",{detail:{batchId:response.batch_id}}));
+      if (!this.applyable()) throw new Error(this.preview?.undo ? "撤销预览已失效，请重新预览" : "命名预览已失效，请重新预览");
+      const preview = this.preview, epoch = this.epoch, resources = this.resources;
+      const response = this.previewUndo ? await this.api.undoApply(preview, this.previewKey) : await this.api.apply(preview, this.previewKey);
+      this.track(response.task, {type: "rename", epoch, resources, operations: preview.operations, undo: this.previewUndo});
+      if (epoch === this.epoch && response.batch_id) {
+        this.renameBatch = response.batch_id;
+        this.host.dispatchEvent(new CustomEvent("v2:naming-accepted", {detail: {batchId: response.batch_id}}));
+      }
       if (this.preview === preview) this.invalidateRename();
     }
     async probe() {
