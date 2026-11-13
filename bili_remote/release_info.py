@@ -59,6 +59,23 @@ def _duration_text(seconds: Any) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def _sanitize_report_paths(text: str, path: Path) -> str:
+    """Keep reports portable by removing server-side absolute source paths."""
+    name = path.name
+    result = str(text).replace(str(path), name).replace(str(path.parent), ".")
+    result = re.sub(
+        r"(?im)^(\s*Complete name\s*:\s*).*$",
+        lambda match: f"{match.group(1)}{name}",
+        result,
+    )
+    result = re.sub(
+        r"(?im)^(\s*Folder name\s*:\s*).*$",
+        lambda match: f"{match.group(1)}.",
+        result,
+    )
+    return result
+
+
 class ReleaseInfoService:
     def __init__(self, settings: Settings, files: FileService, database: Database) -> None:
         self.settings = settings
@@ -164,7 +181,7 @@ class ReleaseInfoService:
             return None
         if len(completed.stdout) > MAX_MEDIAINFO_CHARS:
             raise ReleaseInfoError("MediaInfo 报告超过存储限制，已拒绝截断")
-        return completed.stdout
+        return _sanitize_report_paths(completed.stdout, path)
 
     @staticmethod
     def _bluray_root(source: Path) -> Path | None:
@@ -241,8 +258,9 @@ class ReleaseInfoService:
     @staticmethod
     def _ffprobe_text(details: dict[str, Any], payload: dict[str, Any]) -> str:
         format_data = payload.get("format") or {}
+        display_name = str(details.get("path") or "未知").replace("\\", "/").rsplit("/", 1)[-1] or "未知"
         lines = [
-            f"Complete name: {details.get('path') or '未知'}",
+            f"Complete name: {display_name}",
             "Format: "
             f"{format_data.get('format_long_name') or format_data.get('format_name') or '未知'}",
             f"Duration: {_duration_text(details.get('duration_seconds'))}",

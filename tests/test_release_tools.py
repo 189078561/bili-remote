@@ -393,6 +393,46 @@ def test_release_info_does_not_fabricate_bdinfo_failure(settings, monkeypatch) -
     assert "蓝光信息" not in analysis["generated_text"]
 
 
+def test_release_info_reports_redact_absolute_server_paths(settings, monkeypatch) -> None:
+    settings.ensure_directories()
+    database = Database(settings.database_path)
+    database.initialize()
+    source = settings.download_root / "Show" / "episode01.mkv"
+    source.parent.mkdir()
+    source.write_bytes(b"synthetic-video")
+    service = ReleaseInfoService(settings, FileService(settings, database), database)
+
+    monkeypatch.setattr(
+        release_info_module.shutil,
+        "which",
+        lambda name: "/fake/mediainfo" if name == "mediainfo" else None,
+    )
+    monkeypatch.setattr(
+        release_info_module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=(
+                f"General\nComplete name : {source}\n"
+                f"Folder name : {source.parent}\n\nVideo\nFormat : AVC\n"
+            ),
+            stderr="",
+        ),
+    )
+    mediainfo = service._mediainfo_text(source)
+    assert mediainfo is not None
+    assert str(settings.download_root) not in mediainfo
+    assert "Complete name : episode01.mkv" in mediainfo
+    assert "Folder name : ." in mediainfo
+
+    ffprobe = service._ffprobe_text(
+        {"path": str(source), "duration_seconds": 1, "size_bytes": source.stat().st_size},
+        {"format": {"format_name": "matroska"}, "streams": []},
+    )
+    assert str(settings.download_root) not in ffprobe
+    assert f"Complete name: {source.name}" in ffprobe
+
+
 def test_settings_encrypt_and_redact_image_and_qbittorrent_secrets(settings) -> None:
     settings.ensure_directories()
     app = create_app(settings)

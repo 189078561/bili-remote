@@ -52,8 +52,7 @@ def register(app,services):
             report_texts.append(path.read_text(encoding='utf-8'))
         images=[x.model_dump() for x in body.screenshots]
         return publishing.compose(body.context.model_dump(exclude_none=True),body.release_title,body.subtitle,
-            body.overview,images,body.format,links=body.links,report_texts=report_texts,
-            poster=body.poster.model_dump() if body.poster else None)
+            body.overview,images,body.format,links=body.links,report_texts=report_texts)
 
     @router.get('/tasks')
     def tasks(kind:str|None=None,status:str|None=None,limit:int=Query(100,ge=1,le=500),offset:int=Query(0,ge=0)):

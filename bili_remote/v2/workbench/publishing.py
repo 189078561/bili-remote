@@ -151,7 +151,6 @@ class PublishingService:
         *,
         links=None,
         report_texts=None,
-        poster=None,
     ):
         if format not in {"bbcode", "html", "markdown"}:
             raise NamingError("invalid_format", "发布格式无效")

@@ -124,7 +124,7 @@ class MediaProbe(Model):
 class SidecarRef(Model):
     ref: ResourceRef
     video_ref: ResourceRef
-    kind: Literal['subtitle','audio']
+    kind: Literal['subtitle','external_audio']
     language: str | None = None
     suffix_tokens: list[str] = Field(default_factory=list)
     association: str
