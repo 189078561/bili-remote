@@ -41,13 +41,19 @@
 .wb-name-controls .wb-template-control {grid-column:1/-1;}
 .wb-name-controls .wb-template-control textarea {min-height:58px;}
 .wb-naming-result {background:var(--ws-subtle);border-radius:6px;padding:12px 14px;}
-.wb-naming-result [data-wb=rename] {display:flex;align-items:center;gap:20px;}
-.wb-naming-result [data-wb=rename-summary] {flex:1;min-width:0;}
+.wb-naming-result [data-wb=rename] {display:block;}
+.wb-naming-result [data-wb=rename-summary] {min-width:0;}
+.wb-rename-actions {display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-top:8px;}
+.wb-rename-buttons {display:flex;align-items:center;gap:8px;flex:none;}
+.wb-rename-metrics {display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px;color:var(--ws-muted);}
+.wb-rename-metrics span {font-size:12px;line-height:1.7;}
+.wb-rename-metrics .wb-metric-warn {color:var(--ws-danger);}
 .wb-naming-result button {flex:none;}
 .wb-rename-row {font:12px/1.65 ui-monospace,monospace;padding:4px 0;overflow-wrap:anywhere;}
 .wb-rename-row span {display:block;font-size:11px;color:var(--ws-muted);}
 .wb-rename-row strong {display:block;font-weight:500;}
 .wb-changes-sheet .wb-rename-row {padding:14px 0;border-bottom:1px solid var(--ws-line);}
+.wb-changes-sheet .wb-rename-metrics {padding-bottom:12px;border-bottom:1px solid var(--ws-line);margin-bottom:6px;}
 .wb-rename-episode {display:flex;align-items:center;gap:7px;margin-top:6px;font-size:11px;color:var(--ws-muted);}
 .wb-rename-episode span {display:block;font-size:11px;color:var(--ws-muted);}
 .wb-rename-episode input {width:78px;min-height:30px;padding:4px 7px;border:1px solid var(--ws-line);border-radius:4px;color:var(--ws-ink);background:var(--ws-surface);}

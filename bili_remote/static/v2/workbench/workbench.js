@@ -168,7 +168,7 @@
         summary.append(node("span", source, "wb-rename-source"), node("strong", target, "wb-rename-target"));
       }
       this.el("rename-summary").replaceChildren(...(summary ? [...summary.childNodes] : []));
-      this.el("change-count").textContent = `查看 ${this.el("rename-list").children.length} 项变更`;
+      this.el("change-count").textContent = `查看全部文件名 · ${this.el("rename-list").children.length} 项`;
       this.el("naming-status").hidden = !!first && !this.el("rename").hidden;
       const resultRows = this.el("artifact-summary"); resultRows.replaceChildren();
       for (const artifact of this.artifacts) {
@@ -214,8 +214,8 @@
       this.button("upload").disabled = !this.images.length || this.busy("upload");
       this.button("search").disabled = this.busy("search");
       this.button("search-inline").disabled = !this.resources.length || this.busy("search-inline");
-      this.button("apply").disabled = !this.applyable() || this.busy("apply");
-      this.button("undo").disabled = !this.renameBatch || this.busy("undo");
+      this.host.querySelectorAll('[data-action="apply"]').forEach(el => el.disabled = !this.applyable() || this.busy("apply"));
+      this.host.querySelectorAll('[data-action="undo"]').forEach(el => el.disabled = !this.renameBatch || this.busy("undo"));
       this.host.querySelectorAll("[data-copy]").forEach(el => el.disabled = !(el.dataset.copy === "content" ? this.content : this.fields[el.dataset.copy]));
     }
     applyable() {
@@ -224,6 +224,30 @@
       if (!preview?.can_apply || !preview.preview_token || !preview.operations?.length || preview.conflicts?.length > 0 || !(Date.parse(preview.expires_at) > Date.now())) return false;
       if (preview.undo) return true;
       return preview.context_revision === this.context?.revision;
+    }
+    renameMetrics(preview = this.preview) {
+      if (!preview) return {changed: 0, unchanged: 0, conflict: 0, manual: 0};
+      const operations = preview.operations || [];
+      const changed = Number.isInteger(preview.changed_count) ? preview.changed_count : operations.filter(op => op.source?.relative_path !== op.target_relative_path).length;
+      const unchanged = Number.isInteger(preview.unchanged_count) ? preview.unchanged_count : Math.max(0, operations.length - changed);
+      const conflict = Number.isInteger(preview.conflict_count) ? preview.conflict_count : (preview.conflicts || []).length;
+      const manual = Number.isInteger(preview.manual_confirmation_count) ? preview.manual_confirmation_count : (preview.manual_confirmations || []).length;
+      return {changed, unchanged, conflict, manual};
+    }
+    renderRenameMetrics(preview = this.preview) {
+      const metrics = this.renameMetrics(preview);
+      const parts = [["待修改", metrics.changed, false], ["无需修改", metrics.unchanged, false], ["冲突", metrics.conflict, metrics.conflict > 0], ["待人工确认", metrics.manual, metrics.manual > 0]];
+      const render = container => {
+        if (!container) return;
+        container.replaceChildren();
+        for (const [label, count, warn] of parts) {
+          const item = node("span", `${label} ${count}`, warn ? "wb-metric-warn" : null);
+          item.setAttribute("aria-label", `${label} ${count}`);
+          container.append(item);
+        }
+      };
+      render(this.el("rename-metrics"));
+      render(this.el("rename-metrics-sheet"));
     }
     invalidateRename() {
       this.advancedPreview = false;
@@ -244,6 +268,7 @@
         this.el("rename-warning").textContent = "";
         this.el("naming-status").textContent = this.context ? "命名预览待更新；不会自动修改文件。" : "选择资源后，将显示服务返回的目标文件名。";
       }
+      this.renderRenameMetrics();
       this.controls();
     }
     invalidateContent() {
@@ -557,7 +582,7 @@
         const row = node("div", null, "wb-rename-row"); row.append(node("span", op.source.relative_path), node("strong", `→ ${op.target_relative_path}`)); this.el("rename-list").append(row);
       }
       this.el("rename-warning").textContent = [result.undo ? "撤销预览：在命名详情中确认执行。" : "高级命名预览：在命名详情中确认执行。", ...(result.conflicts || []).map(x=>x.message)].join("；");
-      this.el("rename").hidden = false; this.controls();
+      this.el("rename").hidden = false; this.renderRenameMetrics(result); this.controls();
     }
     newKey() {
       if (global.crypto?.randomUUID) return global.crypto.randomUUID();
@@ -594,7 +619,7 @@
       const undo = !!preview.undo;
       const conflicts = (preview.conflicts || []).map(x => x.message).join("；");
       this.el("rename-warning").textContent = (undo ? "撤销预览：确认后将恢复最近一次命名。" : "") + (conflicts || (undo ? "" : "请核对全部目标路径。确认后由服务端复核指纹与冲突，再执行原地改名。"));
-      this.el("rename").hidden = false; this.controls();
+      this.el("rename").hidden = false; this.renderRenameMetrics(); this.controls();
     }
     async naming() {
       if (!this.context) return;

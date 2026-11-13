@@ -38,7 +38,7 @@
         </div>
         <div class="wb-naming-result">
           <p data-wb="naming-status" class="wb-note">选择资源后显示目标文件名。预览不会修改文件。</p>
-          <div data-wb="rename" hidden><div data-wb="rename-summary" class="wb-rename-row"></div><button type="button" data-layout="changes" data-wb="change-count">查看变更</button></div>
+          <div data-wb="rename" hidden><div data-wb="rename-summary" class="wb-rename-row"></div><div class="wb-rename-actions"><div data-wb="rename-metrics" class="wb-rename-metrics" role="status"></div><div class="wb-rename-buttons"><button type="button" data-layout="changes" data-wb="change-count">查看全部文件名</button><button type="button" class="wb-primary" data-action="apply" disabled>确认重命名</button></div></div></div>
         </div>
         <div class="wb-adjustment-status"><div class="wb-adjustment-copy"><span data-wb="adjustment-status" role="status">未执行改名</span><span data-wb="template-source" class="wb-note"></span></div><div class="wb-actions"><button type="button" class="wb-quiet" data-layout="naming">规则与逐集调整</button></div></div>
 
@@ -92,7 +92,7 @@
   </section>
   <section class="wb-sheet wb-changes-sheet" data-sheet="changes" role="dialog" aria-modal="true" aria-labelledby="wb-changes-heading" hidden>
     <header class="wb-sheet-heading"><div><h2 id="wb-changes-heading">核对文件命名</h2><p class="wb-note">以下为服务返回的真实路径预览，尚未改名。</p></div><button type="button" data-layout="close">返回</button></header>
-    <div class="wb-sheet-body"><div data-wb="rename-list"></div><p data-wb="rename-warning" class="wb-note"></p></div>
+    <div class="wb-sheet-body"><div data-wb="rename-metrics-sheet" class="wb-rename-metrics" role="status"></div><div data-wb="rename-list"></div><p data-wb="rename-warning" class="wb-note"></p></div>
     <footer class="wb-sheet-footer"><button type="button" data-layout="naming">逐集调整与撤销</button><button type="button" data-action="undo" disabled>预览撤销</button><button type="button" class="wb-primary" data-action="apply" disabled>确认重命名</button></footer>
   </section>
   <div class="wb-notices" data-wb="notices" aria-live="polite" aria-atomic="false"></div>
