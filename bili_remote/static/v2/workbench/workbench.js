@@ -153,7 +153,8 @@
       this.el("match-status").classList.toggle('confirmed',Boolean(identity?.confirmed));
       if (this.resources.length) { this.el("resource").textContent = val(ctx?.selected_title) || this.resources[0].relative_path.split("/").at(-1); this.el("context-summary").textContent = this.resources.length === 1 ? this.resources[0].relative_path : `${this.resources.length} 项工作资源 · ${this.resources[0].relative_path} 等`; }
       this.el("provider-status").textContent = ctx ? [val(ctx.metadata?.year),({movie:"电影",series:"剧集",anime:"动画"})[identity?.media_type],identity?.tmdb_id ? `TMDB #${identity.tmdb_id}` : "TMDB 未匹配", identity?.bangumi_id ? `Bangumi #${identity.bangumi_id}` : "Bangumi 未匹配", identity?.confirmed ? "身份已确认" : "可搜索资料或手动输入名称"].filter(Boolean).join(" · ") : "TMDB / Bangumi：等待识别";
-      if (this.preview?.context_revision === ctx?.revision && this.preview) this.el("adjustment-status").textContent = "未执行改名 · 预览已更新";
+      if (this.preview?.stale) this.el("adjustment-status").textContent = "命名预览已过期，请刷新";
+      else if (this.preview?.context_revision === ctx?.revision && this.preview) this.el("adjustment-status").textContent = "未执行改名 · 预览已更新";
       else if (this.advancedPreview) this.el("adjustment-status").textContent = "高级预览已更新；请在命名详情中确认执行。";
       this.el("resource").title = this.resources.map(item => item.relative_path).join("\n");
       const first = this.el("rename-list").firstElementChild;
@@ -209,11 +210,32 @@
     }
     applyable() {
       const preview = this.preview;
+      if (preview?.stale) return false;
       if (!preview?.can_apply || !preview.preview_token || !preview.operations?.length || preview.conflicts?.length > 0 || !(Date.parse(preview.expires_at) > Date.now())) return false;
       if (preview.undo) return true;
       return preview.context_revision === this.context?.revision;
     }
-    invalidateRename() { this.advancedPreview = false; this.versions.naming = (this.versions.naming || 0) + 1; this.preview = null; this.previewKey = null; this.previewUndo = false; this.el("rename").hidden = true; this.button("apply").disabled = true; this.el("naming-status").textContent = this.context ? "命名预览待更新；不会自动修改文件。" : "选择资源后，将显示服务返回的目标文件名。"; }
+    invalidateRename() {
+      this.advancedPreview = false;
+      this.versions.naming = (this.versions.naming || 0) + 1;
+      this.previewKey = null;
+      this.previewUndo = false;
+      if (this.preview && this.context) {
+        // Keep the last visible plan so the user can still read the original
+        // target names, but make it non-applicable until a fresh preview is
+        // generated from the current parameters.
+        this.preview = {...this.preview, stale: true};
+        this.el("rename").hidden = false;
+        this.el("rename-warning").textContent = "预览已过期：命名参数已变化，请刷新后重新确认。";
+        this.el("naming-status").textContent = "命名预览已过期；不会按过期预览执行。";
+      } else {
+        this.preview = null;
+        this.el("rename").hidden = true;
+        this.el("rename-warning").textContent = "";
+        this.el("naming-status").textContent = this.context ? "命名预览待更新；不会自动修改文件。" : "选择资源后，将显示服务返回的目标文件名。";
+      }
+      this.controls();
+    }
     invalidateContent() {
       this.content = ""; this.el("output").textContent = ""; this.el("rich-preview").replaceChildren(); this.el("html-preview").hidden = true; this.el("html-preview").removeAttribute("srcdoc");
       this.el("validation").textContent = this.context ? "正在更新预览…" : "等待识别服务返回上下文"; this.controls();
