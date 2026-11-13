@@ -89,6 +89,16 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.get_by_role("button", name="检测所选画质").click()
         page.wait_for_function("window.calls.some(call => call.url === '/api/episodes/formats/batch')")
         page.locator("[data-format]").select_option("profile:0")
+        resolve_calls_before = page.evaluate("window.calls.filter(call => call.url === '/api/resolve').length")
+        assert page.locator(".dv2-episodes").is_visible()
+        page.get_by_role("button", name="收起", exact=True).click()
+        assert page.locator(".dv2-episodes").is_hidden()
+        assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
+        assert page.locator("[data-format]").input_value() == "profile:0"
+        page.get_by_role("button", name="展开", exact=True).click()
+        assert page.locator(".dv2-episodes").is_visible()
+        assert page.evaluate("document.querySelectorAll('.dv2-episode input:checked').length") == 2
+        assert page.evaluate("window.calls.filter(call => call.url === '/api/resolve').length") == resolve_calls_before
         page.locator(".dv2-advanced > summary").click()
         page.get_by_role("button", name="浏览").click()
         assert page.locator("[data-output]").input_value() == "Series/Season 1"
@@ -98,6 +108,9 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         assert payload["episode_ids"] == ["ep-a", "ep-b"]
         assert payload["format_profile"] == {"height": 1080, "fps_high": True, "vcodec": "avc", "dynamic_range": "SDR"}
         assert payload["api_mode"] == "web"
+        assert page.locator(".dv2-episodes").is_hidden()
+        assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
+        assert page.locator("[data-format]").input_value() == "profile:0"
         assert page.locator(".dv2-job").count() == 1
         page.get_by_role("button", name="取消").click()
         page.locator(".dv2-badge", has_text="已取消").wait_for()

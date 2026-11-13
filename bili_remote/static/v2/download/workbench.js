@@ -77,7 +77,7 @@
     if (!root) throw new TypeError("download workbench root is required");
     const api = options.api || createApi();
     const $ = (selector) => root.querySelector(selector);
-    const state = {resolved: null, resolvedUrl: "", jobs: [], previousStatuses: new Map(), seenInitialJobs: false, timer: null, episodeFormats: new Map(), episodeChoices: new Map(), formatProfiles: [], formatRequest: 0, parseVersion: 0};
+    const state = {resolved: null, resolvedUrl: "", jobs: [], previousStatuses: new Map(), seenInitialJobs: false, timer: null, episodeFormats: new Map(), episodeChoices: new Map(), formatProfiles: [], formatRequest: 0, parseVersion: 0, episodesOpen: false};
     const form = $("[data-download-form]");
     const urlField = $("#dv2-url");
     const modeField = $("[data-mode]");
@@ -86,6 +86,8 @@
     const errorBox = $("[data-error]");
     const resolution = $("[data-resolution]");
     const episodesBox = $("[data-episodes]");
+    const episodeHeading = $("[data-episode-heading]");
+    const episodeToggle = $("[data-episode-toggle]");
     const episodeList = $("[data-episode-list]");
     const selectedCount = $("[data-selected-count]");
     const jobsHost = $("[data-jobs]");
@@ -114,6 +116,14 @@
       stage(state.resolved ? "selecting" : "failed");
     }
     function clearError() { errorBox.textContent = ""; errorBox.hidden = true; }
+    function setEpisodesOpen(open) {
+      state.episodesOpen = Boolean(open) && Boolean(state.resolved?.episodes?.length);
+      episodesBox.hidden = !state.episodesOpen;
+      episodeHeading.hidden = !state.resolved?.episodes?.length;
+      episodeToggle.hidden = !state.resolved?.episodes?.length;
+      episodeToggle.setAttribute("aria-expanded", String(state.episodesOpen));
+      episodeToggle.textContent = state.episodesOpen ? "收起" : "展开";
+    }
     function selectedIds() { return [...episodeList.querySelectorAll("input:checked")].map((input) => input.value); }
     function updateCount() {
       const count = selectedIds().length;
@@ -131,8 +141,9 @@
     function renderEpisodes(data) {
       episodeList.replaceChildren();
       const episodes = Array.isArray(data.episodes) ? data.episodes : [];
-      episodesBox.hidden = episodes.length === 0;
-      $("[data-episode-heading]").hidden = episodes.length === 0;
+      episodesBox.hidden = episodes.length === 0 || !state.episodesOpen;
+      episodeHeading.hidden = episodes.length === 0;
+      episodeToggle.hidden = episodes.length === 0;
       const groups = new Map();
       for (const episode of episodes) {
         const group = episode.group || "其他";
@@ -283,6 +294,7 @@
         $("[data-template]").value = result.episodes?.length ? (options.playlistTemplate || options.outputTemplate || "") : (options.singleTemplate || options.outputTemplate || "");
         resolution.hidden = false;
         renderEpisodes(result);
+        setEpisodesOpen(true);
         renderFormats(result.formats);
         const allParts = $(`[data-all-parts]`);
         allParts.hidden = Boolean(result.episodes?.length) || modeField.value === "tv";
@@ -364,7 +376,7 @@
         } else {
           await api("/api/jobs", {method: "POST", body: JSON.stringify({url, api_mode: modeField.value, format_selector: formatField.value, all_parts: $(`[data-all-parts] input`).checked, output_template: template, output_dir: outputDir, title: state.resolved.title || null, uploader: state.resolved.uploader || null})});
         }
-        if(current()){stage("submitted");parseState.textContent="已提交下载";}
+        if(current()){stage("submitted");parseState.textContent="已提交下载";setEpisodesOpen(false);}
         notice.textContent = "任务已加入现有下载队列；完成后可进入工作台识别并预览命名。";
         await refreshJobs();
       } catch (error) { if(current())showError(error.message);else options.onNotice?.(error.message,true); }
@@ -486,6 +498,7 @@
     $("[data-select-invert]").addEventListener("click", () => setSelection("invert"));
     $("[data-select-none]").addEventListener("click", () => setSelection("none"));
     $("[data-check-batch]").addEventListener("click", checkBatchFormats);
+    episodeToggle.addEventListener("click", () => setEpisodesOpen(!state.episodesOpen));
     $("[data-refresh]").addEventListener("click", ()=>refreshJobs({force:true}));
     $("[data-history-refresh]").addEventListener("click", refreshHistory);
     $("[data-pick-folder]").addEventListener("click", async () => {
