@@ -218,9 +218,12 @@ class TMDBProvider(Provider):
         metadata = {"title_zh": field(localized.get("zh-CN"), self.name, ref), "title_zh_hant": field(localized.get("zh-TW"), self.name, ref),
                     "title_ja": field(localized.get("ja-JP"), self.name, ref), "original_title": field(original, self.name, ref),
                     "year": field((zh.get("release_date" if namespace == "movie" else "first_air_date") or "")[:4] or None, self.name, ref),
+                    "region": field([x.get("name") for x in zh.get("production_countries", []) if isinstance(x, dict) and x.get("name")], self.name, ref),
+                    "release_date": field(zh.get("release_date" if namespace == "movie" else "first_air_date"), self.name, ref),
                     "overview": field(zh.get("overview") or rows[3].get("overview"), self.name, ref),
                     "poster_url": field("https://image.tmdb.org/t/p/original" + zh["poster_path"] if zh.get("poster_path") else None, self.name, ref),
                     "genres": field([x["name"] for x in zh.get("genres", []) if x.get("name")], self.name, ref),
+                    "runtime": field(zh.get("runtime") if namespace == "movie" else next((x for x in zh.get("episode_run_time", []) if type(x) is int and x > 0), None), self.name, ref),
                     "cast": cast, "voice_cast": voice, "directors": directors, "links": {"tmdb": "https://www.themoviedb.org/" + namespace + "/" + ref}}
         imdb = (zh.get("external_ids") or {}).get("imdb_id") or zh.get("imdb_id")
         if re.fullmatch(r"tt\d+", str(imdb or "")):

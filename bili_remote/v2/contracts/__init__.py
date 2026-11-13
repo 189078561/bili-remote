@@ -78,9 +78,14 @@ class Metadata(Model):
     title_ja: FieldValue[str] | None = None
     original_title: FieldValue[str] | None = None
     year: FieldValue[str | int] | None = None
+    region: FieldValue[list[str] | str] | None = None
     overview: FieldValue[str] | None = None
     poster_url: FieldValue[str] | None = None
     genres: FieldValue[list[str]] | None = None
+    release_date: FieldValue[str] | None = None
+    douban_rating: FieldValue[str | float] | None = None
+    douban_url: FieldValue[str] | None = None
+    runtime: FieldValue[int | str] | None = None
     cast: list[PersonCredit] = Field(default_factory=list)
     voice_cast: list[PersonCredit] = Field(default_factory=list)
     directors: list[PersonCredit] = Field(default_factory=list)

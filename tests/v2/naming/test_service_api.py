@@ -77,6 +77,10 @@ def test_preview_zero_writes_technical_overrides_sidecars_apply_and_undo(setup, 
     preview = service.preview(context, overrides)
     assert preview["can_apply"]
     assert len(preview["operations"]) == 5
+    assert preview["changed_count"] == 5
+    assert preview["unchanged_count"] == 0
+    assert preview["conflict_count"] == 0
+    assert preview["manual_confirmation_count"] == 0
     assert preview["operations"][0]["target_relative_path"] == "Movie.2023.1080p.WEB-DL.H264.AAC-HDVWEB.mkv"
     assert any(x["target_relative_path"].endswith(".chs.forced.srt") for x in preview["operations"])
     assert any(x["target_relative_path"].endswith(".eng.flac") for x in preview["operations"])
@@ -84,6 +88,7 @@ def test_preview_zero_writes_technical_overrides_sidecars_apply_and_undo(setup, 
     assert {p.name: (p.stat().st_ino, p.stat().st_size, p.stat().st_mtime_ns, p.stat().st_ctime_ns) for p in root.iterdir()} == before_states
     assert writes == []
     assert not service.executor.audit.records and not service.tasks.calls
+    assert len(service.previews[preview["preview_token"]]["operations"]) == 5
     async def run():
         result = await service.apply(preview["preview_token"], preview["context_revision"], "once")
         assert result == await service.apply(preview["preview_token"], preview["context_revision"], "once")
@@ -138,6 +143,56 @@ def test_batch_episodes_manual_fix_and_duplicate_detection(setup):
     duplicate = service.preview(context, {"episode_overrides": {"EP01.mkv": 3, "EP02.mkv": 3}}, rules={"template_id": "series"})
     assert not duplicate["can_apply"]
     assert any(x["code"] == "duplicate_episode" for x in duplicate["conflicts"])
+    assert duplicate["conflict_count"] == len(duplicate["conflicts"])
+    assert duplicate["manual_confirmation_count"] == 0
+
+
+def test_no_change_preview_keeps_target_and_is_not_applicable(setup):
+    service, root, _ = setup
+    name = "Film.2023.1080p.WEB-DL.H265.AAC-HDVWEB.mkv"
+    (root / name).write_bytes(b"already named")
+    context = analyze(
+        service,
+        [service.files.reference("downloads", name)],
+        manual_overrides={"selected_title": "Film", "year": 2023},
+    )
+    preview = service.preview(context)
+
+    assert preview["operations"][0]["source"]["relative_path"] == name
+    assert preview["operations"][0]["target_relative_path"] == name
+    assert preview["changed_count"] == 0
+    assert preview["unchanged_count"] == 1
+    assert preview["conflict_count"] == 0
+    assert preview["manual_confirmation_count"] == 0
+    assert preview["conflicts"] == []
+    assert preview["manual_confirmations"] == []
+    assert preview["notices"][0]["code"] == "no_changes"
+    assert not preview["can_apply"]
+    assert service.previews[preview["preview_token"]]["operations"] == []
+    with pytest.raises(NamingError) as blocked:
+        asyncio.run(service.apply(preview["preview_token"], preview["context_revision"], "no-change"))
+    assert blocked.value.code == "no_changes"
+    assert not service.executor.audit.records
+
+
+def test_preview_mixes_unchanged_display_rows_with_changed_execution_rows(setup):
+    service, root, _ = setup
+    unchanged = "Series.2023.S01E02.1080p.WEB-DL.H265.AAC-HDVWEB.mkv"
+    (root / unchanged).write_bytes(b"one")
+    (root / "Series.S01E02.old.mkv").write_bytes(b"two")
+    refs = [service.files.reference("downloads", name) for name in (unchanged, "Series.S01E02.old.mkv")]
+    context = analyze(service, refs, manual_overrides={"selected_title": "Series", "year": 2023})
+    preview = service.preview(context, rules={"template_id": "series"}, overrides={
+        "episode_overrides": {unchanged: 2, "Series.S01E02.old.mkv": 2},
+    })
+
+    assert preview["changed_count"] == 1
+    assert preview["unchanged_count"] == 1
+    assert len(preview["operations"]) == 2
+    assert {item["source"]["relative_path"] for item in preview["operations"]} == {
+        unchanged, "Series.S01E02.old.mkv",
+    }
+    assert len(service.previews[preview["preview_token"]]["operations"]) == 1
 
 
 def test_filename_episode_selects_series_template_and_records_provenance(setup):
@@ -243,6 +298,30 @@ def test_directory_scan_season_preview_and_undo(setup):
     assert season.exists()
 
 
+def test_season_preview_keeps_unconfirmed_identity_blocking(setup):
+    service, root, _ = setup
+    season = root / "Film.2023"
+    season.mkdir()
+    (season / "EP01.mkv").write_bytes(b"one")
+    service.resolver = MetadataResolver({"tmdb": RecognitionProvider()})
+    context = analyze(
+        service,
+        [service.files.reference("downloads", "Film.2023")],
+        manual_overrides={"selected_title": "Film"},
+    )
+    assert context["identity"]["selected_by"] == "automatic"
+    preview = service.preview(context, rules={"template_id": "season"})
+    assert not preview["can_apply"]
+    assert preview["conflicts"] == []
+    assert preview["manual_confirmations"] == [{
+        "code": "identity_confirmation_required",
+        "message": "自动匹配的影视身份尚未确认，请人工选择或确认",
+    }]
+    with pytest.raises(NamingError) as blocked:
+        asyncio.run(service.apply(preview["preview_token"], preview["context_revision"], "season-identity"))
+    assert blocked.value.code == "manual_confirmation_required"
+
+
 def client_for(service):
     app = FastAPI()
     app.include_router(create_router(lambda request: service, authenticate=lambda request: request.headers.get("X-Session"), csrf=lambda request: request.headers.get("X-CSRF-Token") == "csrf"))
@@ -312,7 +391,11 @@ def test_automatic_match_is_a_proposal_until_identity_confirmed(setup):
     assert context["identity_candidates"][0]["id"] == "100"
     assert context["metadata"]["year"]["value"] == 2023
     assert context["identity"]["selected_by"] == "automatic"
-    assert not service.preview(context)["can_apply"]
+    proposal = service.preview(context)
+    assert not proposal["can_apply"]
+    assert proposal["conflicts"] == []
+    assert proposal["manual_confirmation_count"] == 1
+    assert proposal["manual_confirmations"][0]["code"] == "identity_confirmation_required"
     confirmed = analyze(service, refs, context=context, selection={"provider": "tmdb", "id": "100", "media_type": "movie"})
     assert confirmed["identity"]["confirmed"]
     assert service.preview(confirmed)["can_apply"]
@@ -334,7 +417,10 @@ def test_only_verified_download_origin_is_used_and_mapping_requires_confirmation
     service.origins = Origins()
     context = analyze(service, [ref], origins=[origin], selection={"provider": "tmdb", "id": "100", "media_type": "series"}, manual_overrides={"selected_title": "Series"})
     assert context["files"][0]["episode"]["episode"]["value"] == 8
-    assert not service.preview(context)["can_apply"]
+    unresolved = service.preview(context)
+    assert not unresolved["can_apply"]
+    assert unresolved["conflicts"] == []
+    assert unresolved["manual_confirmations"][0]["code"] == "mapping_confirmation_required"
     manual = service.preview(context, {"file_values": {"S01E01.mkv": {"season": 2, "episode": 3}}})
     assert manual["can_apply"] and "S02E03" in manual["operations"][0]["target_relative_path"]
 

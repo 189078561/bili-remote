@@ -335,9 +335,9 @@ class NamingService:
                 result = self._season_preview(current, overrides, chosen_rules, signature, plan_changed)
                 self.manual_rules.setdefault(current["context_id"], {}).update(deepcopy(rules or {}))
                 return result
-            operations, conflicts = [], []
+            operations, conflicts, manual_confirmations = [], [], []
             if current.get("identity") and not current["identity"].get("confirmed"):
-                conflicts.append({"code": "identity_confirmation_required", "message": "自动匹配的影视身份尚未确认，请人工选择或确认"})
+                manual_confirmations.append({"code": "identity_confirmation_required", "message": "自动匹配的影视身份尚未确认，请人工选择或确认"})
             episodes = set()
             updated_files = []
             for index, original in enumerate(current["files"]):
@@ -385,7 +385,7 @@ class NamingService:
                     if required in rendered.get("missing_fields", []):
                         conflicts.append({"code": "missing_identity", "field": required, "ref": item["ref"], "message": "缺少名称或集数，请人工确认"})
                 if origin and (current.get("identity") or {}).get("tmdb_id") and not item.get("episode", {}).get("episode", {}).get("confirmed"):
-                    conflicts.append({"code": "mapping_confirmation_required", "ref": item["ref"], "message": "B站与 TMDB 季集映射需人工确认"})
+                    manual_confirmations.append({"code": "mapping_confirmation_required", "ref": item["ref"], "message": "B站与 TMDB 季集映射需人工确认"})
                 media_type = (current.get("identity") or {}).get("media_type", local_rules.get("template_id", "movie"))
                 if media_type in {"series", "anime", "anime_single"}:
                     pair = (_value(item["episode"].get("season")), _value(item["episode"].get("episode")))
@@ -404,14 +404,13 @@ class NamingService:
                     name = PurePosixPath(target).stem + suffix + old_path.suffix
                     operations.append({"source": side_ref, "target_relative_path": str(old_path.with_name(name)),
                                        "temporary_required": True, "sidecar_of": item["ref"], "source_fingerprint": side_ref["fingerprint"], "warnings": []})
-            operations = [x for x in operations if x["source"]["relative_path"] != x["target_relative_path"]]
-            if not operations:
-                conflicts.append({"code": "no_changes", "message": "文件名已符合规则，无需执行"})
-            conflicts.extend(self.files.validate_operations(operations))
+            changed_operations = [x for x in operations if x["source"]["relative_path"] != x["target_relative_path"]]
+            conflicts.extend(self.files.validate_operations(changed_operations))
             current["files"] = updated_files
             self._accept_plan(current, chosen_rules, signature, plan_changed)
             self.manual_rules.setdefault(current["context_id"], {}).update(deepcopy(rules or {}))
-            return self._store_preview(operations, current, conflicts, rules=chosen_rules, overrides=overrides)
+            return self._store_preview(operations, current, conflicts, manual_confirmations=manual_confirmations,
+                                       rules=chosen_rules, overrides=overrides)
 
     def _accept_plan(self, current, rules, signature, changed):
         if changed:
@@ -431,7 +430,12 @@ class NamingService:
 
     def _season_preview(self, current, overrides, rules, signature, changed):
         from .templates import render_filename, season_common_probe
-        operations, conflicts = [], []
+        operations, conflicts, manual_confirmations = [], [], []
+        if current.get("identity") and not current["identity"].get("confirmed"):
+            manual_confirmations.append({
+                "code": "identity_confirmation_required",
+                "message": "自动匹配的影视身份尚未确认，请人工选择或确认",
+            })
         directories = [ref for ref in current["resources"] if self.files.path(ref).is_dir()]
         if not directories:
             raise NamingError("directory_required", "整季目录模板需要选择目录")
@@ -445,12 +449,11 @@ class NamingService:
                 conflicts.append({"code": "missing_identity", "field": "Title", "message": "缺少整季名称"})
             operations.append({"source": ref, "target_relative_path": str(PurePosixPath(ref["relative_path"]).with_name(rendered["filename"])),
                                "temporary_required": True, "sidecar_of": None, "source_fingerprint": ref["fingerprint"], "warnings": warnings + rendered["warnings"]})
-        operations = [x for x in operations if x["source"]["relative_path"] != x["target_relative_path"]]
-        if not operations:
-            conflicts.append({"code": "no_changes", "message": "目录名已符合规则，无需执行"})
-        conflicts.extend(self.files.validate_operations(operations))
+        changed_operations = [x for x in operations if x["source"]["relative_path"] != x["target_relative_path"]]
+        conflicts.extend(self.files.validate_operations(changed_operations))
         self._accept_plan(current, rules, signature, changed)
-        return self._store_preview(operations, current, conflicts, rules=rules, overrides=overrides)
+        return self._store_preview(operations, current, conflicts, manual_confirmations=manual_confirmations,
+                                   rules=rules, overrides=overrides)
 
     def _sidecars(self, item, overrides):
         sidecars = deepcopy(item.get("sidecars", []))
@@ -478,13 +481,39 @@ class NamingService:
             sidecars.append({**sidecar, "ref": actual})
         return sidecars
 
-    def _store_preview(self, operations, context, conflicts, **plan):
+    def _store_preview(self, operations, context, conflicts=None, *, manual_confirmations=None, notices=None, **plan):
         now = time.monotonic()
         self.previews = {k: v for k, v in self.previews.items() if v["deadline"] > now}
         token = secrets.token_urlsafe(32)
-        public = {"preview_token": token, "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=self.ttl)).isoformat(),
-                  "context_revision": context["revision"], "operations": deepcopy(operations), "conflicts": conflicts, "can_apply": not conflicts}
-        self.previews[token] = {"public": public, "deadline": now + self.ttl, "context_id": context["context_id"], **deepcopy(plan)}
+        conflicts = deepcopy(conflicts or [])
+        manual_confirmations = deepcopy(manual_confirmations or [])
+        notices = deepcopy(notices or [])
+        changed_operations = [item for item in operations
+                              if item["source"]["relative_path"] != item["target_relative_path"]]
+        unchanged_count = len(operations) - len(changed_operations)
+        if not changed_operations:
+            notices.append({"code": "no_changes", "message": "名称已符合规则，无需执行"})
+        public = {
+            "preview_token": token,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=self.ttl)).isoformat(),
+            "context_revision": context["revision"],
+            "operations": deepcopy(operations),
+            "conflicts": conflicts,
+            "manual_confirmations": manual_confirmations,
+            "notices": notices,
+            "changed_count": len(changed_operations),
+            "unchanged_count": unchanged_count,
+            "conflict_count": len(conflicts),
+            "manual_confirmation_count": len(manual_confirmations),
+            "can_apply": bool(changed_operations) and not conflicts and not manual_confirmations,
+        }
+        self.previews[token] = {
+            "public": public,
+            "operations": deepcopy(changed_operations),
+            "deadline": now + self.ttl,
+            "context_id": context["context_id"],
+            **deepcopy(plan),
+        }
         while len(self.previews) > self.max_entries:
             self.previews.pop(next(iter(self.previews)))
         return deepcopy(public)
@@ -509,6 +538,12 @@ class NamingService:
             if bool(stored.get("undo_of")) != undo:
                 raise NamingError("invalid_preview", "预览类型不匹配", status=409)
             if not preview["can_apply"]:
+                if preview.get("manual_confirmations"):
+                    raise NamingError("manual_confirmation_required", "预览仍有文件需要人工确认", status=409,
+                                      fields=preview["manual_confirmations"])
+                if not preview.get("changed_count"):
+                    raise NamingError("no_changes", "没有需要执行的重命名", status=409,
+                                      fields=preview.get("notices", []))
                 raise NamingError("rename_conflict", "预览存在冲突", status=409, fields=preview["conflicts"])
             if not self.executor or not self.tasks:
                 raise NamingError("integration_unavailable", "持久化审计及公共执行器尚未接入", status=503)
@@ -517,7 +552,7 @@ class NamingService:
                 result = stored["result"]
             else:
                 if not stored.get("batch_id"):
-                    stored["batch_id"] = self.executor.prepare(preview["operations"], owner=self.owner, undo_of=stored.get("undo_of"))
+                    stored["batch_id"] = self.executor.prepare(stored["operations"], owner=self.owner, undo_of=stored.get("undo_of"))
                     stored["queue_key"] = "v2-naming:" + secrets.token_urlsafe(24)
                 batch_id = stored["batch_id"]
                 task = self.tasks.enqueue_naming(batch_id, stored["queue_key"], undo=undo)
