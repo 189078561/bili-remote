@@ -43,3 +43,19 @@
 ## 验证边界
 
 验证结果：`python3 scripts/dev_test.py download` **40 passed**；`python3 scripts/dev_test.py all` **217 passed, 0 failed, 1 existing Starlette/httpx deprecation warning**；`node --check bili_remote/static/v2/download/workbench.js` 与 `git diff --check` 通过。新增浏览器测试使用本地合成响应检查控件与请求映射，不运行或伪报下载成功。隔离回归只证明当前 fake_ytdlp/HTTP 测试覆盖的逻辑；未使用真实 B站 Web/TV 登录、Cookie、网络资源或 aria2c 下载。浏览器当前没有真实登录会话或真实下载完成联动验收。Python 3.12 全量回归、主页面挂载、真实来源仓储、TaskCenter 接入和 NamingService 整合仍待整合阶段验收。
+
+## 下载速度优化评估（2026-11-14）
+
+本阶段只对可确认项直接实施；需要线上吞吐基准才能证明的改动记录为待部署后验证，不硬编码未经确认的 CDN。
+
+已确认可用（无需改动）：
+
+- aria2 多连接下载：默认 16 连接、`--split=16`、`--min-split-size=20M`、`--piece-length=5M`，另配 `--max-tries=5 --retry-wait=1 --connect-timeout=15 --timeout=30`。
+- 断点续传：aria2 支持 `--continue`，`aria2_resume_retries` 默认 2 次。
+- CDN 探测排序：`tv_cdn_probe_enabled` 默认开启，8 路探测、512 KiB 采样，对 Web/TV 候选 CDN 测速后排序。
+- 解析列表折叠：已提交并测试，收起保留已选集数、画质、编码与当前解析资源，展开不重新解析。
+
+未直接实施（需线上验证或超出本次范围）：
+
+- BBDown 复用：仓库内无 BBDown 实现，接入需新增可执行文件、Docker 构建与下载器分支，本次不引入。
+- 更细的并发/分片参数与 CDN 白名单：现有默认值已较激进，继续调优需真实 B 站线路吞吐与稳定性对比，交给用户部署后实际验证。
