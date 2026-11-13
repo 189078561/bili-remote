@@ -568,7 +568,7 @@
         this.content = result.content; this.el("output").textContent = result.content;
         this.el("rich-preview").hidden = format === "html";
         if (format !== "html") global.BiliWorkbenchPreview?.render(this.el("rich-preview"), result.content, format);
-        const messages = [...(result.validation.errors || []), ...(result.validation.warnings || [])].map(x => typeof x === "string" ? x : x.message);
+        const messages = [...(result.validation.errors || []), ...(result.validation.warnings || []), ...(result.validation.notices || [])].map(x => typeof x === "string" ? x : x.message);
         this.el("validation").textContent = (result.validation.ready ? "发布内容已就绪" : "内容尚有缺项，可预览复制") + (messages.length ? ` · ${messages.join("；")}` : "") + (unpublished ? " · 缩略图待上传图床" : "");
         if (format === "html") { this.el("html-preview").srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; img-src https: http:; style-src &#39;unsafe-inline&#39;"><style>body{font:14px/1.6 system-ui;overflow-wrap:anywhere;color-scheme:light dark;color:CanvasText;background:Canvas}img{max-width:100%}pre{white-space:pre-wrap}</style>' + result.content; this.el("html-preview").hidden = false; }
         this.controls();
