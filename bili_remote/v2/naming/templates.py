@@ -29,7 +29,12 @@ _AUDIO_CODEC_ALIASES = {
 
 
 def value(item):
-    return item.get("value") if isinstance(item, dict) and "value" in item else item
+    if not isinstance(item, dict):
+        return item
+    for key in ("value", "VALUE"):
+        if key in item:
+            return item.get(key)
+    return item
 
 
 def normalize_codec_value(field, item):

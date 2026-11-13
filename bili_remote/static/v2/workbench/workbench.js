@@ -252,22 +252,14 @@
     invalidateRename() {
       this.advancedPreview = false;
       this.versions.naming = (this.versions.naming || 0) + 1;
+      // Any in-flight naming/preview request now describes a stale context and
+      // must not render after a parameter or selection change.
       this.previewKey = null;
       this.previewUndo = false;
-      if (this.preview && this.context) {
-        // Keep the last visible plan so the user can still read the original
-        // target names, but make it non-applicable until a fresh preview is
-        // generated from the current parameters.
-        this.preview = {...this.preview, stale: true};
-        this.el("rename").hidden = false;
-        this.el("rename-warning").textContent = "预览已过期：命名参数已变化，请刷新后重新确认。";
-        this.el("naming-status").textContent = "命名预览已过期；不会按过期预览执行。";
-      } else {
-        this.preview = null;
-        this.el("rename").hidden = true;
-        this.el("rename-warning").textContent = "";
-        this.el("naming-status").textContent = this.context ? "命名预览待更新；不会自动修改文件。" : "选择资源后，将显示服务返回的目标文件名。";
-      }
+      this.preview = null;
+      this.el("rename").hidden = true;
+      this.el("rename-warning").textContent = "";
+      this.el("naming-status").textContent = this.context ? "命名预览待更新；不会自动修改文件。" : "选择资源后，将显示服务返回的目标文件名。";
       this.renderRenameMetrics();
       this.controls();
     }

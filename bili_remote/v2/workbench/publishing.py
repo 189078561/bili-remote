@@ -38,8 +38,10 @@ def safe_url(url):
 
 
 def field_value(item):
-    if isinstance(item, dict) and "value" in item:
-        return item.get("value"), item
+    if isinstance(item, dict):
+        for key in ("value", "VALUE"):
+            if key in item:
+                return item.get(key), item
     return item, {}
 
 

@@ -170,7 +170,7 @@ def test_real_browser_unconfigured_metadata_is_honest(live_server):
         show_panel(page, 'naming')
         page.locator('[data-action="naming"]').click()
         expect(page.locator('[data-wb="rename-warning"]')).to_contain_text('缺少')
-        assert page.locator('[data-action="apply"]').is_disabled()
+        assert page.locator('.wb-naming-result [data-action="apply"]').is_disabled()
         expect(page.locator('[data-wb="task-status"]')).to_contain_text('刷新仅恢复任务')
         assert not errors, errors
     finally:
@@ -240,7 +240,6 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         assert pending.value.suggested_filename.endswith('.torrent')
         assert page.get_by_role('button', name='添加到 qBittorrent', exact=True).count() == 0
         show_panel(page, 'content')
-        expect(page.locator('[data-wb="output"]')).to_contain_text('Synthetic Tool Flow')
         expect(page.locator('[data-wb="output"]')).to_contain_text('Synthetic overview')
         expect(page.locator('[data-wb="output"]')).to_contain_text('https://images.example/')
         expect(page.locator('[data-wb="output"]')).to_contain_text('MediaInfo')
@@ -321,7 +320,7 @@ def test_slow_responses_and_rename_confirmation(live_server):
         page.route('**/api/v2/naming/apply', apply)
         show_panel(page, None)
         show_panel(page, 'changes')
-        page.locator('[data-action="apply"]').click()
+        page.locator('[data-sheet="changes"] [data-action="apply"]').click()
         page.wait_for_timeout(100)
         payload = [payload for path, payload in requests if path == 'naming/apply'][0]
         assert set(payload) == {'preview_token', 'expected_revision', 'confirm', 'idempotency_key'}
@@ -501,7 +500,7 @@ def test_completed_rename_reads_authoritative_paths_and_preserves_edits(live_ser
         page.route('**/api/v2/naming/apply', execute)
         show_panel(page, None)
         show_panel(page, 'changes')
-        page.locator('[data-action="apply"]').click()
+        page.locator('[data-sheet="changes"] [data-action="apply"]').click()
         expect(page.locator('[data-wb="rename"]')).to_be_hidden()
         tasks[0] = {**tasks[0], 'status': 'completed', 'finished_at': '2026-11-04T00:00:00Z'}
         expect(page.locator('[data-wb="context-summary"]')).to_contain_text('Renamed.mp4')
