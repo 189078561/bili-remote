@@ -65,7 +65,7 @@
       this.host.addEventListener("input", event => {
         const name = event.target.dataset.edit;
         if (name) { this.fieldVersions[name] = (this.fieldVersions[name] || 0) + 1; this.dirty.add(name); this.setField(name, event.target.value); this.editVersion++; this.scheduleCompose(); }
-        if (["naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode", "scope", "naming-type", "source-rule", "group-rule"].includes(event.target.dataset.wb)) this.scheduleAdjustment(event.target.dataset.wb);
+        if (["naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode", "scope", "naming-type", "source-rule", "group-rule", "episode-mode", "start-episode", "episode-step", "episode-direction"].includes(event.target.dataset.wb)) this.scheduleAdjustment(event.target.dataset.wb);
       }, opts);
       const imageControls=()=>{
         const collage=this.el('image-mode').value==='collage',percent=this.el('range-mode').value==='percent';
@@ -123,7 +123,7 @@
         this.el("naming-rule").value = this.context?.effective_rules?.naming_rule?.templates?.[this.namingType] || "";
       }
       if (["selected-title","season","episode","scope"].includes(field)) this.pendingAdjustmentEpoch = this.epoch;
-      if (["naming-rule","subtitle-rule","title-rule","cast-limit","naming-type","source-rule","group-rule"].includes(field)) this.rememberRules();
+      if (["naming-rule","subtitle-rule","title-rule","cast-limit","naming-type","source-rule","group-rule","episode-mode","start-episode","episode-step","episode-direction"].includes(field)) this.rememberRules();
       this.invalidateRename(); this.versions.context = (this.versions.context || 0) + 1;
       const ticket = this.adjustmentVersion = (this.adjustmentVersion || 0) + 1, epoch = this.epoch;
       this.contextChanged(); // Also invalidates in-flight advanced naming requests.
@@ -284,6 +284,10 @@
       for (const field of Object.keys(this.fields)) this.setField(field, "");
       ["images", "reports", "torrents", "upload-links", "issues", "candidates", "media"].forEach(name => this.el(name).replaceChildren());
       ["naming-rule", "subtitle-rule", "title-rule", "selected-title", "season", "episode"].forEach(name => this.el(name).value = "");
+      this.el("episode-mode").value = "detected";
+      this.el("start-episode").value = "";
+      this.el("episode-step").value = "1";
+      this.el("episode-direction").value = "increment";
       this.el("scope").value = resources.some(item => item.kind === "directory") || resources.length > 1 ? "season" : "single";
       this.el("resource").textContent = `${resources.length} 项资源 · ${resources[0].relative_path.split("/").at(-1)}`;
       this.el("context-summary").textContent = "资料和参数尚未识别";
@@ -379,6 +383,11 @@
         : (sourceLabels[templateSource?.reason] || "");
       this.el("naming-rule").value = ctx.effective_rules?.naming_rule?.templates?.[this.namingType] || "";
       for(const key of ['source','group']){const rule=ctx.effective_rules?.naming_rule?.[key];this.el(`${key}-rule`).value=(typeof rule==='object'?rule?.value:rule)||(key==='source'?'WEB-DL':'HDVWEB');}
+      const batch = ctx.effective_rules?.naming_rule || {};
+      this.el("episode-mode").value = batch.episode_mode || "detected";
+      this.el("start-episode").value = batch.start_episode ?? 1;
+      this.el("episode-step").value = batch.episode_step ?? 1;
+      this.el("episode-direction").value = batch.episode_direction || "increment";
       this.el("naming-rule").disabled = !ctx.effective_rules?.naming_rule;
       this.el("subtitle-rule").value = ctx.effective_rules?.subtitle_rule?.template_id || "";
       this.el("cast-limit").value = String(ctx.effective_rules?.subtitle_rule?.cast_limit || 3);
@@ -407,7 +416,14 @@
         if (raw) templates[kind] = raw; else delete templates[kind];
         const values={};
         for(const key of ['source','group']){const value=this.el(`${key}-rule`).value.trim(),old=rule[key];values[key]=value===(typeof old==='object'?old?.value:old)?old:{value,source:'manual',manual:true,confirmed:true};}
-        return {...rule, ...values, template_id:kind, templates};
+        const episodeMode = this.el("episode-mode").value || rule.episode_mode || "detected";
+        const startEpisode = this.el("start-episode").value.trim();
+        const episodeStep = this.el("episode-step").value.trim();
+        const episodeDirection = this.el("episode-direction").value || rule.episode_direction || "increment";
+        return {...rule, ...values, template_id:kind, templates, episode_mode: episodeMode,
+          start_episode: startEpisode === "" ? (rule.start_episode ?? 1) : Number(startEpisode),
+          episode_step: episodeStep === "" ? (rule.episode_step ?? 1) : Number(episodeStep),
+          episode_direction: episodeDirection};
       }
       const rule = this.context?.effective_rules?.subtitle_rule || fallback;
       return {...rule, ...(raw ? {template_id: raw} : {}), cast_limit: this.el("cast-limit").value === "all" ? "all" : Number(this.el("cast-limit").value)};
