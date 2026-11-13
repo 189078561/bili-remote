@@ -38,6 +38,8 @@
 .wb-actions,.wb-inline {display:flex;align-items:center;flex-wrap:wrap;gap:8px;}
 .wb-inline>label {flex:1;}
 .wb-name-controls {display:grid;grid-template-columns:minmax(0,1fr) 76px 100px 155px;gap:12px;margin:26px 0 14px;align-items:end;}
+.wb-name-controls .wb-template-control {grid-column:1/-1;}
+.wb-name-controls .wb-template-control textarea {min-height:58px;}
 .wb-naming-result {background:var(--ws-subtle);border-radius:6px;padding:12px 14px;}
 .wb-naming-result [data-wb=rename] {display:flex;align-items:center;gap:20px;}
 .wb-naming-result [data-wb=rename-summary] {flex:1;min-width:0;}

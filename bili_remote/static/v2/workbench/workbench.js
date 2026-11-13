@@ -291,6 +291,8 @@
       this.el("start-episode").value = "";
       this.el("episode-step").value = "1";
       this.el("episode-direction").value = "increment";
+      this.el("naming-type").value = "movie";
+      this.namingType = "movie";
       this.el("candidates-inline").replaceChildren();
       this.el("query-inline").value = resources[0].relative_path.split("/").at(-1).replace(/\.[^.]+$/, "").replace(/[._\-]+/g, " ").trim();
       this.el("scope").value = resources.some(item => item.kind === "directory") || resources.length > 1 ? "season" : "single";
@@ -411,7 +413,6 @@
       this.el("start-episode").value = batch.start_episode ?? 1;
       this.el("episode-step").value = batch.episode_step ?? 1;
       this.el("episode-direction").value = batch.episode_direction || "increment";
-      this.el("naming-rule").disabled = !ctx.effective_rules?.naming_rule;
       this.el("subtitle-rule").value = ctx.effective_rules?.subtitle_rule?.template_id || "";
       this.el("cast-limit").value = String(ctx.effective_rules?.subtitle_rule?.cast_limit || 3);
       if (!this.dirty.has("overview")) this.setField("overview", val(ctx.metadata?.overview));
