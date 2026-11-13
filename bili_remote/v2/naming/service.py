@@ -365,22 +365,31 @@ class NamingService:
                 mapping_key = item.get("episode", {}).get("mapping_key")
                 if path in episode_overrides or mapping_key in episode_overrides:
                     item.setdefault("episode", {})["episode"] = manual_field(episode_overrides.get(path, episode_overrides.get(mapping_key)))
-                file_context = deepcopy(current)
-                if "year" in fields:
-                    file_context["metadata"]["year"] = manual_field(_value(fields["year"]))
-                if "title" in fields:
-                    file_context["selected_title"] = manual_field(_value(fields["title"]))
                 manual_name = (overrides.get("manual_names") or {}).get(path)
-                if manual_name is not None:
-                    file_context["selected_title"] = manual_field(manual_name)
                 local_rules = deepcopy(chosen_rules)
-                if "title" in fields or manual_name is not None:
-                    local_rules.pop("custom_title", None)
-                    local_rules.pop("selected_title_id", None)
-                for key in ("source", "group"):
-                    if key in fields:
-                        local_rules[key] = manual_field(_value(fields[key]))
-                rendered = render_filename(file_context, item, local_rules)
+                if manual_name is not None:
+                    target_name = manual_name.strip()
+                    if not target_name or any(ch in target_name for ch in ("/", "\\", "\0")):
+                        raise NamingError("invalid_manual_value", "人工名称不能包含路径")
+                    try:
+                        from ...file_service import validate_filename
+                        validate_filename(target_name)
+                    except Exception as exc:
+                        raise NamingError("invalid_manual_value", "人工名称无效") from exc
+                    rendered = {"filename": target_name, "missing_fields": [], "warnings": [], "values": {}}
+                else:
+                    file_context = deepcopy(current)
+                    if "year" in fields:
+                        file_context["metadata"]["year"] = manual_field(_value(fields["year"]))
+                    if "title" in fields:
+                        file_context["selected_title"] = manual_field(_value(fields["title"]))
+                    if "title" in fields:
+                        local_rules.pop("custom_title", None)
+                        local_rules.pop("selected_title_id", None)
+                    for key in ("source", "group"):
+                        if key in fields:
+                            local_rules[key] = manual_field(_value(fields[key]))
+                    rendered = render_filename(file_context, item, local_rules)
                 for required in ("Title", "Episode"):
                     if required in rendered.get("missing_fields", []):
                         conflicts.append({"code": "missing_identity", "field": required, "ref": item["ref"], "message": "缺少名称或集数，请人工确认"})

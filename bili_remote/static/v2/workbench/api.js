@@ -32,8 +32,10 @@
     resolve(body) { return this.request("/api/v2/resources/resolve", body); }
     probe(body) { return this.request("/api/v2/resources/probe", body); }
     search(query, media_type) { return this.request("/api/v2/metadata/search?" + new URLSearchParams({query, media_type, providers: "tmdb,bangumi", page: "1"})); }
-    naming(context, rules) { return this.request("/api/v2/naming/preview", {context, overrides: {file_values: {}, episode_overrides: {}, manual_names: {}}, rules}); }
+    naming(context, overrides = {}, rules = {}) { return this.request("/api/v2/naming/preview", {context, overrides, rules}); }
     apply(preview, key) { return this.request("/api/v2/naming/apply", {preview_token: preview.preview_token, expected_revision: preview.context_revision, confirm: true, idempotency_key: key}); }
+    undoPreview(batchId) { return this.request("/api/v2/naming/undo/preview", {batch_id: batchId}); }
+    undoApply(preview, key) { return this.request("/api/v2/naming/undo/apply", {preview_token: preview.preview_token, expected_revision: preview.context_revision, confirm: true, idempotency_key: key}); }
     title(context, rule) { return this.request("/api/v2/release-title/render", {context, rule}); }
     subtitle(context, rule) { return this.request("/api/v2/subtitles/render", {context, rule}); }
     compose(body) { return this.request("/api/v2/publishing/preview", body); }

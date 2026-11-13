@@ -107,6 +107,16 @@ def test_preview_zero_writes_technical_overrides_sidecars_apply_and_undo(setup, 
         assert database.fetch_one(f"SELECT COUNT(*) AS n FROM {table}")["n"] == 0
 
 
+def test_manual_names_use_supplied_complete_filename(setup):
+    service, root, _ = setup
+    (root / "a.mkv").write_bytes(b"a")
+    refs = [service.files.reference("downloads", "a.mkv")]
+    context = analyze(service, refs, manual_overrides={"selected_title": "A", "year": 2023})
+    preview = service.preview(context, {"manual_names": {"a.mkv": "Custom.Name.2023.mkv"}})
+    assert preview["operations"][0]["target_relative_path"] == "Custom.Name.2023.mkv"
+    assert preview["context_revision"] > context["revision"]
+
+
 def test_session_context_provenance_revision_expiry_idempotency(setup):
     service, root, _ = setup
     (root / "a.mkv").write_bytes(b"a")
