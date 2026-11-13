@@ -3,6 +3,29 @@
   const ROOTS = ["downloads", "torrents", "images", "release_info"];
   const signature = refs => JSON.stringify(refs.map(ref => [ref.root_key, ref.relative_path, ref.kind, ref.fingerprint]).sort());
 
+  function normalizedPath(path) {
+    return String(path || "").replace(/\/+$/, "");
+  }
+
+  function isDescendant(path, ancestorPath) {
+    const ancestor = normalizedPath(ancestorPath);
+    const candidate = normalizedPath(path);
+    if (!ancestor) return candidate !== "";
+    return candidate !== ancestor && candidate.startsWith(ancestor + "/");
+  }
+
+  // Batch-selecting a directory already covers every file inside it. Drop
+  // descendant files/directories so a handoff never double-counts them.
+  function pruneDescendants(items, defaultRootKey) {
+    return items.filter((item, index, all) => {
+      const key = item.root_key || defaultRootKey;
+      return !all.some((other, otherIndex) => {
+        if (otherIndex === index) return false;
+        return other.is_dir && (other.root_key || defaultRootKey) === key && isDescendant(item.relative_path, other.relative_path);
+      });
+    });
+  }
+
   // Keep one page-owned context. Never create a second resolver or naming algorithm.
   class FileBrowserAdapter {
     constructor({getContext = () => null, getContextVersion = () => null, setContext, openWorkbench, openNaming, request = api} = {}) {
@@ -17,7 +40,8 @@
 
     async select(items, rootKey) {
       if (!items.length || items.length > 1000) throw new Error("请选择 1 至 1000 项资源");
-      return Promise.all(items.map(async item => {
+      const effective = pruneDescendants(items, rootKey);
+      return Promise.all(effective.map(async item => {
         const key = item.root_key || rootKey;
         if (!ROOTS.includes(key)) throw new Error("此目录不属于四类资源目录");
         const query = new URLSearchParams({root_key: key, path: item.relative_path});

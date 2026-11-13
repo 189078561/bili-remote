@@ -157,3 +157,48 @@ def test_media_preview_and_cancelled_handoff_do_not_commit_context(live_server):
     finally:
         browser.close()
         playwright.stop()
+
+
+def test_adapter_select_dedupes_parent_directory_and_descendants(live_server):
+    base, _app = live_server
+    playwright, browser, page, errors = browser_session(base)
+    try:
+        mount(page, adapter=True)
+        result = page.evaluate('''async () => {
+          const meta = path => ({
+            allowed: true, is_symlink: false, relative_path: path,
+            is_dir: !path.includes('.'), fingerprint: 'fp-' + path
+          });
+          const references = [];
+          const adapter = new FileBrowserAdapter({
+            request: async (url, options) => {
+              if (url.startsWith('/api/files/meta')) {
+                const path = new URL(url, location.href).searchParams.get('path');
+                return meta(path);
+              }
+              if (url === '/api/v2/resources/reference') {
+                const body = JSON.parse(options.body);
+                references.push({root_key: body.root_key, relative_path: body.relative_path});
+                return body;
+              }
+              throw new Error('unexpected request ' + url);
+            }
+          });
+          const items = [
+            {root_key: 'downloads', relative_path: 'Media', is_dir: true, fingerprint: 'fp-Media'},
+            {root_key: 'downloads', relative_path: 'Media/Season1', is_dir: true, fingerprint: 'fp-Media/Season1'},
+            {root_key: 'downloads', relative_path: 'Media/Season1/episode01.mp4', is_dir: false, fingerprint: 'fp-Media/Season1/episode01.mp4'},
+            {root_key: 'downloads', relative_path: 'entry44.txt', is_dir: false, fingerprint: 'fp-entry44.txt'}
+          ];
+          const refs = await adapter.select(items, 'downloads');
+          return {paths: refs.map(ref => ref.relative_path), references};
+        }''')
+        assert result['paths'] == ['Media', 'entry44.txt']
+        assert result['references'] == [
+            {'root_key': 'downloads', 'relative_path': 'Media'},
+            {'root_key': 'downloads', 'relative_path': 'entry44.txt'},
+        ]
+        assert not errors
+    finally:
+        browser.close()
+        playwright.stop()
