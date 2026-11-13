@@ -157,6 +157,18 @@ def test_batch_episodes_manual_fix_and_duplicate_detection(setup):
     assert duplicate["manual_confirmation_count"] == 0
 
 
+def test_episode_offset_rule_applies_uniform_shift(setup):
+    service, root, _ = setup
+    for name in ("EP01.mkv", "EP02.mkv"):
+        (root / name).write_bytes(name.encode())
+    context = analyze(service, [service.files.reference("downloads", x) for x in ("EP01.mkv", "EP02.mkv")], manual_overrides={"selected_title": "Series"})
+    preview = service.preview(context, rules={"template_id": "series", "episode_mode": "offset", "episode_rules": {"offset": 3}})
+    assert "E04" in preview["operations"][0]["target_relative_path"]
+    assert "E05" in preview["operations"][1]["target_relative_path"]
+    assert preview["changed_count"] == 2
+    assert preview["conflict_count"] == 0
+
+
 def test_no_change_preview_keeps_target_and_is_not_applicable(setup):
     service, root, _ = setup
     name = "Film.2023.1080p.WEB-DL.H265.AAC-HDVWEB.mkv"

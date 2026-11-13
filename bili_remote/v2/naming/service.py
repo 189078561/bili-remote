@@ -320,9 +320,13 @@ class NamingService:
                     raise NamingError("invalid_manual_value", "人工名称无效")
             if "sidecars" in overrides and (not isinstance(overrides["sidecars"], list) or len(overrides["sidecars"]) > 1000):
                 raise NamingError("invalid_sidecar", "关联列表无效")
-            chosen_rules = {**{**current.get("effective_rules", {}).get("naming_rule", {}), "episode_rules": current.get("effective_rules", {}).get("episode_rules", {})}, **deepcopy(rules or {})}
-            from .memory import validate_naming_rule
-            validate_naming_rule(rules or {})
+            incoming = deepcopy(rules or {})
+            episode_rules = incoming.pop("episode_rules", None)
+            chosen_rules = {**{**current.get("effective_rules", {}).get("naming_rule", {}), "episode_rules": current.get("effective_rules", {}).get("episode_rules", {})}, **incoming}
+            from .memory import validate_naming_rule, validate_episode_rules
+            validate_naming_rule(incoming)
+            if episode_rules is not None:
+                chosen_rules["episode_rules"] = {**chosen_rules.get("episode_rules", {}), **validate_episode_rules(episode_rules)}
             validate_naming_rule({k: v for k, v in chosen_rules.items() if k != "episode_rules"})
             paths = [x["ref"]["relative_path"] for x in current["files"]]
             years = [_value((overrides.get("file_values") or {}).get(path, {}).get("year")) for path in paths if isinstance((overrides.get("file_values") or {}).get(path, {}), dict)]

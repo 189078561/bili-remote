@@ -116,32 +116,36 @@ def validate_memory_rules(rules):
         except SubtitleRuleError as exc:
             raise NamingError("invalid_memory_rule", str(exc), fields=["subtitle_rule"]) from exc
     if "episode_rules" in rules:
-        episodes = rules["episode_rules"]
-        _strict(episodes, EPISODE_FIELDS, "episode_rules")
-        for key in {"offset", "start", "step"} & episodes.keys():
-            if type(episodes[key]) is not int or abs(episodes[key]) > 100000 or key in {"start", "step"} and episodes[key] < 1:
-                raise NamingError("invalid_memory_rule", "季集规则数字无效")
-        if episodes.get("direction", "increment") not in {"increment", "decrement"}:
-            raise NamingError("invalid_memory_rule", "集数方向无效")
-        if not isinstance(episodes.get("overrides", {}), dict) or len(episodes.get("overrides", {})) > 1000:
-            raise NamingError("invalid_memory_rule", "逐集规则列表无效")
-        for source, item in episodes.get("overrides", {}).items():
-            _text(source, "overrides", 1000)
-            _episode_override(item)
-        mappings = episodes.get("mappings", [])
-        if not isinstance(mappings, list) or len(mappings) > 1000:
-            raise NamingError("invalid_memory_rule", "映射列表无效")
-        for mapping in mappings:
-            _strict(mapping, {"bili_season_id", "bili_ep_id", "bili_cid", "tmdb_id", "tmdb_season", "tmdb_episode", "method", "confirmed"}, "mappings")
-            if not mapping.get("bili_ep_id") and not mapping.get("bili_cid") or not re.fullmatch(r"[1-9]\d*", str(mapping.get("tmdb_id", ""))):
-                raise NamingError("invalid_memory_rule", "映射必须含来源集号和 TMDB 系列")
-            _episode_override({"season": mapping.get("tmdb_season"), "episode": mapping.get("tmdb_episode")})
-            for key in ("bili_season_id", "bili_ep_id", "bili_cid"):
-                if mapping.get(key) is not None and not re.fullmatch(r"[1-9]\d*", str(mapping[key])):
-                    raise NamingError("invalid_memory_rule", "来源 ID 无效")
-            if mapping.get("method") not in {"structured", "tmdb", "filename", "manual", "memory"} or type(mapping.get("confirmed")) is not bool:
-                raise NamingError("invalid_memory_rule", "映射来源或确认标记无效")
+        validate_episode_rules(rules["episode_rules"])
     return deepcopy(rules)
+
+
+def validate_episode_rules(episodes):
+    _strict(episodes, EPISODE_FIELDS, "episode_rules")
+    for key in {"offset", "start", "step"} & episodes.keys():
+        if type(episodes[key]) is not int or abs(episodes[key]) > 100000 or key in {"start", "step"} and episodes[key] < 1:
+            raise NamingError("invalid_memory_rule", "季集规则数字无效")
+    if episodes.get("direction", "increment") not in {"increment", "decrement"}:
+        raise NamingError("invalid_memory_rule", "集数方向无效")
+    if not isinstance(episodes.get("overrides", {}), dict) or len(episodes.get("overrides", {})) > 1000:
+        raise NamingError("invalid_memory_rule", "逐集规则列表无效")
+    for source, item in episodes.get("overrides", {}).items():
+        _text(source, "overrides", 1000)
+        _episode_override(item)
+    mappings = episodes.get("mappings", [])
+    if not isinstance(mappings, list) or len(mappings) > 1000:
+        raise NamingError("invalid_memory_rule", "映射列表无效")
+    for mapping in mappings:
+        _strict(mapping, {"bili_season_id", "bili_ep_id", "bili_cid", "tmdb_id", "tmdb_season", "tmdb_episode", "method", "confirmed"}, "mappings")
+        if not mapping.get("bili_ep_id") and not mapping.get("bili_cid") or not re.fullmatch(r"[1-9]\d*", str(mapping.get("tmdb_id", ""))):
+            raise NamingError("invalid_memory_rule", "映射必须含来源集号和 TMDB 系列")
+        _episode_override({"season": mapping.get("tmdb_season"), "episode": mapping.get("tmdb_episode")})
+        for key in ("bili_season_id", "bili_ep_id", "bili_cid"):
+            if mapping.get(key) is not None and not re.fullmatch(r"[1-9]\d*", str(mapping[key])):
+                raise NamingError("invalid_memory_rule", "来源 ID 无效")
+        if mapping.get("method") not in {"structured", "tmdb", "filename", "manual", "memory"} or type(mapping.get("confirmed")) is not bool:
+            raise NamingError("invalid_memory_rule", "映射来源或确认标记无效")
+    return deepcopy(episodes)
 
 
 def merge_layers(layers, manual=None):
