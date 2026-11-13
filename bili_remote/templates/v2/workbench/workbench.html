@@ -20,7 +20,11 @@
         </div>
         <div class="wb-name-controls">
           <label class="wb-title-control">选用名称<input data-wb="selected-title" placeholder="输入作品名称"></label>
+          <label>年份<input data-wb="year" type="number" min="1888" max="2100" step="1" placeholder="自动识别"></label>
           <label>季号<input data-wb="season" type="number" min="0" step="1"></label>
+          <label>分辨率<input data-wb="resolution" maxlength="20" placeholder="如 2160p" list="wb-resolutions"></label><datalist id="wb-resolutions"><option>2160p</option><option>1080p</option><option>1080i</option><option>720p</option><option>480p</option></datalist>
+          <label>视频编码<input data-wb="video-codec" maxlength="20" placeholder="H264" list="wb-video-codecs"></label><datalist id="wb-video-codecs"><option>H264</option><option>H265</option><option>AV1</option></datalist>
+          <label>音频编码<input data-wb="audio-codec" maxlength="20" placeholder="AAC" list="wb-audio-codecs"></label><datalist id="wb-audio-codecs"><option>AAC</option><option>AC3</option><option>EAC3</option><option>FLAC</option></datalist>
           <label>片源 · 规则值<input data-wb="source-rule" value="WEB-DL" maxlength="100" list="wb-sources"></label><datalist id="wb-sources"><option>WEB-DL</option><option>WEBRip</option><option>BluRay</option><option>Remux</option></datalist>
           <label>制作组<input data-wb="group-rule" value="HDVWEB" maxlength="100"></label>
           <label>集数规则<select data-wb="episode-mode"><option value="detected">识别 / 逐集修正</option><option value="start">从指定集号排序</option><option value="offset" disabled>统一偏移（待接入）</option></select></label>

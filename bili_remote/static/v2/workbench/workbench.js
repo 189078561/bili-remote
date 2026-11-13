@@ -66,6 +66,7 @@
         const name = event.target.dataset.edit;
         if (name) { this.fieldVersions[name] = (this.fieldVersions[name] || 0) + 1; this.dirty.add(name); this.setField(name, event.target.value); this.editVersion++; this.scheduleCompose(); }
         if (["naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode", "scope", "naming-type", "source-rule", "group-rule", "episode-mode", "start-episode", "episode-step", "episode-direction"].includes(event.target.dataset.wb)) this.scheduleAdjustment(event.target.dataset.wb);
+        if (["year", "resolution", "video-codec", "audio-codec"].includes(event.target.dataset.wb)) this.scheduleNamingOverride();
       }, opts);
       const imageControls=()=>{
         const collage=this.el('image-mode').value==='collage',percent=this.el('range-mode').value==='percent';
@@ -285,7 +286,7 @@
       this.images = []; this.artifacts = []; this.links = []; this.episodeOverrides = {}; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
       for (const field of Object.keys(this.fields)) this.setField(field, "");
       ["images", "reports", "torrents", "upload-links", "issues", "candidates", "media"].forEach(name => this.el(name).replaceChildren());
-      ["naming-rule", "subtitle-rule", "title-rule", "selected-title", "season", "episode"].forEach(name => this.el(name).value = "");
+      ["naming-rule", "subtitle-rule", "title-rule", "selected-title", "season", "episode", "year", "resolution", "video-codec", "audio-codec"].forEach(name => this.el(name).value = "");
       this.el("episode-mode").value = "detected";
       this.el("start-episode").value = "";
       this.el("episode-step").value = "1";
@@ -319,13 +320,28 @@
     namingOverrides() {
       const result = {};
       if (Object.keys(this.episodeOverrides).length) result.episode_overrides = {...this.episodeOverrides};
+      const fileValues = {};
+      const year = this.el("year").value.trim();
+      const resolution = this.el("resolution").value.trim();
+      const videoCodec = this.el("video-codec").value.trim();
+      const audioCodec = this.el("audio-codec").value.trim();
+      if (year !== "") {
+        if (!/^\d{4}$/.test(year)) throw new Error("年份须为四位数字，例如 2020");
+        fileValues.year = Number(year);
+      }
+      if (resolution !== "") fileValues.resolution = resolution;
+      if (videoCodec !== "") fileValues.video_codec = videoCodec;
+      if (audioCodec !== "") fileValues.audio_codec = audioCodec;
+      if (Object.keys(fileValues).length && this.context?.files?.length) {
+        result.file_values = Object.fromEntries(this.context.files.map(file => [file.ref.relative_path, {...fileValues}]));
+      }
       return result;
     }
     scheduleNamingOverride() {
       if (this.destroyed) return;
       this.cancelTimer(this.overrideTimer);
       this.invalidateRename();
-      this.overrideTimer = this.later(() => { if (this.context && !this.destroyed) this.naming(); }, 320);
+      this.overrideTimer = this.later(() => { if (this.context && !this.destroyed) this.naming().catch(error => this.notice(error.message, true)); }, 320);
     }
     async resolve(selection = null, manual_overrides = {}) {
       if (!this.resources.length) throw new Error("请先选择资源");
@@ -368,6 +384,9 @@
       const ctx = this.context; if (!ctx) return;
       this.el("context-summary").textContent = [val(ctx.selected_title) || "未确认影视身份", ctx.episode?.scope === "season" ? "整季" : "单集 / 单视频", `修订 ${ctx.revision}`, `${ctx.files?.length || 0} 个媒体文件`].join(" · ");
       this.el("selected-title").value = val(ctx.selected_title); this.el("season").value = val(ctx.episode?.season); this.el("episode").value = val(ctx.episode?.episode); this.el("scope").value = ctx.episode?.scope || this.el("scope").value;
+      const probeValue = key => { const values = (ctx.files || []).map(file => val(file.probe?.[key])); return values.length && values.every(value => value !== "" && String(value) === String(values[0])) ? values[0] : ""; };
+      const autofill = {year: val(ctx.metadata?.year), resolution: probeValue("resolution"), "video-codec": probeValue("video_codec"), "audio-codec": probeValue("audio_codec")};
+      for (const [name, value] of Object.entries(autofill)) if (value !== "" && this.el(name).value.trim() === "") this.el(name).value = value;
       this.el("issues").textContent = [...new Set([...(ctx.warnings || []), ...(ctx.conflicts || [])].map(x => x.message))].join("；");
       this.namingType = ctx.effective_rules?.naming_rule?.template_id || ctx.identity?.media_type || "movie";
       this.namingType = {anime_single:"anime",tv:"series"}[this.namingType] || this.namingType;
