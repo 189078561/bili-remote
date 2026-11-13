@@ -77,6 +77,7 @@
       for(const key of ['image-mode','image-columns','image-rows','range-mode'])this.el(key).addEventListener('input',imageControls,opts);
       imageControls();
       this.el("query").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); this.run("search", this.button("search")); } }, opts);
+      this.el("query-inline").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); this.run("search-inline", this.button("search-inline")); } }, opts);
       this.el("format").addEventListener("change", () => { this.editVersion++; this.scheduleCompose(); }, opts);
       this.el("title-choice").addEventListener("change", () => {
         const title = this.context?.titles?.find(item => item.id === this.el("title-choice").value);
@@ -196,7 +197,7 @@
       const epoch = this.epoch, pendingKey = `${epoch}:${action}`;
       this.pending.add(pendingKey); if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
       try {
-        const handlers = {resolve: () => this.resolve(), search: () => this.search(), overrides: () => this.resolve(null, this.overrides()), rules: () => this.applyRules(), naming: () => this.naming(), undo: () => this.showUndoPreview(), apply: () => this.applyRename(), title: () => this.generate("release_title", true), subtitle: () => this.generate("subtitle", true), probe: () => this.probe(), screenshots: () => this.screenshots(), report: () => this.report(), torrent: () => this.torrent(), upload: () => this.upload()};
+        const handlers = {resolve: () => this.resolve(), search: () => this.search(), "search-inline": () => this.searchInline(), overrides: () => this.resolve(null, this.overrides()), rules: () => this.applyRules(), naming: () => this.naming(), undo: () => this.showUndoPreview(), apply: () => this.applyRename(), title: () => this.generate("release_title", true), subtitle: () => this.generate("subtitle", true), probe: () => this.probe(), screenshots: () => this.screenshots(), report: () => this.report(), torrent: () => this.torrent(), upload: () => this.upload()};
         if (["rules", "naming"].includes(action) && this.pendingAdjustmentEpoch === this.epoch) await this.resolve(null, this.overrides());
         else await handlers[action]?.();
       } catch (error) { if (epoch === this.epoch) this.notice(error.message, true); }
@@ -211,6 +212,7 @@
       for (const action of ["report", "torrent"]) this.button(action).disabled = this.resources.length !== 1 || this.busy(action);
       this.button("upload").disabled = !this.images.length || this.busy("upload");
       this.button("search").disabled = this.busy("search");
+      this.button("search-inline").disabled = !this.resources.length || this.busy("search-inline");
       this.button("apply").disabled = !this.applyable() || this.busy("apply");
       this.button("undo").disabled = !this.renameBatch || this.busy("undo");
       this.host.querySelectorAll("[data-copy]").forEach(el => el.disabled = !(el.dataset.copy === "content" ? this.content : this.fields[el.dataset.copy]));
@@ -288,6 +290,8 @@
       this.el("start-episode").value = "";
       this.el("episode-step").value = "1";
       this.el("episode-direction").value = "increment";
+      this.el("candidates-inline").replaceChildren();
+      this.el("query-inline").value = resources[0].relative_path.split("/").at(-1).replace(/\.[^.]+$/, "").replace(/[._\-]+/g, " ").trim();
       this.el("scope").value = resources.some(item => item.kind === "directory") || resources.length > 1 ? "season" : "single";
       this.el("resource").textContent = `${resources.length} 项资源 · ${resources[0].relative_path.split("/").at(-1)}`;
       this.el("context-summary").textContent = "资料和参数尚未识别";
@@ -455,6 +459,21 @@
         const poster=safeURL(candidate.poster_url);if(candidate.poster_url&&poster){const image=node('img');image.alt='';image.src=poster;image.referrerPolicy='no-referrer';image.onerror=()=>image.remove();button.prepend(image);}
         button.type = "button"; button.disabled = !this.resources.length;
         button.onclick = () => this.withButton(button, async () => { const epoch = this.epoch; await this.resolve({provider: candidate.provider, id: String(candidate.id), media_type: candidate.media_type}); if (epoch === this.epoch && this.context?.identity) this.openPanel(null); }); container.append(button);
+      });
+    }
+    async searchInline() {
+      const query = this.el("query-inline").value.trim(); if (!query) throw new Error("请输入影视名称"); const current = this.stamp("search-inline"), text = query;
+      const result = await this.api.search(query, this.el("media-type-inline").value); if (!current() || text !== this.el("query-inline").value.trim()) return;
+      const container = this.el("candidates-inline"); container.replaceChildren();
+      if(result.warnings?.length) container.append(node('p',result.warnings.map(x=>x.message).join('；'),'wb-note'));
+      if (!result.items.length) container.append(node("p", "未找到候选，可以调整名称后重试。", "wb-note"));
+      result.items.forEach(candidate => {
+        const button = node("button", null, 'wb-candidate');
+        const info=node('span',null,'wb-candidate-copy');info.append(node('strong',candidate.title||candidate.name||candidate.id),node('small',[candidate.original_title,candidate.year,({movie:'电影',series:'剧集',anime:'动画'})[candidate.media_type],candidate.provider?`${candidate.provider.toUpperCase()} #${candidate.id}`:null].filter(Boolean).join(' · ')));button.append(info);
+        const poster=safeURL(candidate.poster_url);if(candidate.poster_url&&poster){const image=node('img');image.alt='';image.src=poster;image.referrerPolicy='no-referrer';image.onerror=()=>image.remove();button.prepend(image);}
+        button.type = "button"; button.disabled = !this.resources.length;
+        button.onclick = () => this.withButton(button, async () => { const epoch = this.epoch; await this.resolve({provider: candidate.provider, id: String(candidate.id), media_type: candidate.media_type}); if (epoch === this.epoch && this.context?.identity) this.openPanel(null); });
+        container.append(button);
       });
     }
     setField(name, value) {

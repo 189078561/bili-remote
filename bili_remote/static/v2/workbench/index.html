@@ -30,6 +30,12 @@
       </section>
       <section class="wb-naming" aria-labelledby="wb-name-heading">
         <div class="wb-section-heading"><h2 id="wb-name-heading">文件命名</h2><span class="wb-note" data-wb="season-summary"></span></div>
+        <div class="wb-naming-search">
+          <label>识别名称<input data-wb="query-inline" placeholder="自动填入文件名，可修改后搜索 TMDB / Bangumi" maxlength="200"></label>
+          <label>类型<select data-wb="media-type-inline"><option value="series">电视剧</option><option value="anime">动画</option><option value="movie">电影</option></select></label>
+          <button type="button" data-action="search-inline">搜索资料</button>
+          <div data-wb="candidates-inline" class="wb-candidates"></div>
+        </div>
         <div class="wb-name-controls">
           <label class="wb-title-control">选用名称<input data-wb="selected-title" placeholder="输入作品名称"></label>
           <label>季号<input data-wb="season" type="number" min="0" step="1"></label>
