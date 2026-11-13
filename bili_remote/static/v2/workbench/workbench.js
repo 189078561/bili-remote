@@ -18,7 +18,7 @@
       if (!host) throw new Error("工作台缺少挂载节点");
       this.host = host; this.api = api; this.FileBrowser = FileBrowser; this.pollInterval = pollInterval;
       this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
-      this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.previewKey = null; this.previewUndo = false; this.renameBatch = null; this.content = ""; this.images = []; this.artifacts = []; this.links = [];
+      this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.previewKey = null; this.previewUndo = false; this.renameBatch = null; this.episodeOverrides = {}; this.content = ""; this.images = []; this.artifacts = []; this.links = [];
       this.fieldVersions = {}; this.tasks = new Map(); this.jobs = new Map(); this.notified = new Set(); this.applied = new Set(); this.pending = new Set(); this.timers = new Set(); this.abort = new AbortController(); this.destroyed = false;
       this.listen(); this.setTab("content"); this.setupLayout();
     }
@@ -158,7 +158,14 @@
       else if (this.advancedPreview) this.el("adjustment-status").textContent = "高级预览已更新；请在命名详情中确认执行。";
       this.el("resource").title = this.resources.map(item => item.relative_path).join("\n");
       const first = this.el("rename-list").firstElementChild;
-      this.el("rename-summary").replaceChildren(...(first ? [...first.childNodes].map(child=>child.cloneNode(true)) : []));
+      let summary = null;
+      if (first) {
+        summary = node("div", null, "wb-rename-row");
+        const source = first.querySelector(".wb-rename-source")?.textContent || first.childNodes[0]?.textContent || "";
+        const target = first.querySelector(".wb-rename-target")?.textContent || first.childNodes[1]?.textContent || "";
+        summary.append(node("span", source, "wb-rename-source"), node("strong", target, "wb-rename-target"));
+      }
+      this.el("rename-summary").replaceChildren(...(summary ? [...summary.childNodes] : []));
       this.el("change-count").textContent = `查看 ${this.el("rename-list").children.length} 项变更`;
       this.el("naming-status").hidden = !!first && !this.el("rename").hidden;
       const resultRows = this.el("artifact-summary"); resultRows.replaceChildren();
@@ -273,7 +280,7 @@
       this.versions = {}; this.resources = resources; this.selectionSignature = selectedSignature;
       this.context = null; this.origins = origins; this.dirty.clear(); this.editVersion++;
       this.cancelTimer(this.composeTimer); this.contextChanged("selection");
-      this.images = []; this.artifacts = []; this.links = []; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
+      this.images = []; this.artifacts = []; this.links = []; this.episodeOverrides = {}; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
       for (const field of Object.keys(this.fields)) this.setField(field, "");
       ["images", "reports", "torrents", "upload-links", "issues", "candidates", "media"].forEach(name => this.el(name).replaceChildren());
       ["naming-rule", "subtitle-rule", "title-rule", "selected-title", "season", "episode"].forEach(name => this.el(name).value = "");
@@ -300,6 +307,17 @@
       }
       if (this.el("selected-title").value.trim()) result.selected_title = this.el("selected-title").value.trim();
       return result;
+    }
+    namingOverrides() {
+      const result = {};
+      if (Object.keys(this.episodeOverrides).length) result.episode_overrides = {...this.episodeOverrides};
+      return result;
+    }
+    scheduleNamingOverride() {
+      if (this.destroyed) return;
+      this.cancelTimer(this.overrideTimer);
+      this.invalidateRename();
+      this.overrideTimer = this.later(() => { if (this.context && !this.destroyed) this.naming(); }, 320);
     }
     async resolve(selection = null, manual_overrides = {}) {
       if (!this.resources.length) throw new Error("请先选择资源");
@@ -493,9 +511,29 @@
     }
     renderPreview(preview) {
       this.el("rename-list").replaceChildren();
+      const files = new Map((this.context?.files || []).map(file => [file.ref.relative_path, file]));
+      const editable = !preview.undo && this.context?.episode?.scope !== "single";
       for (const op of preview.operations || []) {
         const row = node("div", null, "wb-rename-row");
-        row.append(node("span", op.source.relative_path), node("strong", `→ ${op.target_relative_path}`));
+        row.append(node("span", op.source.relative_path, "wb-rename-source"), node("strong", `→ ${op.target_relative_path}`, "wb-rename-target"));
+        if (editable && !op.sidecar_of) {
+          const path = op.source.relative_path;
+          const file = files.get(path);
+          const label = node("label", null, "wb-rename-episode"); label.append(node("span", "集号"));
+          const input = node("input"); input.type = "number"; input.min = "1"; input.step = "1";
+          input.value = Object.prototype.hasOwnProperty.call(this.episodeOverrides, path) ? this.episodeOverrides[path] : val(file?.episode?.episode);
+          input.addEventListener("input", () => {
+            const raw = input.value.trim();
+            if (raw === "") delete this.episodeOverrides[path];
+            else {
+              const number = Number(raw);
+              if (!Number.isInteger(number) || number < 1) { this.notice("集号必须是正整数", true); return; }
+              this.episodeOverrides[path] = number;
+            }
+            this.scheduleNamingOverride();
+          });
+          label.append(input); row.append(label);
+        }
         this.el("rename-list").append(row);
       }
       const undo = !!preview.undo;
@@ -506,7 +544,7 @@
     async naming() {
       if (!this.context) return;
       const current = this.stamp("naming"), revision = this.context.revision;
-      const preview = await this.api.naming(this.context, {}, this.readRule("naming-rule", this.context.effective_rules?.naming_rule || {}));
+      const preview = await this.api.naming(this.context, this.namingOverrides(), this.readRule("naming-rule", this.context.effective_rules?.naming_rule || {}));
       if (!current() || this.context?.revision !== revision || preview.context_revision < revision) return;
       this.context = {...this.context, revision: preview.context_revision}; this.contextChanged();
       this.invalidateContent(); this.scheduleCompose();
