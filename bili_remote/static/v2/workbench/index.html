@@ -49,10 +49,11 @@
           <label>片源 · 规则值<input data-wb="source-rule" value="WEB-DL" maxlength="100" list="wb-sources"></label><datalist id="wb-sources"><option>WEB-DL</option><option>WEBRip</option><option>BluRay</option><option>Remux</option></datalist>
           <label>制作组<input data-wb="group-rule" value="HDVWEB" maxlength="100"></label>
           <label class="wb-template-control">命名模板<textarea data-wb="naming-rule" maxlength="500" rows="2" spellcheck="false" placeholder="留空使用当前类型的内置模板"></textarea></label>
-          <label>集数规则<select data-wb="episode-mode"><option value="detected">识别 / 逐集修正</option><option value="start">从指定集号排序</option><option value="offset" disabled>统一偏移（待接入）</option></select></label>
+          <label>集数规则<select data-wb="episode-mode"><option value="detected">识别 / 逐集修正</option><option value="start">从指定集号排序</option><option value="offset">统一偏移</option></select></label>
           <label>起始集号<input data-wb="start-episode" type="number" min="1" step="1"></label>
           <label>集数步长<input data-wb="episode-step" type="number" min="1" step="1"></label>
           <label>集数方向<select data-wb="episode-direction"><option value="increment">递增</option><option value="decrement">递减</option></select></label>
+          <label>集数偏移<input data-wb="episode-offset" type="number" min="-100000" max="100000" step="1" placeholder="如 3"></label>
         </div>
         <div class="wb-naming-result">
           <p data-wb="naming-status" class="wb-note">选择资源后显示目标文件名。预览不会修改文件。</p>

@@ -65,7 +65,7 @@
       this.host.addEventListener("input", event => {
         const name = event.target.dataset.edit;
         if (name) { this.fieldVersions[name] = (this.fieldVersions[name] || 0) + 1; this.dirty.add(name); this.setField(name, event.target.value); this.editVersion++; this.scheduleCompose(); }
-        if (["naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode", "scope", "naming-type", "source-rule", "group-rule", "episode-mode", "start-episode", "episode-step", "episode-direction"].includes(event.target.dataset.wb)) this.scheduleAdjustment(event.target.dataset.wb);
+        if (["naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode", "scope", "naming-type", "source-rule", "group-rule", "episode-mode", "start-episode", "episode-step", "episode-direction", "episode-offset"].includes(event.target.dataset.wb)) this.scheduleAdjustment(event.target.dataset.wb);
         if (["year", "resolution", "video-codec", "audio-codec"].includes(event.target.dataset.wb)) this.scheduleNamingOverride();
       }, opts);
       const imageControls=()=>{
@@ -125,7 +125,7 @@
         this.el("naming-rule").value = this.context?.effective_rules?.naming_rule?.templates?.[this.namingType] || "";
       }
       if (["selected-title","season","episode","scope"].includes(field)) this.pendingAdjustmentEpoch = this.epoch;
-      if (["naming-rule","subtitle-rule","title-rule","cast-limit","naming-type","source-rule","group-rule","episode-mode","start-episode","episode-step","episode-direction"].includes(field)) this.rememberRules();
+      if (["naming-rule","subtitle-rule","title-rule","cast-limit","naming-type","source-rule","group-rule","episode-mode","start-episode","episode-step","episode-direction","episode-offset"].includes(field)) this.rememberRules();
       this.invalidateRename(); this.versions.context = (this.versions.context || 0) + 1;
       const ticket = this.adjustmentVersion = (this.adjustmentVersion || 0) + 1, epoch = this.epoch;
       this.contextChanged(); // Also invalidates in-flight advanced naming requests.
@@ -316,6 +316,7 @@
       this.el("start-episode").value = "";
       this.el("episode-step").value = "1";
       this.el("episode-direction").value = "increment";
+      this.el("episode-offset").value = "";
       this.el("naming-type").value = "movie";
       this.namingType = "movie";
       this.el("candidates-inline").replaceChildren();
@@ -438,6 +439,7 @@
       this.el("start-episode").value = batch.start_episode ?? 1;
       this.el("episode-step").value = batch.episode_step ?? 1;
       this.el("episode-direction").value = batch.episode_direction || "increment";
+      this.el("episode-offset").value = ctx.effective_rules?.episode_rules?.offset ?? "";
       this.el("subtitle-rule").value = ctx.effective_rules?.subtitle_rule?.template_id || "";
       this.el("cast-limit").value = String(ctx.effective_rules?.subtitle_rule?.cast_limit || 3);
       if (!this.dirty.has("overview")) this.setField("overview", val(ctx.metadata?.overview));
@@ -469,10 +471,18 @@
         const startEpisode = this.el("start-episode").value.trim();
         const episodeStep = this.el("episode-step").value.trim();
         const episodeDirection = this.el("episode-direction").value || rule.episode_direction || "increment";
+        const episodeOffset = this.el("episode-offset").value.trim();
+        const episodeRules = {};
+        if (episodeMode === "offset") {
+          const offset = episodeOffset === "" ? 0 : Number(episodeOffset);
+          if (!Number.isInteger(offset) || Math.abs(offset) > 100000) throw new Error("集数偏移必须是整数，且绝对值不超过 100000");
+          episodeRules.offset = offset;
+        }
         return {...rule, ...values, template_id:kind, templates, episode_mode: episodeMode,
           start_episode: startEpisode === "" ? (rule.start_episode ?? 1) : Number(startEpisode),
           episode_step: episodeStep === "" ? (rule.episode_step ?? 1) : Number(episodeStep),
-          episode_direction: episodeDirection};
+          episode_direction: episodeDirection,
+          ...(Object.keys(episodeRules).length ? {episode_rules: episodeRules} : {})};
       }
       const rule = this.context?.effective_rules?.subtitle_rule || fallback;
       return {...rule, ...(raw ? {template_id: raw} : {}), cast_limit: this.el("cast-limit").value === "all" ? "all" : Number(this.el("cast-limit").value)};
