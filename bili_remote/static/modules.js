@@ -196,15 +196,13 @@
         api("/api/tasks?limit=100"),
         api("/api/uploads?limit=100"),
         api("/api/release-info?limit=100"),
-        api("/api/torrents?limit=100"),
-        api("/api/qbittorrent/status")
+        api("/api/torrents?limit=100")
       ]);
-      const [tasksResult, uploadsResult, releasesResult, torrentsResult, qbitResult] = results;
+      const [tasksResult, uploadsResult, releasesResult, torrentsResult] = results;
       const tasks = tasksResult.status === "fulfilled" ? tasksResult.value : [];
       const uploads = uploadsResult.status === "fulfilled" ? uploadsResult.value.items || [] : [];
       const releases = releasesResult.status === "fulfilled" ? releasesResult.value.items || [] : [];
       const torrents = torrentsResult.status === "fulfilled" ? torrentsResult.value.items || [] : [];
-      const qbit = qbitResult.status === "fulfilled" ? qbitResult.value : {configured: false};
       const running = tasks.filter(task => ["running", "queued"].includes(task.status)).length;
       const failed = tasks.filter(task => task.status === "failed").length;
       const uploaded = uploads.filter(item => item.status === "completed").length;
@@ -212,7 +210,7 @@
         summaryCard("后台任务", tasksResult.status === "fulfilled" ? String(running) : "读取失败", tasksResult.status === "fulfilled" ? (failed ? `${failed} 个失败任务` : "没有失败任务") : tasksResult.reason.message, "files"),
         summaryCard("图床上传", uploadsResult.status === "fulfilled" ? String(uploaded) : "读取失败", uploadsResult.status === "fulfilled" ? `${uploads.length} 条最近上传记录` : uploadsResult.reason.message, "uploads"),
         summaryCard("媒体报告", releasesResult.status === "fulfilled" ? String(releases.length) : "读取失败", releasesResult.status === "fulfilled" ? "可复用的原始报告与描述" : releasesResult.reason.message, "release-info"),
-        summaryCard("种子", torrentsResult.status === "fulfilled" ? String(torrents.length) : "读取失败", torrentsResult.status !== "fulfilled" ? torrentsResult.reason.message : qbit.configured ? "qBittorrent 已配置" : "qBittorrent 未配置", "torrents")
+        summaryCard("种子", torrentsResult.status === "fulfilled" ? String(torrents.length) : "读取失败", torrentsResult.status === "fulfilled" ? "本地生成的种子文件" : torrentsResult.reason.message, "torrents")
       ];
       host.replaceChildren(...cards);
     } finally {
@@ -634,7 +632,7 @@
     }
   }
 
-  // Torrents and qBittorrent -------------------------------------
+  // Torrents ------------------------------------------------------
   async function selectTorrentSource() {
     try {
       const selected = await pickOne({
@@ -651,19 +649,6 @@
       message("torrent-message", "已选择种子源，确认参数后生成种子。", "success");
     } catch (error) {
       message("torrent-message", error.message);
-    }
-  }
-
-  async function loadQbittorrentStatus() {
-    const host = byId("qbit-status");
-    if (!host) return;
-    try {
-      const status = await api("/api/qbittorrent/status");
-      host.replaceChildren();
-      host.append(node("span", status.configured ? "status-pill completed" : "status-pill", status.configured ? "已配置" : "未配置"));
-      host.append(node("span", "muted", status.url || "请在设置中配置 qBittorrent Web API 地址与账号"));
-    } catch (error) {
-      host.replaceChildren(empty(error.message));
     }
   }
 
@@ -698,23 +683,6 @@
       const download = node("a", "button ghost small", "下载 .torrent");
       download.href = build.download_url || `/api/torrents/${build.id}/file`;
       actions.push(download);
-      const add = button("添加到 qBittorrent", "button secondary small");
-      add.addEventListener("click", async () => {
-        busy(add, true);
-        try {
-          await api("/api/qbittorrent/torrents", {
-            method: "POST",
-            body: JSON.stringify({torrent_build_id: build.id})
-          });
-          message("qbit-message", `已添加：${build.name}`, "success");
-          await loadQbittorrentTorrents();
-        } catch (error) {
-          message("qbit-message", error.message);
-        } finally {
-          busy(add, false);
-        }
-      });
-      actions.push(add);
       const use = button("用于 PT 发布"); use.addEventListener("click",()=>ToolUI.useInPublish("torrent",build)); actions.push(use);
       host.append(recordCard({
         title: build.name || `种子 #${build.id}`,
@@ -766,54 +734,6 @@
     }
   }
 
-  async function testQbittorrent() {
-    const target = byId("qbit-test");
-    busy(target, true);
-    try {
-      const result = await api("/api/qbittorrent/test", {method: "POST"});
-      message("qbit-message", `连接成功 · qBittorrent ${result.version || "未知版本"}`, "success");
-    } catch (error) {
-      message("qbit-message", error.message);
-    } finally {
-      busy(target, false);
-    }
-  }
-
-  async function loadQbittorrentTorrents() {
-    const target = byId("qbit-refresh");
-    const host = byId("qbit-list");
-    busy(target, true);
-    try {
-      const result = await api("/api/qbittorrent/torrents?limit=100");
-      const items = result.items || [];
-      if (!items.length) {
-        host.replaceChildren(empty("qBittorrent 中没有任务。"));
-        return;
-      }
-      host.replaceChildren();
-      for (const item of items) {
-        const progress = Math.max(0, Math.min(100, Number(item.progress || 0) * 100));
-        const body = node("div", "qbit-progress");
-        const bar = node("progress");
-        bar.max = 100;
-        bar.value = progress;
-        body.append(bar, node("span", "muted", `${progress.toFixed(1)}% · ${item.state || "未知状态"}`));
-        host.append(recordCard({
-          title: item.name || "未命名任务",
-          meta: [`${formatBytes(item.size)} · ↓ ${formatBytes(item.dlspeed)}/s · ↑ ${formatBytes(item.upspeed)}/s`],
-          status: item.state === "error" ? "failed" : item.progress >= 1 ? "completed" : "running",
-          body
-        }));
-      }
-      message("qbit-message", `已读取 ${items.length} 个 qBittorrent 任务`, "success");
-    } catch (error) {
-      host.replaceChildren(empty(error.message));
-      message("qbit-message", error.message);
-    } finally {
-      busy(target, false);
-    }
-  }
-
   // Publishing ----------------------------------------------------
   function publishSourcePayload() {
     return state.publishSource ? {source_root_key:state.publishSource.root_key,source_relative_path:state.publishSource.relative_path} : {};
@@ -841,7 +761,6 @@
     });
     for(const key of ["category","quality","release-select","torrent-select","poster_upload_id"]) byId(`publish-${key}`).value="";
     ToolUI.selectPublishReport(null);
-    byId("publish-qbit").disabled=true;
     byId("publish-output-title").textContent="发布内容";
     byId("publish-warnings").replaceChildren();
     state.publishDirty=false;
@@ -976,7 +895,6 @@
     for (const item of record.warnings || []) warnings.append(node("p", (record.metadata?.checks?.errors || []).includes(item) ? "form-error" : "muted", item));
     renderPublishFormat();
     byId("publish-update").disabled = false;
-    byId("publish-qbit").disabled = !record.torrent_build_id;
   }
 
   function renderPublishFormat() {
@@ -1000,7 +918,7 @@
       });
       if(version !== state.publishVersion) return;
       showPublish(record,editVersion !== state.publishEditVersion);
-      message("publish-message", "发布内容已生成，请检查后再复制或添加到 qBittorrent。", "success");
+      message("publish-message", "发布内容已生成，请检查后再复制。", "success");
       await loadPublishSessions();
     } catch (error) {
       message("publish-message", error.message);
@@ -1031,21 +949,6 @@
     }
   }
 
-  async function addPublishToQbittorrent() {
-    if (!state.currentPublish) return;
-    const target = byId("publish-qbit");
-    busy(target, true);
-    try {
-      await api(`/api/publish/sessions/${state.currentPublish.id}/qbittorrent`, {method: "POST"});
-      message("publish-message", "关联种子已添加到 qBittorrent。", "success");
-      await loadPublishSessions();
-    } catch (error) {
-      message("publish-message", error.message);
-    } finally {
-      busy(target, false);
-    }
-  }
-
   async function loadPublishSessions() {
     const host = byId("publish-list");
     if (!host) return;
@@ -1064,7 +967,7 @@
           title: session.title || `发布辅助 #${session.id}`,
           meta: [
             `${session.image_upload_ids?.length || 0} 张图片 · ${session.torrent_build_id ? "已关联种子" : "未关联种子"}`,
-            `qBittorrent：${session.qbittorrent_status || "未操作"} · ${formatTime(session.updated_at)}`
+            `更新于 ${formatTime(session.updated_at)}`
           ],
           status: session.status,
           actions: [open]
@@ -1138,7 +1041,6 @@
       else if (view === "release-info") loadReleaseDocuments();
       else if (view === "torrents") {
         loadTorrentBuilds();
-        loadQbittorrentStatus();
       } else if (view === "publish" && !window.BILI_V2) {
         loadPublishSources();
         loadPublishSessions();
@@ -1188,8 +1090,6 @@
     ));
     byId("torrent-create")?.addEventListener("click", createTorrent);
     byId("torrent-refresh")?.addEventListener("click", loadTorrentBuilds);
-    byId("qbit-test")?.addEventListener("click", testQbittorrent);
-    byId("qbit-refresh")?.addEventListener("click", loadQbittorrentTorrents);
   }
 
   function wirePublish() {
@@ -1212,7 +1112,6 @@
     });
     byId("publish-create")?.addEventListener("click", createPublish);
     byId("publish-update")?.addEventListener("click", updatePublish);
-    byId("publish-qbit")?.addEventListener("click", addPublishToQbittorrent);
     byId("publish-format-select")?.addEventListener("change", renderPublishFormat);
     byId("publish-copy")?.addEventListener("click", async () => {
       try {
@@ -1259,7 +1158,7 @@
   document.addEventListener("file-tool:open",event=>{
     if(event.detail.kind === "uploads") loadUploads();
     if(event.detail.kind === "release-info") loadReleaseDocuments();
-    if(event.detail.kind === "torrents") {loadTorrentBuilds();loadQbittorrentStatus();}
+    if(event.detail.kind === "torrents") loadTorrentBuilds();
   });
   async function runFileTool(kind,items,rootKey) {
     const sources=items.map(item=>({...item,root_key:item.root_key || rootKey}));

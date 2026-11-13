@@ -477,12 +477,6 @@
       link.download = "";
       card.append(
         link,
-        action("添加到 qBittorrent", async () => {
-          await post("/api/qbittorrent/torrents", {
-            torrent_build_id: record.id,
-          });
-          notify("已添加到 qBittorrent");
-        }),
       );
       host.append(card);
     }

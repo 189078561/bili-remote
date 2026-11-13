@@ -8,7 +8,6 @@ from typing import Any
 
 from .database import Database
 from .file_service import FileServiceError
-from .qbittorrent import QbittorrentError, QbittorrentService
 from .torrents import TorrentError, TorrentService
 
 
@@ -31,10 +30,8 @@ def release_title(fields):
 
 
 class PublishService:
-    def __init__(
-        self, database: Database, torrents: TorrentService, qbittorrent: QbittorrentService
-    ):
-        self.database, self.torrents, self.qbittorrent = database, torrents, qbittorrent
+    def __init__(self, database: Database, torrents: TorrentService):
+        self.database, self.torrents = database, torrents
 
     def _reports(self, document, selected):
         media = (document or {}).get("media") or {}
@@ -305,27 +302,3 @@ class PublishService:
 
     def list_sessions(self, *, limit=100, offset=0):
         return self.database.list_publish_sessions(limit=limit, offset=offset)
-
-    def add_to_qbittorrent(self, session_id: int) -> dict[str, Any]:
-        session = self.database.get_publish_session(session_id)
-        if session is None:
-            raise PublishError("发布辅助会话不存在")
-        torrent_id = session.get("torrent_build_id")
-        if not torrent_id:
-            raise PublishError("当前发布辅助会话尚未关联种子")
-        try:
-            path = self.torrents.file_path(int(torrent_id))
-            result = self.qbittorrent.add_torrent(path)
-        except (TorrentError, QbittorrentError) as exc:
-            self.database.update_publish_session(
-                session_id,
-                qbittorrent_status="failed",
-                qbittorrent_error=str(exc)[:1000],
-            )
-            raise
-        self.database.update_publish_session(
-            session_id,
-            qbittorrent_status="added",
-            qbittorrent_error=None,
-        )
-        return result

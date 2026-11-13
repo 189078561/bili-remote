@@ -198,17 +198,6 @@ def _size(value: Any, definition: SettingDefinition) -> str:
     return text
 
 
-def _optional_http_url(value: Any, definition: SettingDefinition) -> str:
-    text = str(value or "").strip().rstrip("/")
-    if not text:
-        return ""
-    if len(text) > 500 or not re.fullmatch(r"https?://[^\s/]+(?:/[^\s]*)?", text):
-        raise ValidationError(f"{definition.label}必须是 http:// 或 https:// 地址")
-    if "@" in text.split("://", 1)[-1].split("/", 1)[0]:
-        raise ValidationError(f"{definition.label}不能包含账号信息")
-    return text
-
-
 def _trackers(value: Any, definition: SettingDefinition) -> list[str]:
     if value is None:
         return []
@@ -896,8 +885,8 @@ IMAGE_HOST_GROUP = SettingGroup(
 
 TORRENT_GROUP = SettingGroup(
     "torrents",
-    "种子与 qBittorrent",
-    "配置本地种子生成默认值和 qBittorrent Web API 连接；连接密码只加密保存在服务端。",
+    "种子制作",
+    "配置本地种子文件生成的默认参数。",
     (
         SettingSection(
             "torrent_defaults",
@@ -935,70 +924,6 @@ TORRENT_GROUP = SettingGroup(
                     "",
                     "可选，写入种子 info.source；留空表示不设置。",
                     placeholder="例如 BiliRemote",
-                ),
-            ),
-        ),
-        SettingSection(
-            "qbittorrent",
-            "qBittorrent 连接",
-            "使用 qBittorrent Web API。保存后可先测试连接，再把生成的种子添加到分类中。",
-            (
-                SettingDefinition(
-                    "qbittorrent_url",
-                    "Web API 地址",
-                    "text",
-                    "",
-                    "例如 http://127.0.0.1:8080；不要填写账号密码。",
-                    validator=_optional_http_url,
-                    placeholder="http://host:8080",
-                ),
-                SettingDefinition(
-                    "qbittorrent_username",
-                    "用户名",
-                    "text",
-                    "",
-                    "qBittorrent Web UI 用户名。",
-                ),
-                SettingDefinition(
-                    "qbittorrent_password",
-                    "密码",
-                    "password",
-                    "",
-                    "只用于服务端登录；留空不会覆盖已保存值。",
-                    sensitive=True,
-                    validator=_optional_secret,
-                    placeholder="已保存时留空保持不变",
-                ),
-                SettingDefinition(
-                    "qbittorrent_category",
-                    "默认分类",
-                    "text",
-                    "bili-remote",
-                    "添加种子时使用；留空表示不指定分类。",
-                ),
-                SettingDefinition(
-                    "qbittorrent_save_path",
-                    "保存路径",
-                    "text",
-                    "",
-                    "qBittorrent 所在主机可访问的路径；留空使用其默认下载目录。",
-                ),
-                SettingDefinition(
-                    "qbittorrent_paused",
-                    "添加后暂停",
-                    "switch",
-                    False,
-                    "开启时种子会以暂停状态加入 qBittorrent。",
-                ),
-                SettingDefinition(
-                    "qbittorrent_timeout_seconds",
-                    "连接超时（秒）",
-                    "number",
-                    15,
-                    "测试连接和添加种子的最长等待时间。",
-                    minimum=3,
-                    maximum=120,
-                    step=1,
                 ),
             ),
         ),
@@ -1077,7 +1002,6 @@ MAINTENANCE_GROUP = SettingGroup(
                 ),
                 SettingDefinition("mediainfo_status", "MediaInfo", "readonly", read_only=True),
                 SettingDefinition("bdinfo_status", "BDInfo", "readonly", read_only=True),
-                SettingDefinition("qbittorrent_status", "qBittorrent", "readonly", read_only=True),
                 SettingDefinition("aria2_status", "aria2c", "readonly", read_only=True),
                 SettingDefinition("timezone", "时区", "readonly", read_only=True),
                 SettingDefinition("mount_paths", "挂载路径", "readonly", read_only=True),

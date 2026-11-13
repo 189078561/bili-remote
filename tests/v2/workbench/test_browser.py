@@ -181,19 +181,8 @@ def test_real_browser_unconfigured_metadata_is_honest(live_server):
 def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
     base_url, app = live_server
     from test_release_tools import FakeImageClient
-    import httpx
     fake_upload = FakeImageClient()
     app.state.services.image_hosts._client_factory = lambda *_: fake_upload
-    qbit_calls = []
-    def qbit(request):
-        qbit_calls.append(request.url.path)
-        if request.url.path.endswith('/auth/login'):
-            return httpx.Response(200, text='Ok.', headers={'set-cookie': 'SID=synthetic-session; path=/'})
-        if request.url.path.endswith('/torrents/add'):
-            return httpx.Response(200, text='Ok.')
-        return httpx.Response(404)
-    app.state.services.qbittorrent._client_factory = lambda url, timeout: httpx.Client(base_url=url, timeout=timeout, transport=httpx.MockTransport(qbit))
-    app.state.services.database.update_settings({'qbittorrent_url': 'http://qbit.test', 'qbittorrent_username': 'test-admin'})
     path = app.state.services.settings.download_root / 'Media' / 'episode01.mp4'
     subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24', '-t', '3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', str(path)], check=True)
     playwright, browser, page, errors = browser_session(base_url)
@@ -249,9 +238,7 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         with page.expect_download() as pending:
             page.get_by_role('link', name='下载种子').click()
         assert pending.value.suggested_filename.endswith('.torrent')
-        page.get_by_role('button', name='添加到 qBittorrent', exact=True).click()
-        expect(page.locator('[data-wb="notices"]')).to_contain_text('种子已提交到 qBittorrent')
-        assert '/api/v2/torrents/add' in qbit_calls
+        assert page.get_by_role('button', name='添加到 qBittorrent', exact=True).count() == 0
         show_panel(page, 'content')
         expect(page.locator('[data-wb="output"]')).to_contain_text('Synthetic Tool Flow')
         expect(page.locator('[data-wb="output"]')).to_contain_text('Synthetic overview')

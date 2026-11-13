@@ -36,7 +36,6 @@ from .integrations import integration_status
 from .naming import NamingError, create_preview
 from .processing import task_log_content
 from .publishing import PublishError
-from .qbittorrent import QbittorrentError
 from .release_info import ReleaseInfoError
 from .screenshots import ScreenshotConflictError, ScreenshotError
 from .security import SessionData
@@ -680,11 +679,6 @@ class PTGenRequest(BaseModel):
     url: str = Field(max_length=500)
 
 
-class QbittorrentTorrentRequest(BaseModel):
-    torrent_build_id: int = Field(ge=1)
-    category: str | None = Field(default=None, max_length=120)
-
-
 def create_app(settings: Settings | None = None) -> FastAPI:
     services = Services.build(settings or Settings.from_env())
     app_settings = services.settings
@@ -762,10 +756,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(ImageHostError)
     async def image_host_error_handler(_: Request, exc: ImageHostError) -> JSONResponse:
-        return JSONResponse(status_code=502, content={"detail": str(exc)})
-
-    @app.exception_handler(QbittorrentError)
-    async def qbittorrent_error_handler(_: Request, exc: QbittorrentError) -> JSONResponse:
         return JSONResponse(status_code=502, content={"detail": str(exc)})
 
     @app.exception_handler(TorrentError)
@@ -1906,45 +1896,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
         )
 
-    @app.get("/api/qbittorrent/status")
-    async def qbittorrent_status(
-        _: SessionData = Depends(get_session),
-        service_container: Services = Depends(get_services),
-    ) -> dict[str, Any]:
-        return service_container.qbittorrent.status()
-
-    @app.post("/api/qbittorrent/test")
-    async def test_qbittorrent(
-        _: SessionData = Depends(require_csrf),
-        service_container: Services = Depends(get_services),
-    ) -> dict[str, Any]:
-        return await asyncio.to_thread(service_container.qbittorrent.test_connection)
-
-    @app.get("/api/qbittorrent/torrents")
-    async def list_qbittorrent_torrents(
-        limit: int = Query(default=100, ge=1, le=500),
-        _: SessionData = Depends(get_session),
-        service_container: Services = Depends(get_services),
-    ) -> dict[str, Any]:
-        return {
-            "items": await asyncio.to_thread(
-                service_container.qbittorrent.list_torrents, limit=limit
-            )
-        }
-
-    @app.post("/api/qbittorrent/torrents")
-    async def add_qbittorrent_torrent(
-        payload: QbittorrentTorrentRequest,
-        _: SessionData = Depends(require_csrf),
-        service_container: Services = Depends(get_services),
-    ) -> dict[str, Any]:
-        path = service_container.torrents.file_path(payload.torrent_build_id)
-        return await asyncio.to_thread(
-            service_container.qbittorrent.add_torrent,
-            path,
-            category=payload.category,
-        )
-
     @app.get("/api/publish/sessions")
     async def list_publish_sessions(
         limit: int = Query(default=100, ge=1, le=500),
@@ -1978,14 +1929,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         service_container: Services = Depends(get_services),
     ) -> dict[str, Any]:
         return service_container.publishing.update(session_id, payload.model_dump())
-
-    @app.post("/api/publish/sessions/{session_id}/qbittorrent")
-    async def add_publish_session_to_qbittorrent(
-        session_id: int,
-        _: SessionData = Depends(require_csrf),
-        service_container: Services = Depends(get_services),
-    ) -> dict[str, Any]:
-        return await asyncio.to_thread(service_container.publishing.add_to_qbittorrent, session_id)
 
     @app.get("/api/media/search")
     async def search_media(
@@ -2661,7 +2604,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         collage_status = service_container.collage.status()
         release_tools = service_container.release_info.status()
-        qbittorrent = service_container.qbittorrent.status()
         return {
             "ytdlp_version": runtime.ytdlp_version,
             "ffprobe_status": ffprobe_status,
@@ -2670,7 +2612,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "screenshot_render_status": render_status(service_container),
             "mediainfo_status": "可用" if release_tools["mediainfo"] else "未检测到",
             "bdinfo_status": "可用" if release_tools["bdinfo"] else "未检测到",
-            "qbittorrent_status": ("已配置" if qbittorrent["configured"] else "未配置"),
             "aria2_status": aria2_status,
             "timezone": runtime.timezone,
             "mount_paths": " · ".join(
@@ -2710,9 +2651,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "ytdlp_version": values.get("ytdlp_version"),
             "log_retention_days": values.get("log_retention_days"),
             "secrets_configured": {
-                ("qbittorrent_credentials" if key == "qbittorrent_password" else key): bool(
-                    stored.get(key)
-                )
+                key: bool(stored.get(key))
                 for key in SECRET_SETTING_KEYS
             },
             "values": values,

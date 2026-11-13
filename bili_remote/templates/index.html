@@ -299,11 +299,11 @@
           <button id="screenshot-sessions-button" class="button ghost small" type="button">缩略图记录</button>
           <button class="button ghost small" type="button" data-file-tool="release-info">媒体报告</button>
           <button class="button ghost small" type="button" data-file-tool="uploads">上传记录</button>
-          <button class="button ghost small" type="button" data-file-tool="torrents">种子与 qBittorrent</button>
+          <button class="button ghost small" type="button" data-file-tool="torrents">本地种子</button>
         </div></details>
         {% else %}
         <button id="screenshot-sessions-button" class="button secondary small" type="button">缩略图记录</button>
-        <details class="file-history-menu"><summary class="button ghost small">工具记录</summary><div class="file-history-items"><button class="button ghost small" type="button" data-file-tool="release-info">媒体报告</button><button class="button ghost small" type="button" data-file-tool="uploads">上传记录</button><button class="button ghost small" type="button" data-file-tool="torrents">种子与 qBittorrent</button></div></details>
+        <details class="file-history-menu"><summary class="button ghost small">工具记录</summary><div class="file-history-items"><button class="button ghost small" type="button" data-file-tool="release-info">媒体报告</button><button class="button ghost small" type="button" data-file-tool="uploads">上传记录</button><button class="button ghost small" type="button" data-file-tool="torrents">本地种子</button></div></details>
         {% endif %}
         <button id="file-refresh-button" class="button ghost small" type="button">刷新当前目录</button>
       </div>
@@ -397,8 +397,8 @@
     <section class="files-header">
       <div>
         <p class="eyebrow">TORRENT TOOLS</p>
-        <h2>种子与 qBittorrent</h2>
-        <p class="muted">本地真实生成 .torrent 文件，并与 qBittorrent 添加操作明确区分。</p>
+        <h2>本地种子制作</h2>
+        <p class="muted">从当前资源直接生成并下载 .torrent 文件。</p>
       </div>
       <div class="button-row">
         <button id="torrent-source-select" class="button secondary small" type="button">选择文件或目录</button>
@@ -423,18 +423,6 @@
         <button id="torrent-create" class="button primary" type="button">生成种子文件</button>
       </div>
       <p id="torrent-message" class="form-error" role="status" aria-live="polite"></p>
-    </section>
-    <section class="card">
-      <div class="card-heading">
-        <div><p class="eyebrow">QBITTORRENT</p><h2>qBittorrent 连接</h2></div>
-        <div class="button-row">
-          <button id="qbit-test" class="button secondary small" type="button">测试连接</button>
-          <button id="qbit-refresh" class="button ghost small" type="button">读取任务</button>
-        </div>
-      </div>
-      <div id="qbit-status" class="module-status-row"><span class="muted">正在读取 qBittorrent 配置…</span></div>
-      <div id="qbit-message" class="form-error" role="status" aria-live="polite"></div>
-      <div id="qbit-list" class="module-list"></div>
     </section>
     <section class="card">
       <div class="card-heading"><div><p class="eyebrow">BUILDS</p><h2>已生成种子</h2></div><button id="torrent-refresh" class="button ghost small" type="button">刷新</button></div>
@@ -469,7 +457,7 @@
         </div></details>
         <details class="assistant-panel"><summary>图床上传</summary><div class="panel-body"><label class="assistant-field">使用图床<select id="assistant-provider"><option value="">设置中的默认图床</option><option value="pixhost">Pixhost</option><option value="catbox">Catbox</option><option value="imgbb">ImgBB</option></select></label><p class="muted">上传当前完整缩略图，结果中直接复制 URL 和 BBCode。</p><button type="button" class="button secondary" id="assistant-upload-selected">上传所选图片</button><button type="button" class="button ghost small" data-open-settings>图床设置</button></div></details>
         <details class="assistant-panel"><summary>发布信息</summary><div class="panel-body"><p class="muted">结合媒体信息和 TMDB 生成内容；手动编辑的字段会保留。</p><button id="assistant-compose" type="button" class="button secondary">生成发布信息</button><button id="assistant-save" type="button" class="button ghost small">保存发布草稿</button><details class="assistant-advanced"><summary>其他发布工具</summary><div class="button-row"><button type="button" id="assistant-legacy-open" class="button ghost small">完整发布编辑器</button><button type="button" data-assistant-tool="release-info" class="button ghost small">MediaInfo / BDInfo</button><button type="button" data-assistant-tool="uploads" class="button ghost small">上传记录</button><button type="button" id="assistant-rename" class="button ghost small">批量重命名</button></div></details></div></details>
-        <details class="assistant-panel"><summary>种子制作</summary><div class="panel-body"><label>Tracker（每行一个）<textarea id="assistant-trackers" rows="2" placeholder="留空使用全局设置"></textarea></label><label class="inline-check"><input id="assistant-private" type="checkbox" checked>私有种子</label><button id="assistant-torrent" type="button" class="button secondary">制作种子</button><button type="button" data-assistant-tool="torrents" class="button ghost small">高级参数 / qBittorrent</button></div></details>
+        <details class="assistant-panel"><summary>种子制作</summary><div class="panel-body"><label>Tracker（每行一个）<textarea id="assistant-trackers" rows="2" placeholder="留空使用全局设置"></textarea></label><label class="inline-check"><input id="assistant-private" type="checkbox" checked>私有种子</label><button id="assistant-torrent" type="button" class="button secondary">制作种子</button><button type="button" data-assistant-tool="torrents" class="button ghost small">种子参数</button></div></details>
         <details class="assistant-panel"><summary>组合执行</summary><div class="panel-body"><label class="inline-check"><input id="assistant-batch-report" type="checkbox">完整媒体报告</label><label class="inline-check"><input id="assistant-batch-thumbnail" type="checkbox" checked>生成缩略图</label><label class="inline-check"><input id="assistant-batch-upload" type="checkbox">上传缩略图</label><label class="inline-check"><input id="assistant-batch-publish" type="checkbox" checked>生成发布信息</label><label class="inline-check"><input id="assistant-batch-torrent" type="checkbox">制作种子</label><button id="assistant-run" type="button" class="button primary full-width">执行所选操作</button></div></details>
           <button id="assistant-generate" type="button" class="button primary full-width">开始生成缩略图</button>
         <div id="assistant-jobs" class="assistant-jobs" aria-live="polite"></div><p id="assistant-error" class="form-error" role="alert"></p>
@@ -532,7 +520,6 @@
       </details><div class="button-row">
         <button id="publish-create" class="button primary" type="button">更新发布内容</button>
         <button id="publish-update" class="button secondary" type="button">保存草稿</button>
-        <button id="publish-qbit" class="button ghost" type="button" disabled>添加到 qBittorrent</button>
       </div>
       <p id="publish-message" class="form-error" role="status" aria-live="polite"></p>
     </section>

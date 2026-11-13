@@ -16,7 +16,6 @@ from .metadata import MetadataService
 from .naming import PreviewStore
 from .processing import ProcessingTaskManager
 from .publishing import PublishService
-from .qbittorrent import QbittorrentService
 from .release_info import ReleaseInfoService
 from .runtime_settings import RuntimeSettingsManager
 from .screenshots import ScreenshotService
@@ -64,7 +63,6 @@ class Services:
     image_hosts: ImageHostService
     release_info: ReleaseInfoService
     torrents: TorrentService
-    qbittorrent: QbittorrentService
     metadata: MetadataService
     publishing: PublishService
     runtime_settings: RuntimeSettingsManager
@@ -94,8 +92,7 @@ class Services:
         image_hosts = ImageHostService(files, database, secret_box)
         release_info = ReleaseInfoService(settings, files, database)
         torrents = TorrentService(files, database)
-        qbittorrent = QbittorrentService(database, secret_box)
-        publishing = PublishService(database, torrents, qbittorrent)
+        publishing = PublishService(database, torrents)
         processing = ProcessingTaskManager(
             settings, database, previews, files, collage, screenshots
         )
@@ -120,7 +117,6 @@ class Services:
             image_hosts=image_hosts,
             release_info=release_info,
             torrents=torrents,
-            qbittorrent=qbittorrent,
             publishing=publishing,
             metadata=metadata,
             runtime_settings=runtime_settings,

@@ -250,14 +250,7 @@
       return relativeDirectoryControl(field, value, context.onChange, context.onError);
     }
     const enriched = field.sensitive
-      ? {
-          ...field,
-          configured: Boolean(
-            field.key === "qbittorrent_password"
-              ? context.secretsConfigured?.qbittorrent_credentials
-              : context.secretsConfigured?.[field.key]
-          )
-        }
+      ? {...field, configured: Boolean(context.secretsConfigured?.[field.key])}
       : field;
     return inputControl(enriched, value, context.onChange);
   }

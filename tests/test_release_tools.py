@@ -4,14 +4,12 @@ import base64
 from pathlib import Path
 from types import SimpleNamespace
 
-import httpx
 from fastapi.testclient import TestClient
 
 from bili_remote import release_info as release_info_module
 from bili_remote.database import Database
 from bili_remote.file_service import FileConflictError, FileService, FileServiceError
 from bili_remote.image_hosts import ImageHostError, ImageHostService
-from bili_remote.qbittorrent import QbittorrentService
 from bili_remote.release_info import ReleaseInfoService
 from bili_remote.security import SecretBox
 from bili_remote.torrents import TorrentService, bdecode
@@ -433,20 +431,27 @@ def test_release_info_reports_redact_absolute_server_paths(settings, monkeypatch
     assert f"Complete name: {source.name}" in ffprobe
 
 
-def test_settings_encrypt_and_redact_image_and_qbittorrent_secrets(settings) -> None:
+def test_settings_encrypt_image_secret_and_preserve_stored_qbittorrent_values(settings) -> None:
     settings.ensure_directories()
     app = create_app(settings)
     with TestClient(app) as client:
         login(client)
+        database = app.state.services.database
+        database.update_settings(
+            {
+                "qbittorrent_url": "http://qbittorrent:8080",
+                "qbittorrent_username": "admin",
+                "qbittorrent_password": app.state.services.secrets.encrypt_json(
+                    "super-secret-qbit-password"
+                ),
+            }
+        )
         response = client.put(
             "/api/settings",
             json={
                 "values": {
                     "image_host_provider": "imgbb",
                     "image_host_imgbb_api_key": "super-secret-image-key",
-                    "qbittorrent_url": "http://qbittorrent:8080",
-                    "qbittorrent_username": "admin",
-                    "qbittorrent_password": "super-secret-qbit-password",
                 }
             },
         )
@@ -454,78 +459,22 @@ def test_settings_encrypt_and_redact_image_and_qbittorrent_secrets(settings) -> 
         assert "super-secret" not in response.text
         payload = response.json()
         assert payload["secrets_configured"]["image_host_imgbb_api_key"] is True
-        assert payload["secrets_configured"]["qbittorrent_credentials"] is True
-        assert "qbittorrent_password" not in payload["values"]
+        assert "qbittorrent_credentials" not in payload["secrets_configured"]
+        assert all("qbittorrent" not in key for key in payload["values"])
 
-        stored = app.state.services.database.get_settings()
+        stored = database.get_settings()
         assert stored["image_host_imgbb_api_key"] != "super-secret-image-key"
         assert stored["qbittorrent_password"] != "super-secret-qbit-password"
         assert app.state.services.secrets.decrypt_json(
             stored["qbittorrent_password"]
         ) == "super-secret-qbit-password"
 
-        preserved = client.put("/api/settings", json={"values": {"qbittorrent_password": ""}})
-        assert preserved.status_code == 200, preserved.text
+        rejected = client.put("/api/settings", json={"values": {"qbittorrent_password": ""}})
+        assert rejected.status_code == 422, rejected.text
+        assert "qbittorrent_password" in rejected.text
         assert app.state.services.secrets.decrypt_json(
-            app.state.services.database.get_settings()["qbittorrent_password"]
+            database.get_settings()["qbittorrent_password"]
         ) == "super-secret-qbit-password"
-
-
-def test_qbittorrent_real_api_shapes_with_mock_transport(settings) -> None:
-    settings.ensure_directories()
-    database = Database(settings.database_path)
-    database.initialize()
-    secrets = SecretBox(settings.app_secret)
-    database.update_settings(
-        {
-            "qbittorrent_url": "http://qbit.test:8080",
-            "qbittorrent_username": "admin",
-            "qbittorrent_password": secrets.encrypt_json("secret-password"),
-            "qbittorrent_category": "bili-remote",
-            "qbittorrent_paused": "true",
-            "qbittorrent_timeout_seconds": "5",
-        }
-    )
-    calls: list[tuple[str, str]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append((request.method, request.url.path))
-        if request.url.path == "/api/v2/auth/login":
-            assert b"username=admin" in request.content
-            assert b"password=secret-password" in request.content
-            return httpx.Response(200, text="Ok.", headers={"set-cookie": "SID=session-id; path=/"})
-        if request.url.path == "/api/v2/app/version":
-            return httpx.Response(200, text="v5.0.0")
-        if request.url.path == "/api/v2/transfer/info":
-            return httpx.Response(200, json={"dl_info_speed": 100, "up_info_speed": 20})
-        if request.url.path == "/api/v2/torrents/info":
-            return httpx.Response(200, json=[{"name": "show", "progress": 0.5, "size": 1000}])
-        if request.url.path == "/api/v2/torrents/add":
-            assert b"category" in request.content
-            assert b"paused" in request.content
-            return httpx.Response(200, text="Ok.")
-        return httpx.Response(404)
-
-    def factory(base_url: str, timeout: float) -> httpx.Client:
-        return httpx.Client(
-            base_url=base_url,
-            timeout=timeout,
-            transport=httpx.MockTransport(handler),
-        )
-
-    service = QbittorrentService(database, secrets, client_factory=factory)
-    status = service.test_connection()
-    assert status["connected"] is True
-    assert status["version"] == "v5.0.0"
-    assert status["download_speed"] == 100
-    assert service.list_torrents()[0]["name"] == "show"
-
-    torrent_path = settings.torrents_root / "show.torrent"
-    torrent_path.write_bytes(b"d4:infodee")
-    added = service.add_torrent(torrent_path)
-    assert added["added"] is True
-    assert added["paused"] is True
-    assert ("POST", "/api/v2/torrents/add") in calls
 
 
 def test_torrent_rejects_symlink_source(settings) -> None:

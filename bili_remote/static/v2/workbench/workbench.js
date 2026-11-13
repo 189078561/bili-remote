@@ -633,9 +633,10 @@
       });
     }
     renderTorrent(record) {
-      const card = node("article", null, "wb-task"), link = node("a", "下载种子"), add = node("button", "添加到 qBittorrent"); add.type = "button";
-      link.href = `/api/torrents/${encodeURIComponent(record.id)}/file`; card.append(node("strong", record.name || record.filename || ".torrent"), node("p", record.info_hash || ""), link, add);
-      add.onclick = () => this.withButton(add, async () => { await this.api.request("/api/qbittorrent/torrents", {torrent_build_id: record.id}); this.notice("种子已提交到 qBittorrent"); }); this.el("torrents").append(card);
+      const card = node("article", null, "wb-task"), link = node("a", "下载种子");
+      link.href = `/api/torrents/${encodeURIComponent(record.id)}/file`;
+      card.append(node("strong", record.name || record.filename || ".torrent"), node("p", record.info_hash || ""), link);
+      this.el("torrents").append(card);
     }
     renderTasks() {
       const signature = JSON.stringify([...this.tasks.values()].map(task => [key(task), task.status, task.progress, task.error, task.cancel_allowed, task.retry_allowed]));

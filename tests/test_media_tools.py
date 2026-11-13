@@ -18,7 +18,6 @@ from bili_remote.image_hosts import PixhostClient
 from bili_remote.media_tools import optical_choices, optical_input, run_tool
 from bili_remote.metadata import MetadataService
 from bili_remote.publishing import PublishService
-from bili_remote.qbittorrent import QbittorrentService
 from bili_remote.screenshots import ScreenshotService
 from bili_remote.security import SecretBox
 from bili_remote.torrents import TorrentService, bdecode
@@ -287,8 +286,8 @@ def test_metadata_credentials_not_returned_in_settings(settings):
 
 
 def test_pter_report_order_and_draft_readiness(settings):
-    db, files, secret = setup_services(settings)
-    service = PublishService(db, TorrentService(files, db), QbittorrentService(db, secret))
+    db, files, _ = setup_services(settings)
+    service = PublishService(db, TorrentService(files, db))
     raw = "General\nComplete name : example.mkv\n\nVideo\nFormat : AVC\n"
     document = db.create_release_document(
         title="Test",

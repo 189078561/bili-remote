@@ -982,9 +982,6 @@
 .release-warnings { margin: 0; padding-left: 20px; color: var(--warning); font-size: 0.78rem; }
 .release-editor-label { margin-top: 4px; }
 .release-editor-label textarea { min-height: 280px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
-.qbit-progress { display: grid; gap: 4px; min-width: 0; }
-.qbit-progress progress { width: 100%; height: 9px; accent-color: var(--brand); }
-.qbit-progress span { font-size: 0.72rem; }
 .publish-upload-picker { display: grid; gap: 9px; }
 .publish-upload-list {
   display: grid;
