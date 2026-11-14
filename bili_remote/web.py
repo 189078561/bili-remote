@@ -24,7 +24,11 @@ from .bili import BiliAPIError
 from .collage import CollageConflictError, CollageError
 from .config import Settings
 from .downloader import DownloadFailure, create_job_log_path
-from .file_service import FileConflictError, FileServiceError
+from .file_service import (
+    FileConflictError,
+    FileServiceError,
+    OperationPreviewExpired,
+)
 from .filebrowser import (
     FileRenameError,
     analyze_file_rename,
@@ -749,6 +753,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(FileConflictError)
     async def file_conflict_error_handler(_: Request, exc: FileConflictError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(OperationPreviewExpired)
+    async def operation_preview_expired_handler(
+        _: Request, exc: OperationPreviewExpired
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": str(exc), "code": "preview_expired"},
+        )
 
     @app.exception_handler(FileServiceError)
     async def file_service_error_handler(_: Request, exc: FileServiceError) -> JSONResponse:

@@ -118,6 +118,156 @@ def test_core_file_operations_and_editor_conflict(live_server):
         playwright.stop()
 
 
+def test_delete_preview_recovery_submit_states_failure_and_cancel(live_server):
+    base, app = live_server
+    root = app.state.services.settings.download_root
+    (root / 'single.txt').write_text('single', encoding='utf-8')
+    (root / 'multi-a.txt').write_text('a', encoding='utf-8')
+    (root / 'multi-b.txt').write_text('b', encoding='utf-8')
+    (root / 'expired.txt').write_text('expired', encoding='utf-8')
+    (root / 'failure.txt').write_text('failure', encoding='utf-8')
+    playwright, browser, page, errors = browser_session(base)
+
+    def preview_request(response):
+        return response.url.endswith('/api/files/operations/preview') and response.request.method == 'POST'
+
+    try:
+        host = mount(page)
+
+        # A valid confirmation shows an in-progress state and prevents duplicate submits.
+        select(host, 'single.txt')
+        with page.expect_response(preview_request) as preview:
+            more_action(host, '删除')
+        assert preview.value.json()['summary']['total'] == 1
+        held = []
+
+        def hold_apply(route):
+            if not held:
+                held.append(route)
+            else:
+                route.continue_()
+
+        page.route('**/api/files/operations/apply', hold_apply)
+        confirm = page.locator('#modal .dialog-actions .button.primary')
+        confirm.click()
+        expect(confirm).to_be_disabled()
+        expect(confirm).to_have_text('正在提交…')
+        assert len(held) == 1
+        held.pop().continue_()
+        page.unroute('**/api/files/operations/apply', hold_apply)
+        expect(host.locator('.file-row[data-path="single.txt"]')).to_have_count(0)
+        expect(host.locator('.selection-count')).to_have_text('未选择')
+        assert not (root / 'single.txt').exists()
+
+        # An expired token is rechecked automatically; the unchanged scope is resubmitted once.
+        select(host, 'expired.txt')
+        with page.expect_response(preview_request) as preview:
+            more_action(host, '删除')
+        stale = preview.value.json()
+        app.state.services.files.previews.remove(stale['token'])
+        expired_error = page.evaluate('''async token => {
+          try {
+            await api('/api/files/operations/apply', {
+              method: 'POST',
+              body: JSON.stringify({token, confirm_overwrite: false})
+            });
+            return null;
+          } catch (error) {
+            return {status: error.status, code: error.data?.code, message: error.message};
+          }
+        }''', stale['token'])
+        assert expired_error == {
+            'status': 409,
+            'code': 'preview_expired',
+            'message': '操作预览已失效，请重新检查'
+        }
+        with page.expect_response(preview_request) as refreshed:
+            page.locator('#modal').get_by_role('button', name='确认删除', exact=True).click()
+        assert refreshed.value.json()['token'] != stale['token']
+        expect(host.locator('.file-row[data-path="expired.txt"]')).to_have_count(0)
+        assert not (root / 'expired.txt').exists()
+
+        # Multiple selected files are deleted in one confirmed operation.
+        select(host, 'multi-a.txt')
+        select(host, 'multi-b.txt')
+        with page.expect_response(preview_request) as preview:
+            more_action(host, '删除')
+        assert preview.value.json()['summary']['total'] == 2
+        page.locator('#modal').get_by_role('button', name='确认删除', exact=True).click()
+        expect(host.locator('.file-row[data-path="multi-a.txt"]')).to_have_count(0)
+        expect(host.locator('.file-row[data-path="multi-b.txt"]')).to_have_count(0)
+        assert not (root / 'multi-a.txt').exists()
+        assert not (root / 'multi-b.txt').exists()
+
+        # Backend failures stay visible and restore a usable confirmation button.
+        select(host, 'failure.txt')
+        with page.expect_response(preview_request):
+            more_action(host, '删除')
+        with page.expect_response(preview_request):
+            page.locator('#modal').get_by_role('button', name='重新检查', exact=True).click()
+        expect(page.locator('#modal')).to_contain_text('预检已更新，请确认后执行')
+
+        def fail_apply(route):
+            route.fulfill(
+                status=500,
+                content_type='application/json',
+                body=json.dumps({'detail': '模拟删除失败：权限不足'})
+            )
+
+        page.route('**/api/files/operations/apply', fail_apply)
+        confirm = page.locator('#modal .dialog-actions .button.primary')
+        confirm.click()
+        expect(page.locator('#modal .form-error')).to_contain_text('模拟删除失败：权限不足')
+        expect(confirm).to_be_enabled()
+        expect(confirm).to_have_text('确认删除')
+        assert (root / 'failure.txt').exists()
+        page.unroute('**/api/files/operations/apply', fail_apply)
+        page.locator('#modal').get_by_role('button', name='取消', exact=True).click()
+        assert (root / 'failure.txt').exists()
+        assert not errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_delete_directory_scope_change_requires_new_confirmation(live_server):
+    base, app = live_server
+    root = app.state.services.settings.download_root
+    changing = root / 'changing'
+    changing.mkdir()
+    (changing / 'child.txt').write_text('child', encoding='utf-8')
+    playwright, browser, page, errors = browser_session(base)
+
+    def preview_request(response):
+        return response.url.endswith('/api/files/operations/preview') and response.request.method == 'POST'
+
+    try:
+        host = mount(page)
+        select(host, 'changing')
+        with page.expect_response(preview_request) as preview:
+            more_action(host, '删除')
+        stale = preview.value.json()
+        expect(page.locator('#modal')).to_contain_text('删除目录会同时删除其中列出的全部下级内容')
+        (changing / 'added.txt').write_text('added', encoding='utf-8')
+        app.state.services.files.previews.remove(stale['token'])
+        with page.expect_response(preview_request) as refreshed:
+            page.locator('#modal').get_by_role('button', name='确认删除', exact=True).click()
+        fresh = refreshed.value.json()
+        assert fresh['token'] != stale['token']
+        assert fresh['items'][0]['descendant_count'] == 2
+        expect(page.locator('#modal')).to_contain_text('文件范围发生变化，请重新确认')
+        expect(page.locator('#modal')).to_contain_text('包含 2 项')
+        assert changing.exists()
+        page.locator('#modal').get_by_role('button', name='确认删除', exact=True).click()
+        expect(host.locator('.file-row[data-path="changing"]')).to_have_count(0)
+        assert not changing.exists()
+        expect(host.locator('.selection-count')).to_have_text('未选择')
+        assert not errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
 @pytest.mark.parametrize('width', [390, 768, 1440])
 def test_mobile_tree_breadcrumb_search_paging_image_and_selection(live_server, width):
     base, app = live_server

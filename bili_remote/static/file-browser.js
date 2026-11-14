@@ -71,6 +71,25 @@
     return ["image", "text", "video"].includes(item.kind) ? item.kind : "other";
   }
 
+  function operationPlanSignature(plan) {
+    return JSON.stringify({
+      operation: plan.operation,
+      conflict_policy: plan.conflict_policy,
+      items: (plan.items || []).map(item => ({
+        source: item.source,
+        target: item.target,
+        status: item.status,
+        object_type: item.object_type,
+        fingerprint: item.fingerprint,
+        size_bytes: item.size_bytes,
+        descendant_count: item.descendant_count,
+        descendant_bytes: item.descendant_bytes,
+        will_overwrite: Boolean(item.will_overwrite),
+        reasons: item.reasons || []
+      }))
+    });
+  }
+
   class FileBrowser {
     static _defaults = {
       pageSize: 100,
@@ -1036,30 +1055,44 @@
       });
     }
 
+    operationRequest(operation, items, target, conflictPolicy = "abort") {
+      return {
+        operation,
+        sources: items.map(item => ({
+          root_key: item.root_key || this.rootKey,
+          relative_path: item.relative_path
+        })),
+        target: target ? {root_key: target.root_key, relative_path: target.relative_path} : null,
+        conflict_policy: conflictPolicy
+      };
+    }
+
+    requestOperationPreview(request) {
+      return api("/api/files/operations/preview", {
+        method: "POST",
+        body: JSON.stringify(request)
+      });
+    }
+
+    handleOperationPreview(plan, request, {overwrite = false, notice = ""} = {}) {
+      if (plan.summary.blocked) {
+        this.showOperationErrors(plan);
+        return;
+      }
+      if (plan.summary.conflict) {
+        this.showConflictChoice(plan, request);
+        return;
+      }
+      this.confirmAndApply(plan, request, {overwrite, notice});
+    }
+
     async startOperation(operation, items, target) {
+      const request = this.operationRequest(operation, items, target);
       this.el.actionStatus.textContent = "正在检查目标…";
       try {
-        let plan = await api("/api/files/operations/preview", {
-          method: "POST",
-          body: JSON.stringify({
-            operation,
-            sources: items.map(item => ({
-              root_key: item.root_key || this.rootKey,
-              relative_path: item.relative_path
-            })),
-            target: target || null,
-            conflict_policy: "abort"
-          })
-        });
-        if (plan.summary.blocked) {
-          this.showOperationErrors(plan);
-          return;
-        }
-        if (plan.summary.conflict) {
-          this.showConflictChoice(plan, items, target, operation);
-          return;
-        }
-        this.confirmAndApply(plan, false);
+        const plan = await this.requestOperationPreview(request);
+        this.el.actionStatus.textContent = "";
+        this.handleOperationPreview(plan, request);
       } catch (error) {
         this.el.actionStatus.textContent = "";
         this.el.listError.textContent = error.message;
@@ -1079,7 +1112,7 @@
       showModal(panel);
     }
 
-    showConflictChoice(plan, items, target, operation) {
+    showConflictChoice(plan, request) {
       const panel = element("div", "operation-dialog");
       panel.append(element("h2", null, "目标名称冲突"));
       panel.append(element("p", "muted", `发现 ${plan.summary.conflict} 个已存在的目标。请选择取消、跳过冲突项，或明确覆盖。`));
@@ -1091,32 +1124,25 @@
       const skip = button("跳过冲突项", "button secondary");
       const overwrite = button("覆盖冲突项", "button danger");
       cancel.addEventListener("click", closeModal);
-      skip.addEventListener("click", () => this.recheckConflicts("skip", items, target, operation));
-      overwrite.addEventListener("click", () => this.recheckConflicts("overwrite", items, target, operation));
+      skip.addEventListener("click", () => this.recheckConflicts("skip", request));
+      overwrite.addEventListener("click", () => this.recheckConflicts("overwrite", request));
       footer.append(cancel, skip, overwrite);
       panel.append(footer);
       showModal(panel);
     }
 
-    async recheckConflicts(policy, items, target, operation) {
+    async recheckConflicts(policy, request) {
       try {
-        const plan = await api("/api/files/operations/preview", {
-          method: "POST",
-          body: JSON.stringify({
-            operation,
-            sources: items.map(item => ({root_key: item.root_key || this.rootKey, relative_path: item.relative_path})),
-            target: target || null,
-            conflict_policy: policy
-          })
-        });
-        this.confirmAndApply(plan, policy === "overwrite");
+        const nextRequest = {...request, conflict_policy: policy};
+        const plan = await this.requestOperationPreview(nextRequest);
+        this.handleOperationPreview(plan, nextRequest, {overwrite: policy === "overwrite"});
       } catch (error) {
         closeModal();
         this.el.listError.textContent = error.message;
       }
     }
 
-    confirmAndApply(plan, overwrite) {
+    confirmAndApply(plan, request, {overwrite = false, notice = ""} = {}) {
       const panel = element("div", "operation-dialog");
       const action = plan.operation === "copy" ? "复制" : plan.operation === "move" ? "移动" : "删除";
       panel.append(element("h2", null, `确认${action}`));
@@ -1144,24 +1170,113 @@
       if (plan.operation === "delete" && plan.items.some(item => item.object_type === "directory")) {
         panel.append(element("p", "rename-warning", "删除目录会同时删除其中列出的全部下级内容，且不可撤销。"));
       }
+      const feedback = element("p", "muted");
+      feedback.setAttribute("role", "status");
+      feedback.setAttribute("aria-live", "polite");
+      feedback.hidden = true;
+      panel.append(feedback);
+      const setFeedback = (message, kind = "info") => {
+        feedback.hidden = !message;
+        feedback.className = kind === "error" ? "form-error" : kind === "warning" ? "rename-warning" : "muted";
+        feedback.setAttribute("role", kind === "error" ? "alert" : "status");
+        feedback.textContent = message || "";
+      };
+      setFeedback(notice, "warning");
       const footer = element("div", "dialog-actions");
       const cancel = button("取消", "button ghost");
-      const apply = button(overwrite ? "确认覆盖并执行" : `确认${action}`, overwrite ? "button danger" : "button primary");
+      const recheck = button("重新检查", "button secondary");
+      const applyLabel = overwrite ? "确认覆盖并执行" : `确认${action}`;
+      const apply = button(applyLabel, overwrite ? "button danger" : "button primary");
+      let applying = false;
+      let rechecking = false;
+      const setBusyState = (active, activeButton = null, activeText = "") => {
+        busy(apply, active);
+        busy(cancel, active);
+        busy(recheck, active);
+        apply.textContent = active && activeButton === "apply" ? activeText : applyLabel;
+        recheck.textContent = active && activeButton === "recheck" ? activeText : "重新检查";
+      };
+      const resetBusyState = () => {
+        applying = false;
+        rechecking = false;
+        setBusyState(false);
+      };
       cancel.addEventListener("click", closeModal);
-      apply.addEventListener("click", async () => {
-        busy(apply, true);
+      recheck.addEventListener("click", async () => {
+        if (applying || rechecking) return;
+        rechecking = true;
+        setBusyState(true, "recheck", "正在检查…");
+        setFeedback("正在重新检查文件状态…");
         try {
-          const result = await api("/api/files/operations/apply", {
-            method: "POST",
-            body: JSON.stringify({token: plan.token, confirm_overwrite: overwrite})
+          const fresh = await this.requestOperationPreview(request);
+          if (fresh.summary.blocked) {
+            this.showOperationErrors(fresh);
+            return;
+          }
+          if (fresh.summary.conflict) {
+            this.showConflictChoice(fresh, request);
+            return;
+          }
+          const changed = operationPlanSignature(fresh) !== operationPlanSignature(plan);
+          this.confirmAndApply(fresh, request, {
+            overwrite,
+            notice: changed
+              ? "预检已更新，文件范围发生变化，请重新确认后再执行。"
+              : "预检已更新，请确认后执行。"
           });
-          this.showTaskProgress(result.task_id, {operation: plan.operation, clipboard: this.clipboard});
         } catch (error) {
-          panel.append(element("p", "form-error", error.message));
-          busy(apply, false);
+          resetBusyState();
+          setFeedback(`重新检查失败：${error.message}`, "error");
         }
       });
-      footer.append(cancel, apply);
+      apply.addEventListener("click", async () => {
+        if (applying || rechecking) return;
+        const submit = async (targetPlan, allowAutoRecheck) => {
+          applying = true;
+          setBusyState(true, "apply", "正在提交…");
+          setFeedback(`正在提交${action}任务…`);
+          try {
+            const result = await api("/api/files/operations/apply", {
+              method: "POST",
+              body: JSON.stringify({token: targetPlan.token, confirm_overwrite: overwrite})
+            });
+            this.el.actionStatus.textContent = "";
+            this.showTaskProgress(result.task_id, {operation: targetPlan.operation, clipboard: this.clipboard});
+          } catch (error) {
+            if (allowAutoRecheck && error.data?.code === "preview_expired") {
+              setFeedback("操作预览已失效，正在自动重新检查…");
+              try {
+                const fresh = await this.requestOperationPreview(request);
+                if (fresh.summary.blocked) {
+                  this.showOperationErrors(fresh);
+                  return;
+                }
+                if (fresh.summary.conflict) {
+                  this.showConflictChoice(fresh, request);
+                  return;
+                }
+                if (operationPlanSignature(fresh) !== operationPlanSignature(plan)) {
+                  this.confirmAndApply(fresh, request, {
+                    overwrite,
+                    notice: "预检已更新，文件范围发生变化，请重新确认后再执行。"
+                  });
+                  return;
+                }
+                await submit(fresh, false);
+                return;
+              } catch (refreshError) {
+                resetBusyState();
+                setFeedback(`重新检查失败：${refreshError.message}`, "error");
+                return;
+              }
+            }
+            resetBusyState();
+            setFeedback(error.message || `${action}失败`, "error");
+          }
+        };
+        await submit(plan, true);
+      });
+      footer.append(recheck, cancel, apply);
       panel.append(footer);
       showModal(panel);
     }

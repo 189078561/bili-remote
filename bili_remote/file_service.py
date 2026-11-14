@@ -126,6 +126,10 @@ class FileConflictError(FileServiceError):
     pass
 
 
+class OperationPreviewExpired(FileConflictError):
+    pass
+
+
 class OperationCancelled(Exception):
     pass
 
@@ -197,10 +201,10 @@ class OperationPreviewStore:
         self._prune()
         preview = self._entries.get(token)
         if not preview:
-            raise FileConflictError("操作预览已失效，请重新检查")
+            raise OperationPreviewExpired("操作预览已失效，请重新检查")
         if time.monotonic() - preview.created_monotonic > PREVIEW_TTL_SECONDS:
             self._entries.pop(token, None)
-            raise FileConflictError("操作预览已过期，请重新检查")
+            raise OperationPreviewExpired("操作预览已过期，请重新检查")
         return preview
 
     def remove(self, token: str) -> None:
