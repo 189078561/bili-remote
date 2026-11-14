@@ -70,14 +70,37 @@
 
   function modeLabel(mode) { return mode === "tv" ? "TV" : "Web"; }
   function statusLabel(status) {
-    return ({queued: "排队中", running: "下载中", completed: "已完成", failed: "失败", auth_required: "需要登录", cancelled: "已取消"})[status] || status || "状态未知";
+    return ({queued: "排队中", downloading: "下载中", merging: "合并中", running: "下载中", completed: "已完成", failed: "失败", auth_required: "需要登录", cancelled: "已取消"})[status] || status || "状态未知";
+  }
+  function displayStatus(job) {
+    if (job.display_status) return String(job.display_status);
+    if (job.status === "running") return Number(job.progress) >= 99.5 ? "merging" : "downloading";
+    return job.status || "unknown";
+  }
+  function dateTimeLabel(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "时间未知" : date.toLocaleString("zh-CN", {hour12: false});
+  }
+  function durationSeconds(job) {
+    const explicit = Number(job.download_duration_seconds);
+    if (Number.isFinite(explicit) && explicit >= 0) return Math.floor(explicit);
+    const started = Date.parse(job.started_at || "");
+    const finished = Date.parse(job.finished_at || "");
+    if (!Number.isFinite(started) || !Number.isFinite(finished) || finished < started) return null;
+    return Math.floor((finished - started) / 1000);
   }
 
   function mount(root, options = {}) {
     if (!root) throw new TypeError("download workbench root is required");
     const api = options.api || createApi();
     const $ = (selector) => root.querySelector(selector);
-    const state = {resolved: null, resolvedUrl: "", jobs: [], previousStatuses: new Map(), seenInitialJobs: false, timer: null, episodeFormats: new Map(), episodeChoices: new Map(), formatProfiles: [], formatRequest: 0, parseVersion: 0, episodesOpen: false};
+    const state = {
+      resolved: null, resolvedUrl: "", jobs: [], previousStatuses: new Map(), seenInitialJobs: false,
+      timer: null, refreshInFlight: null, refreshQueued: false, refreshAbort: null, destroyed: false,
+      jobCards: new Map(), listeners: [], logScrollY: 0, logReturnFocus: null,
+      episodeFormats: new Map(), episodeChoices: new Map(), formatProfiles: [], formatRequest: 0,
+      parseVersion: 0, episodesOpen: false, submitting: false
+    };
     const form = $("[data-download-form]");
     const urlField = $("#dv2-url");
     const modeField = $("[data-mode]");
@@ -93,6 +116,21 @@
     const jobsHost = $("[data-jobs]");
     const notice = $("[data-notice]");
     const formatHint = $("[data-format-hint]");
+    const logDialog = $("[data-log-dialog]");
+
+    function listen(target, type, handler, options) {
+      if (!target) return;
+      target.addEventListener(type, handler, options);
+      state.listeners.push([target, type, handler, options]);
+    }
+    function pageVisible() {
+      if (state.destroyed || document.hidden || !root.isConnected) return false;
+      return !root.closest(".app-view")?.classList.contains("hidden");
+    }
+    function clearRefreshTimer() {
+      if (state.timer) window.clearTimeout(state.timer);
+      state.timer = null;
+    }
 
     function stage(name) {
       root.dataset.stage=name;
@@ -382,21 +420,61 @@
       } catch (error) { if(current())showError(error.message);else options.onNotice?.(error.message,true); }
       finally { state.submitting=false;submitButton.disabled = false;summary(); }
     }
-    function jobCard(job) {
+    function createJobCard(job) {
       const card = make("article", "dv2-job");
-      card.dataset.jobId = String(job.id);card.dataset.status=job.status;
+      card.dataset.jobId = String(job.id);
       const head = make("div", "dv2-job-head");
-      head.append(make("strong", "dv2-job-title", job.title || "等待解析"), make("span", "dv2-badge", `${modeLabel(job.api_mode)} · ${statusLabel(job.status)}`));
-      card.append(head);
-      const metaParts = [`任务 #${job.id}`, job.progress == null ? null : `${Math.max(0, Math.min(100, Math.round(Number(job.progress) || 0)))}%`, job.speed ? `${size(job.speed)}/s` : null, job.eta == null ? null : `剩余 ${elapsed(job.eta)}`, job.total_bytes ? `${size(job.downloaded_bytes)} / ${size(job.total_bytes)}` : null];
-      card.append(make("div", "dv2-job-meta", metaParts.filter(Boolean).join(" · ")));
+      const title = make("strong", "dv2-job-title");
+      const badge = make("span", "dv2-badge");
+      const meta = make("div", "dv2-job-meta");
       const track = make("div", "dv2-progress");
       const bar = document.createElement("span");
-      const percent = Math.max(0, Math.min(100, Number(job.progress) || 0));
-      bar.style.width = `${job.status === "completed" ? 100 : percent}%`;
-      track.append(bar); card.append(track);
-      if (job.error) card.append(make("div", "dv2-job-error", job.error));
       const actions = make("div", "dv2-job-actions");
+      const error = make("div", "dv2-job-error");
+      track.append(bar);
+      head.append(title, badge);
+      card.append(head, meta, track, error, actions);
+      const entry = {card, title, badge, meta, track, bar, error, actions, actionSignature: null};
+      state.jobCards.set(String(job.id), entry);
+      return entry;
+    }
+    function updateJobCard(entry, job) {
+      const status = displayStatus(job);
+      entry.card.dataset.status = status;
+      entry.card.dataset.rawStatus = job.status || "";
+      entry.title.textContent = job.title || "等待解析";
+      entry.badge.textContent = `${modeLabel(job.api_mode)} · ${statusLabel(status)}`;
+      const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
+      const meta = [`任务 #${job.id}`];
+      if (status === "queued") {
+        meta.push("等待开始");
+      } else if (status === "downloading") {
+        meta.push(`${Math.round(progress)}%`);
+        if (Number(job.speed) > 0) meta.push(`${size(job.speed)}/s`);
+        if (job.eta != null) meta.push(`剩余 ${elapsed(job.eta)}`);
+        if (job.total_bytes) meta.push(`${size(job.downloaded_bytes)} / ${size(job.total_bytes)}`);
+      } else if (status === "merging") {
+        meta.push("下载完成，正在合并音视频并完成后处理");
+      } else if (status === "completed") {
+        meta.push(`完成于 ${dateTimeLabel(job.finished_at)}`);
+        const duration = durationSeconds(job);
+        if (duration != null) meta.push(`下载总用时 ${elapsed(duration)}`);
+        meta.push(job.final_size_bytes == null ? "最终文件大小不可用" : `最终大小 ${size(job.final_size_bytes)}`);
+      } else {
+        if (job.finished_at) meta.push(`结束于 ${dateTimeLabel(job.finished_at)}`);
+        const duration = durationSeconds(job);
+        if (duration != null) meta.push(`总用时 ${elapsed(duration)}`);
+      }
+      entry.meta.textContent = meta.join(" · ");
+      entry.track.hidden = !["queued", "downloading", "merging"].includes(status);
+      entry.bar.style.width = `${status === "merging" ? 100 : progress}%`;
+      entry.error.hidden = !job.error;
+      entry.error.textContent = job.error || "";
+
+      if (entry.actionSignature === String(job.status)) return;
+      entry.actionSignature = String(job.status);
+      entry.actions.replaceChildren();
+      const actions = entry.actions;
       if (["queued", "running"].includes(job.status)) addAction(actions, "取消", () => taskAction(job, "cancel"), "is-danger");
       if (["failed", "cancelled", "auth_required"].includes(job.status)) addAction(actions, "重试", () => taskAction(job, "retry"));
       addAction(actions, "查看日志", () => showLog(job.id));
@@ -404,8 +482,6 @@
         try { await options.onOpenFile(job); } catch (error) { showError(error.message); }
       });
       if(job.status==='completed' && options.onOpenDirectory) addAction(actions,'打开文件管理',()=>options.onOpenDirectory(job));
-      card.append(actions);
-      return card;
     }
     function addAction(parent, text, callback, extraClass = "") {
       const button = make("button", extraClass, text); button.type = "button"; button.addEventListener("click", async()=>{button.disabled=true;try{await callback();}catch(error){showError(error.message);}finally{button.disabled=false;}}); parent.append(button);
@@ -426,25 +502,98 @@
         if (window.Notification?.permission === "granted") new Notification("B站下载", {body: message});
       }
     }
+    function renderJobs(jobs) {
+      const cards = [];
+      const keys = new Set();
+      for (const job of jobs) {
+        if (!job || job.id == null) continue;
+        const key = String(job.id);
+        keys.add(key);
+        const entry = state.jobCards.get(key) || createJobCard(job);
+        updateJobCard(entry, job);
+        cards.push(entry.card);
+      }
+      for (const [key, entry] of state.jobCards) {
+        if (keys.has(key)) continue;
+        entry.card.remove();
+        state.jobCards.delete(key);
+        state.previousStatuses.delete(key);
+      }
+      for (const child of [...jobsHost.children]) {
+        if (!cards.includes(child)) child.remove();
+      }
+      cards.forEach((card, index) => {
+        const current = jobsHost.children[index];
+        if (current !== card) jobsHost.insertBefore(card, current || null);
+      });
+      if (!cards.length) jobsHost.append(make("p", "dv2-empty", "暂无下载任务"));
+    }
     async function refreshJobs({force=false} = {}) {
-      try {
-        const jobs = await api("/api/jobs?limit=500");
-        if(!force && jobsHost.contains(document.activeElement)){state.jobs=jobs||[];return;}
-        jobsHost.replaceChildren();
-        if (!Array.isArray(jobs) || !jobs.length) jobsHost.append(make("p", "dv2-empty", "暂无下载任务"));
-        else for (const job of jobs) { jobsHost.append(jobCard(job)); if (state.seenInitialJobs) alertTransition(job); else state.previousStatuses.set(String(job.id), job.status); }
-        state.seenInitialJobs = true;
-        state.jobs = jobs || [];
-        $("[data-queue-count]").textContent = state.jobs.length ? `${state.jobs.length} 项` : "";
-      } catch (error) { notice.textContent=`队列读取失败：${error.message}；保留上次结果。`;if(!state.jobs.length)jobsHost.replaceChildren(make("p", "dv2-empty", error.message)); }
+      if (state.destroyed) return;
+      if (state.refreshInFlight) {
+        if (force) state.refreshQueued = true;
+        return state.refreshInFlight;
+      }
+      if (!force && !pageVisible()) return;
+      const controller = new AbortController();
+      state.refreshAbort = controller;
+      state.refreshInFlight = (async () => {
+        try {
+          const result = await api("/api/jobs?limit=500", {signal: controller.signal});
+          if (state.destroyed) return;
+          if (!Array.isArray(result)) throw new Error("任务列表响应格式无效");
+          for (const job of result) {
+            if (state.seenInitialJobs) alertTransition(job);
+            else state.previousStatuses.set(String(job.id), job.status);
+          }
+          state.seenInitialJobs = true;
+          state.jobs = result;
+          renderJobs(result);
+          notice.textContent = "队列状态自动更新。";
+          $("[data-queue-count]").textContent = result.length ? `${result.length} 项` : "";
+        } catch (error) {
+          if (error.name === "AbortError" || state.destroyed) return;
+          notice.textContent = `队列读取失败：${error.message}；保留上次结果。`;
+          if (!state.jobs.length) showJobsUnavailable(error.message);
+        } finally {
+          if (state.refreshAbort === controller) state.refreshAbort = null;
+          state.refreshInFlight = null;
+          if (!state.destroyed) {
+            if (state.refreshQueued) {
+              state.refreshQueued = false;
+              window.queueMicrotask(() => refreshJobs({force: true}));
+            } else {
+              scheduleRefresh();
+            }
+          }
+        }
+      })();
+      return state.refreshInFlight;
+    }
+    function showJobsUnavailable(message) {
+      for (const entry of state.jobCards.values()) entry.card.remove();
+      state.jobCards.clear();
+      jobsHost.replaceChildren(make("p", "dv2-empty", message));
+    }
+    function scheduleRefresh(delay = options.pollInterval || 5000) {
+      clearRefreshTimer();
+      if (!pageVisible() || state.refreshInFlight) return;
+      state.timer = window.setTimeout(() => {
+        state.timer = null;
+        refreshJobs();
+      }, Math.max(1000, Number(delay) || 5000));
     }
     async function showLog(jobId) {
       try {
         const result = await api(`/api/jobs/${jobId}/log?lines=160`);
         $(`[data-log-content]`).textContent = result.content || "暂无日志内容";
-        const dialog = $(`[data-log-dialog]`);
-        if (typeof dialog.showModal === "function") dialog.showModal();
-        else dialog.setAttribute("open", "");
+        $("[data-log-title]").textContent = `任务 #${jobId} 日志`;
+        state.logScrollY = window.scrollY;
+        state.logReturnFocus = document.activeElement;
+        $(`[data-log-content]`).scrollTop = 0;
+        if (typeof logDialog.showModal === "function") logDialog.showModal();
+        else logDialog.setAttribute("open", "");
+        $("[data-log-close]")?.focus({preventScroll: true});
       } catch (error) { showError(error.message); }
     }
     async function refreshHistory() {
@@ -485,23 +634,58 @@
     const closeMenus = event => {
       for(const menu of root.querySelectorAll('.dv2-account,.dv2-select-actions details')) if(!menu.contains(event.target))menu.open=false;
     };
-    document.addEventListener('pointerdown',closeMenus);
-    $("[data-parse]").addEventListener("click", parse);
-    urlField.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); parse(); } });
-    urlField.addEventListener('input',()=>{++state.parseVersion;++state.formatRequest;state.resolved=null;resolution.hidden=true;stage('idle');parseState.textContent='等待解析';$("[data-parse]").disabled=false;$("[data-parse]").textContent='解析链接';});
-    form.addEventListener("submit", submit);
-    formatField.addEventListener("change", summary);
-    $("[data-output]").addEventListener("input", summary);
-    modeField.addEventListener("change", () => { ++state.parseVersion; if (urlField.value.trim()) parse(); });
-    $("[data-select-main]").addEventListener("click", () => setSelection("main"));
-    $("[data-select-all]").addEventListener("click", () => setSelection("all"));
-    $("[data-select-invert]").addEventListener("click", () => setSelection("invert"));
-    $("[data-select-none]").addEventListener("click", () => setSelection("none"));
-    $("[data-check-batch]").addEventListener("click", checkBatchFormats);
-    episodeToggle.addEventListener("click", () => setEpisodesOpen(!state.episodesOpen));
-    $("[data-refresh]").addEventListener("click", ()=>refreshJobs({force:true}));
-    $("[data-history-refresh]").addEventListener("click", refreshHistory);
-    $("[data-pick-folder]").addEventListener("click", async () => {
+    function restoreLogView() {
+      const scrollY = state.logScrollY;
+      const focus = state.logReturnFocus;
+      state.logReturnFocus = null;
+      window.requestAnimationFrame(() => {
+        if (focus?.isConnected) focus.focus({preventScroll: true});
+        window.scrollTo(0, scrollY);
+      });
+    }
+    function closeLog() {
+      if (!logDialog) return;
+      if (typeof logDialog.close === "function" && logDialog.open) logDialog.close();
+      else {
+        logDialog.removeAttribute("open");
+        restoreLogView();
+      }
+    }
+    listen(document, "pointerdown", closeMenus);
+    listen(document, "visibilitychange", () => {
+      if (pageVisible()) refreshJobs({force: true});
+      else clearRefreshTimer();
+    });
+    listen(document, "app:view", event => {
+      if (event.detail?.view === "download") refreshJobs({force: true});
+      else clearRefreshTimer();
+    });
+    listen($("[data-parse]"), "click", parse);
+    listen(urlField, "keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); parse(); } });
+    listen(urlField, "input", () => {++state.parseVersion;++state.formatRequest;state.resolved=null;resolution.hidden=true;stage('idle');parseState.textContent='等待解析';$("[data-parse]").disabled=false;$("[data-parse]").textContent='解析链接';});
+    listen(form, "submit", submit);
+    listen(formatField, "change", summary);
+    listen($("[data-output]"), "input", summary);
+    listen(modeField, "change", () => { ++state.parseVersion; if (urlField.value.trim()) parse(); });
+    listen($("[data-select-main]"), "click", () => setSelection("main"));
+    listen($("[data-select-all]"), "click", () => setSelection("all"));
+    listen($("[data-select-invert]"), "click", () => setSelection("invert"));
+    listen($("[data-select-none]"), "click", () => setSelection("none"));
+    listen($("[data-check-batch]"), "click", checkBatchFormats);
+    listen(episodeToggle, "click", () => setEpisodesOpen(!state.episodesOpen));
+    listen($("[data-refresh]"), "click", () => refreshJobs({force:true}));
+    listen($("[data-history-refresh]"), "click", refreshHistory);
+    listen(logDialog, "cancel", event => { event.preventDefault(); closeLog(); });
+    listen(logDialog, "close", restoreLogView);
+    listen(logDialog, "click", event => {
+      if (event.target !== logDialog) return;
+      const bounds = logDialog.getBoundingClientRect();
+      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+        closeLog();
+      }
+    });
+    listen($("[data-log-close]"), "click", closeLog);
+    listen($("[data-pick-folder]"), "click", async () => {
       if (typeof options.onChooseDirectory !== "function") return;
       try {
         const selected = await options.onChooseDirectory($("[data-output]").value.trim());
@@ -510,26 +694,37 @@
         summary();
       } catch (error) { showError(error.message); }
     });
-    $("[data-login-web]").addEventListener("click", () => options.onLogin?.("web"));
-    $("[data-login-tv]").addEventListener("click", () => options.onLogin?.("tv"));
-    $("[data-logout-web]").addEventListener("click", async () => {
+    listen($("[data-login-web]"), "click", () => options.onLogin?.("web"));
+    listen($("[data-login-tv]"), "click", () => options.onLogin?.("tv"));
+    listen($("[data-logout-web]"), "click", async () => {
       try { await api("/api/bili/logout", {method: "POST"}); await refreshAccount(); }
       catch (error) { showError(error.message); }
     });
-    $("[data-logout-tv]").addEventListener("click", async () => {
+    listen($("[data-logout-tv]"), "click", async () => {
       try { await api("/api/bili/tv/logout", {method: "POST"}); await refreshAccount(); }
       catch (error) { showError(error.message); }
     });
-    $("[data-log-dialog] form").addEventListener("submit", () => $("[data-log-dialog]").removeAttribute("open"));
 
     stage("idle");summary();$("[data-parse]").disabled=false;root.dataset.mounted="true";refreshAccount(); refreshJobs(); refreshHistory();
-    state.timer = window.setInterval(refreshJobs, options.pollInterval || 5000);
     return {
       state,
       parse,
       refreshJobs,
       refreshHistory,
-      destroy() { document.removeEventListener('pointerdown',closeMenus);if (state.timer) window.clearInterval(state.timer); }
+      destroy() {
+        if (state.destroyed) return;
+        state.destroyed = true;
+        clearRefreshTimer();
+        state.refreshAbort?.abort();
+        for (const [target, type, handler, listenerOptions] of state.listeners.splice(0)) {
+          target.removeEventListener(type, handler, listenerOptions);
+        }
+        if (logDialog?.open) logDialog.close();
+        state.jobCards.clear();
+        jobsHost.replaceChildren();
+        episodeList.replaceChildren();
+        delete root.dataset.mounted;
+      }
     };
   }
 

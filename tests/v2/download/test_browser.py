@@ -155,3 +155,173 @@ def test_changed_link_cannot_restore_old_parse_result(live_server):
         assert not errors,errors
     finally:
         browser.close();playwright.stop()
+
+
+def test_download_workbench_stability_and_log_controls():
+    playwright_api = pytest.importorskip("playwright.sync_api")
+    playwright = playwright_api.sync_playwright().start()
+    try:
+        try:
+            browser = playwright.chromium.launch()
+        except playwright_api.Error as exc:
+            pytest.skip(str(exc))
+        page = browser.new_page(viewport={"width": 1440, "height": 900})
+        page_errors = []
+        page.on("pageerror", lambda error: page_errors.append(str(error)))
+        fragment = (ROOT / "bili_remote/templates/v2/download/workbench.html").read_text()
+        css = (ROOT / "bili_remote/static/v2/download/workbench.css").read_text()
+        js = ROOT / "bili_remote/static/v2/download/workbench.js"
+        page.set_content(
+            '<meta name="csrf-token" content="test">'
+            '<style>body{min-height:2600px}</style>'
+            f'<main id="mount">{fragment}</main>'
+        )
+        page.add_style_tag(content=css)
+        page.add_script_tag(path=str(js))
+        page.evaluate(
+            """() => {
+              window.calls = [];
+              window.activeJobCalls = 0;
+              window.maxActiveJobCalls = 0;
+              window.jobs = [
+                {
+                  id: 1, title: '合成合并任务', api_mode: 'web', status: 'running',
+                  progress: 100, speed: 1048576, eta: 30
+                },
+                {
+                  id: 2, title: '合成完成任务', api_mode: 'web', status: 'completed',
+                  progress: 100, speed: 2097152, eta: 2,
+                  started_at: '2026-11-15T01:00:00+00:00',
+                  finished_at: '2026-11-15T01:01:05+00:00',
+                  download_duration_seconds: 65,
+                  final_size_bytes: 123456789
+                }
+              ];
+              window.logContent = Array.from(
+                {length: 240}, (_, index) => `synthetic log line ${index + 1}`
+              ).join('\\n');
+              window.wb = window.BiliDownloadV2.mount(document.querySelector('#mount'), {
+                pollInterval: 60000,
+                api: async (url, options = {}) => {
+                  window.calls.push({url, options});
+                  if (url === '/api/bili/status') {
+                    return {logged_in: true, tv_logged_in: false};
+                  }
+                  if (url === '/api/history?limit=200') return [];
+                  if (url.includes('/log?')) return {content: window.logContent};
+                  if (url !== '/api/jobs?limit=500') {
+                    throw new Error(`unexpected test request: ${url}`);
+                  }
+                  window.activeJobCalls += 1;
+                  window.maxActiveJobCalls = Math.max(
+                    window.maxActiveJobCalls, window.activeJobCalls
+                  );
+                  try {
+                    await new Promise(resolve => setTimeout(resolve, 60));
+                    return window.jobs;
+                  } finally {
+                    window.activeJobCalls -= 1;
+                  }
+                }
+              });
+            }"""
+        )
+        page.locator('.dv2-job[data-job-id="2"]').wait_for()
+        merging = page.locator('.dv2-job[data-job-id="1"]')
+        completed = page.locator('.dv2-job[data-job-id="2"]')
+        expect(merging.locator(".dv2-badge")).to_have_text("Web · 合并中")
+        assert "正在合并音视频" in merging.locator(".dv2-job-meta").inner_text()
+        assert "剩余" not in merging.locator(".dv2-job-meta").inner_text()
+        assert "/s" not in merging.locator(".dv2-job-meta").inner_text()
+        expect(merging.locator(".dv2-progress")).to_be_visible()
+
+        expect(completed.locator(".dv2-badge")).to_have_text("Web · 已完成")
+        completed_meta = completed.locator(".dv2-job-meta").inner_text()
+        assert "完成于" in completed_meta
+        assert "下载总用时 1 分 5 秒" in completed_meta
+        assert "最终大小 117.7 MiB" in completed_meta
+        assert "剩余" not in completed_meta
+        assert "/s" not in completed_meta
+        expect(completed.locator(".dv2-progress")).to_be_hidden()
+
+        page.evaluate(
+            """() => {
+              window.stableCard = document.querySelector('.dv2-job[data-job-id="1"]');
+              window.jobs[0].progress = 50;
+            }"""
+        )
+        page.evaluate("window.wb.refreshJobs({force: true})")
+        assert page.evaluate(
+            """() => window.stableCard === document.querySelector(
+              '.dv2-job[data-job-id="1"]'
+            ) && window.stableCard.dataset.status === 'downloading'"""
+        )
+        assert "50%" in merging.locator(".dv2-job-meta").inner_text()
+
+        page.wait_for_function("window.activeJobCalls === 0")
+        page.evaluate("window.maxActiveJobCalls = 0; window.activeJobCalls = 0")
+        concurrency = page.evaluate(
+            """async () => {
+              await Promise.all([
+                window.wb.refreshJobs({force: true}),
+                window.wb.refreshJobs({force: true}),
+                window.wb.refreshJobs({force: true})
+              ]);
+              await new Promise(resolve => setTimeout(resolve, 180));
+              return window.maxActiveJobCalls;
+            }"""
+        )
+        assert concurrency == 1
+
+        page.evaluate("window.scrollTo(0, 700)")
+        assert page.evaluate("window.scrollY") == 700
+
+        def open_log():
+            completed.get_by_role("button", name="查看日志").click()
+            expect(page.locator("[data-log-dialog]")).to_be_visible()
+            page.wait_for_function(
+                "document.activeElement === document.querySelector('[data-log-close]')"
+            )
+
+        open_log()
+        dialog = page.locator("[data-log-dialog]")
+        expect(page.locator("[data-log-close]")).to_be_visible()
+        assert page.evaluate(
+            "document.querySelector('[data-log-content]').scrollHeight > "
+            "document.querySelector('[data-log-content]').clientHeight"
+        )
+        page.evaluate(
+            "document.querySelector('[data-log-content]').scrollTop = 100000"
+        )
+        assert page.evaluate("document.querySelector('[data-log-content]').scrollTop > 0")
+        page.get_by_role("button", name="关闭日志").click()
+        expect(dialog).to_be_hidden()
+        page.wait_for_function("Math.abs(window.scrollY - 700) <= 2")
+
+        open_log()
+        page.keyboard.press("Escape")
+        expect(dialog).to_be_hidden()
+        page.wait_for_function("Math.abs(window.scrollY - 700) <= 2")
+
+        open_log()
+        dialog_box = dialog.bounding_box()
+        assert dialog_box
+        page.mouse.click(max(2, dialog_box["x"] - 10), max(2, dialog_box["y"] - 10))
+        expect(dialog).to_be_hidden()
+        page.wait_for_function("Math.abs(window.scrollY - 700) <= 2")
+
+        page.evaluate("window.wb.destroy()")
+        assert page.locator(".dv2-job").count() == 0
+        assert page.evaluate(
+            "document.querySelector('#mount').dataset.mounted === undefined"
+        )
+        page.evaluate("window.calls.length = 0")
+        page.evaluate(
+            "document.dispatchEvent(new CustomEvent('app:view', {detail: {view: 'download'}}))"
+        )
+        page.wait_for_timeout(100)
+        assert page.evaluate("window.calls.length") == 0
+        assert not page_errors, page_errors
+        browser.close()
+    finally:
+        playwright.stop()

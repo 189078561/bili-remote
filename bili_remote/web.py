@@ -65,6 +65,7 @@ from .validation import (
     validate_output_directory,
     validate_output_template,
 )
+from .v2.download import project_download_job
 from .workspace import (
     WorkspaceError,
     normalize_relative_path,
@@ -1059,7 +1060,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _: SessionData = Depends(get_session),
         service_container: Services = Depends(get_services),
     ) -> list[dict[str, Any]]:
-        jobs = service_container.database.list_jobs(limit)
+        jobs = [
+            project_download_job(job)
+            for job in service_container.database.list_jobs(limit)
+        ]
         for job in jobs:
             job.pop("log_path", None)
         return jobs
