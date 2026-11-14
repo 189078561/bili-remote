@@ -713,17 +713,45 @@ class YtDlpRunner:
 
     @staticmethod
     def _is_cdn_failure(message: str) -> bool:
-        return any(
-            pattern in message
+        text = message.lower()
+        if any(
+            pattern in text
             for pattern in (
-                "HTTP Error 403",
-                "403: Forbidden",
-                "403 Forbidden",
-                "HTTP Error 404",
-                "404: Not Found",
-                "Did not get any data blocks",
-                "Remote end closed connection",
-                "Unable to download video data",
+                "http error 403",
+                "403: forbidden",
+                "403 forbidden",
+                "http error 404",
+                "404: not found",
+                "did not get any data blocks",
+                "remote end closed connection",
+                "connection reset by peer",
+                "connection aborted",
+                "unable to download video data",
+            )
+        ):
+            return True
+
+        retryable_status = (
+            r"(?:429|5(?:00|01|02|03|04|20|21|22|23|24|25|26|27)|567)"
+        )
+        if re.search(
+            rf"(?:\bhttp(?:\s+error)?(?:\s+status)?|\berrorcode|"
+            rf"\bstatus(?:\s+code)?)\s*[:=/]?\s*{retryable_status}\b",
+            text,
+        ):
+            return True
+        if re.search(
+            rf"\bhttp/\d(?:\.\d)?\s+{retryable_status}\b",
+            text,
+        ):
+            return True
+        return bool(
+            re.search(
+                rf"\b{retryable_status}\b\s*:?\s*"
+                r"(?:too many requests|internal server error|bad gateway|"
+                r"service unavailable|gateway timeout|web server is down|"
+                r"connection timed out|origin is unreachable)",
+                text,
             )
         )
 
@@ -1348,19 +1376,21 @@ class YtDlpRunner:
 
     @staticmethod
     def _should_fallback(message: str) -> bool:
-        patterns = (
-            "Did not get any data blocks",
-            "Remote end closed connection",
-            "HTTP Error 403",
-            "403: Forbidden",
-            "403 Forbidden",
-            "Requested format is not available",
-            "Unable to download video data",
+        return YtDlpRunner._is_cdn_failure(message) or (
+            "requested format is not available" in message.lower()
         )
-        return any(pattern in message for pattern in patterns)
 
-    def _aria2_args(self) -> str:
+    def _aria2_connection_plan(self) -> tuple[int, ...]:
+        attempts = 1 + self.settings.aria2_resume_retries
         connections = self.settings.aria2_connections
+        plan: list[int] = []
+        for _ in range(attempts):
+            plan.append(max(1, connections))
+            connections = max(1, (connections + 1) // 2)
+        return tuple(plan)
+
+    def _aria2_args(self, connections: int | None = None) -> str:
+        connections = connections or self.settings.aria2_connections
         return (
             "aria2c:--max-concurrent-downloads=1 "
             f"--max-connection-per-server={connections} --split={connections} "
@@ -1432,7 +1462,11 @@ class YtDlpRunner:
         if info_payload and info_payload.get("_v2_origin"):
             self.completion_origins[job["id"]] = info_payload["_v2_origin"]
 
-        def build_command(selector: str, use_aria2: bool) -> list[str]:
+        def build_command(
+            selector: str,
+            use_aria2: bool,
+            connections: int | None = None,
+        ) -> list[str]:
             command = [
                 *self.settings.ytdlp_command,
                 "--newline",
@@ -1480,7 +1514,7 @@ class YtDlpRunner:
                         "--downloader",
                         "aria2c",
                         "--downloader-args",
-                        self._aria2_args(),
+                        self._aria2_args(connections),
                     ]
                 )
             if info_path:
@@ -1514,14 +1548,15 @@ class YtDlpRunner:
             for index, selector in enumerate(selectors)
             if selector and selector not in selectors[:index]
         ]
-        attempts: list[tuple[str, bool]] = []
+        connection_plan = self._aria2_connection_plan()
+        attempts: list[tuple[str, bool, int | None]] = []
         for selector in selectors:
             if self.aria2_executable:
                 attempts.extend(
-                    (selector, True)
-                    for _ in range(1 + self.settings.aria2_resume_retries)
+                    (selector, True, connections)
+                    for connections in connection_plan
                 )
-            attempts.append((selector, False))
+            attempts.append((selector, False, None))
         try:
             attempt_messages: list[str] = []
             result_path: str | None = None
@@ -1530,12 +1565,16 @@ class YtDlpRunner:
             aria2_partial_file: Path | None = None
             with log_path.open("a", encoding="utf-8") as log_file:
                 if self.aria2_executable:
+                    connection_plan_text = " → ".join(
+                        f"x{connections}" for connections in connection_plan
+                    )
                     log_file.write(
                         f"\n[{utc_now()}] aria2c 多连接下载已启用："
                         f"{self.settings.aria2_connections} 连接，"
                         f"分片 {self.settings.aria2_piece_size}，"
                         f"最小分片 {self.settings.aria2_min_split_size}，"
-                        f"断点续传重试 {self.settings.aria2_resume_retries} 次\n"
+                        f"断点续传重试 {self.settings.aria2_resume_retries} 次；"
+                        f"CDN 限流时按 {connection_plan_text} 自动降档\n"
                     )
                 elif self.settings.aria2_enabled:
                     log_file.write(
@@ -1544,7 +1583,7 @@ class YtDlpRunner:
                 if cdn_warning:
                     log_file.write(f"[{utc_now()}] {cdn_warning}\n")
                 log_file.flush()
-            for index, (selector, use_aria2) in enumerate(attempts):
+            for index, (selector, use_aria2, connections) in enumerate(attempts):
                 if (
                     index > 0
                     and info_payload
@@ -1558,9 +1597,15 @@ class YtDlpRunner:
                     aria2_partial_file = None
                     self._write_info_json(info_path, info_payload)
                     with log_path.open("a", encoding="utf-8") as log_file:
+                        next_engine = (
+                            f"aria2c x{connections}"
+                            if use_aria2
+                            else "yt-dlp 原生下载"
+                        )
                         log_file.write(
-                            f"\n[{utc_now()}] CDN 节点失败，"
-                            "已切换到下一个备用节点\n"
+                            f"\n[{utc_now()}] CDN 节点失败或触发并发限流，"
+                            "已切换到下一个备用节点；"
+                            f"下一次尝试使用 {next_engine}\n"
                         )
                         log_file.flush()
                 if selector != previous_selector:
@@ -1585,8 +1630,9 @@ class YtDlpRunner:
                 elif use_aria2 and attempts[index - 1][1]:
                     with log_path.open("a", encoding="utf-8") as log_file:
                         log_file.write(
-                            f"\n[{utc_now()}] aria2c 连接中断，"
-                            "使用断点续传重试\n"
+                            f"\n[{utc_now()}] aria2c 下载失败，"
+                            "使用断点续传重试"
+                            f"（连接数调整为 x{connections}）\n"
                         )
                         log_file.flush()
                 elif not use_aria2 and attempts[index - 1][1]:
@@ -1598,12 +1644,12 @@ class YtDlpRunner:
                         )
                         log_file.flush()
 
-                command = build_command(selector, use_aria2)
+                command = build_command(selector, use_aria2, connections)
                 result_path = None
                 errors = []
                 with log_path.open("a", encoding="utf-8") as log_file:
                     engine = (
-                        f"aria2c x{self.settings.aria2_connections}"
+                        f"aria2c x{connections}"
                         if use_aria2
                         else "yt-dlp native"
                     )

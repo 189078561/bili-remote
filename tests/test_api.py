@@ -315,6 +315,39 @@ def test_aria2_resumes_after_connection_drop(settings, monkeypatch) -> None:
         assert "回退到 yt-dlp 原生下载" not in log
 
 
+def test_aria2_downgrades_connections_before_native_fallback(
+    settings, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "bili_remote.downloader.shutil.which", lambda _name: "/usr/bin/aria2c"
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        csrf = login(client)
+        created = client.post(
+            "/api/jobs",
+            headers={"X-CSRF-Token": csrf},
+            json={
+                "url": "https://www.bilibili.com/video/BV1TEST?ariadownshift=1",
+                "format_selector": "bv*+ba/b",
+                "all_parts": True,
+                "output_template": "Bilibili/%(title)s.%(ext)s",
+                "output_dir": "",
+            },
+        )
+        assert created.status_code == 200, created.text
+        job = wait_for_job(client, created.json()["id"], {"completed", "failed"})
+        assert job["status"] == "completed", job
+        log = client.get(f"/api/jobs/{job['id']}/log").json()["content"]
+        assert "CDN 限流时按 x16 → x8 → x4 自动降档" in log
+        assert "HTTP Error 567" in log
+        assert "HTTP Error 429" in log
+        assert "via aria2c x16" in log
+        assert "via aria2c x8" in log
+        assert "via aria2c x4" in log
+        assert "回退到 yt-dlp 原生下载" not in log
+
+
 def test_aria2_partial_files_are_removed_before_native_fallback(
     settings, monkeypatch
 ) -> None:

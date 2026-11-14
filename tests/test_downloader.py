@@ -126,6 +126,28 @@ def test_aria2_defaults_are_balanced_for_bilibili(settings) -> None:
     assert "--summary-interval=1" in args
 
 
+def test_aria2_connections_downgrade_after_cdn_rate_limits(settings) -> None:
+    settings.aria2_connections = 16
+    settings.aria2_resume_retries = 2
+    runner = YtDlpRunner(settings, None)
+
+    assert runner._aria2_connection_plan() == (16, 8, 4)
+    assert "--max-connection-per-server=8" in runner._aria2_args(8)
+    assert "--split=8" in runner._aria2_args(8)
+
+
+def test_cdn_rate_limit_and_temporary_statuses_are_recoverable() -> None:
+    messages = (
+        "ERROR: unable to download video data: HTTP Error 567",
+        "ERROR: HTTP Error 429: Too Many Requests",
+        "ERROR: HTTP Error 503: Service Unavailable",
+        "errorCode=502",
+        "HTTP/1.1 504 Gateway Timeout",
+    )
+    assert all(YtDlpRunner._is_cdn_failure(message) for message in messages)
+    assert not YtDlpRunner._is_cdn_failure("disk full: status 507")
+
+
 def test_tv_formats_have_stable_ids() -> None:
     formats = YtDlpRunner._tv_formats(
         {

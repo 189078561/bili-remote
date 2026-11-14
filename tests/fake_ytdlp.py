@@ -32,6 +32,25 @@ def main() -> int:
     url = sys.argv[-1]
     if option_value("--downloader") == "aria2c":
         print("__ARIA__using external downloader", file=sys.stderr, flush=True)
+        downloader_args = option_value("--downloader-args") or ""
+        if "ariadownshift" in url:
+            if "--split=16" in downloader_args:
+                print(
+                    "ERROR: unable to download video data: HTTP Error 567",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return 1
+            if "--split=8" in downloader_args:
+                print(
+                    "ERROR: HTTP Error 429: Too Many Requests",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return 1
+            if "--split=4" not in downloader_args:
+                print("ERROR: unexpected adaptive connection plan", file=sys.stderr)
+                return 1
         if "ariaresume" in url:
             paths = option_value("--paths") or "home:."
             root = Path(paths.removeprefix("home:"))
