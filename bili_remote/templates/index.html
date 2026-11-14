@@ -295,12 +295,7 @@
       </div>
       <div class="button-row files-header-actions">
         {% if v2_enabled %}
-        <details class="file-history-menu"><summary class="button ghost small">工具记录</summary><div class="file-history-items">
-          <button id="screenshot-sessions-button" class="button ghost small" type="button">缩略图记录</button>
-          <button class="button ghost small" type="button" data-file-tool="release-info">媒体报告</button>
-          <button class="button ghost small" type="button" data-file-tool="uploads">上传记录</button>
-          <button class="button ghost small" type="button" data-file-tool="torrents">本地种子</button>
-        </div></details>
+        <button class="button ghost small" type="button" data-file-tool="uploads">上传记录</button>
         {% else %}
         <button id="screenshot-sessions-button" class="button secondary small" type="button">缩略图记录</button>
         <details class="file-history-menu"><summary class="button ghost small">工具记录</summary><div class="file-history-items"><button class="button ghost small" type="button" data-file-tool="release-info">媒体报告</button><button class="button ghost small" type="button" data-file-tool="uploads">上传记录</button><button class="button ghost small" type="button" data-file-tool="torrents">本地种子</button></div></details>
