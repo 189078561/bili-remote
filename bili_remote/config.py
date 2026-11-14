@@ -41,7 +41,7 @@ class Settings:
     ytdlp_version: str = "2026.8.19"
     aria2_enabled: bool = True
     aria2c_command: str = "aria2c"
-    aria2_connections: int = 16
+    aria2_connections: int = 8
     aria2_resume_retries: int = 2
     aria2_min_split_size: str = "20M"
     aria2_piece_size: str = "5M"
@@ -109,7 +109,7 @@ class Settings:
             ytdlp_version=os.getenv("YTDLP_VERSION", "2026.8.19"),
             aria2_enabled=_as_bool(os.getenv("ARIA2_ENABLED"), True),
             aria2c_command=os.getenv("ARIA2C_COMMAND", "aria2c"),
-            aria2_connections=int(os.getenv("ARIA2_CONNECTIONS", "16")),
+            aria2_connections=int(os.getenv("ARIA2_CONNECTIONS", "8")),
             aria2_resume_retries=int(os.getenv("ARIA2_RESUME_RETRIES", "2")),
             aria2_min_split_size=os.getenv("ARIA2_MIN_SPLIT_SIZE", "20M"),
             aria2_piece_size=os.getenv("ARIA2_PIECE_SIZE", "5M"),

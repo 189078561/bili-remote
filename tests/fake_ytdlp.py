@@ -34,14 +34,14 @@ def main() -> int:
         print("__ARIA__using external downloader", file=sys.stderr, flush=True)
         downloader_args = option_value("--downloader-args") or ""
         if "ariadownshift" in url:
-            if "--split=16" in downloader_args:
+            if "--split=8" in downloader_args:
                 print(
                     "ERROR: unable to download video data: HTTP Error 567",
                     file=sys.stderr,
                     flush=True,
                 )
                 return 1
-            if "--split=8" in downloader_args:
+            if "--split=6" in downloader_args:
                 print(
                     "ERROR: HTTP Error 429: Too Many Requests",
                     file=sys.stderr,

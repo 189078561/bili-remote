@@ -47,6 +47,8 @@ TV_CDN_BLOCKED_MESSAGE = (
     "TV 线路不能解除地区限制，请切换到 Web 线路，或更换服务器出口 IP 后重试。"
 )
 MIN_FORMAT_HEIGHT = 1080
+ARIA2_STABLE_MAX_CONNECTIONS = 8
+ARIA2_STABLE_FLOOR_CONNECTIONS = 4
 TV_STREAM_USER_AGENT = (
     "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36"
@@ -714,7 +716,7 @@ class YtDlpRunner:
     @staticmethod
     def _is_cdn_failure(message: str) -> bool:
         text = message.lower()
-        if any(
+        return YtDlpRunner._has_retryable_cdn_status(message) or any(
             pattern in text
             for pattern in (
                 "http error 403",
@@ -728,9 +730,11 @@ class YtDlpRunner:
                 "connection aborted",
                 "unable to download video data",
             )
-        ):
-            return True
+        )
 
+    @staticmethod
+    def _has_retryable_cdn_status(message: str) -> bool:
+        text = message.lower()
         retryable_status = (
             r"(?:429|5(?:00|01|02|03|04|20|21|22|23|24|25|26|27)|567)"
         )
@@ -752,6 +756,32 @@ class YtDlpRunner:
                 r"service unavailable|gateway timeout|web server is down|"
                 r"connection timed out|origin is unreachable)",
                 text,
+            )
+        )
+
+    @staticmethod
+    def _should_rotate_cdn(message: str) -> bool:
+        """Keep resumable downloads on one CDN unless the node itself is bad."""
+        text = message.lower()
+        if (
+            YtDlpRunner._has_retryable_cdn_status(message)
+            or "too many requests" in text
+            or "rate limit" in text
+        ):
+            return False
+        return any(
+            pattern in text
+            for pattern in (
+                "http error 403",
+                "403: forbidden",
+                "403 forbidden",
+                "http error 404",
+                "404: not found",
+                "did not get any data blocks",
+                "remote end closed connection",
+                "connection reset by peer",
+                "connection aborted",
+                "unable to download video data",
             )
         )
 
@@ -1382,11 +1412,20 @@ class YtDlpRunner:
 
     def _aria2_connection_plan(self) -> tuple[int, ...]:
         attempts = 1 + self.settings.aria2_resume_retries
-        connections = self.settings.aria2_connections
+        connections = min(
+            max(1, self.settings.aria2_connections),
+            ARIA2_STABLE_MAX_CONNECTIONS,
+        )
         plan: list[int] = []
         for _ in range(attempts):
             plan.append(max(1, connections))
-            connections = max(1, (connections + 1) // 2)
+            if connections <= ARIA2_STABLE_FLOOR_CONNECTIONS:
+                connections = max(1, connections - 1)
+            else:
+                connections = max(
+                    ARIA2_STABLE_FLOOR_CONNECTIONS,
+                    connections - 2,
+                )
         return tuple(plan)
 
     def _aria2_args(self, connections: int | None = None) -> str:
@@ -1570,7 +1609,8 @@ class YtDlpRunner:
                     )
                     log_file.write(
                         f"\n[{utc_now()}] aria2c 多连接下载已启用："
-                        f"{self.settings.aria2_connections} 连接，"
+                        f"配置 {self.settings.aria2_connections} 连接，"
+                        f"当前 {connection_plan[0]} 连接，"
                         f"分片 {self.settings.aria2_piece_size}，"
                         f"最小分片 {self.settings.aria2_min_split_size}，"
                         f"断点续传重试 {self.settings.aria2_resume_retries} 次；"
@@ -1590,7 +1630,7 @@ class YtDlpRunner:
                     and info_path
                     and selector == previous_selector
                     and attempt_messages
-                    and self._is_cdn_failure(attempt_messages[-1])
+                    and self._should_rotate_cdn(attempt_messages[-1])
                     and self._advance_cdn_info(info_payload)
                 ):
                     self._remove_aria2_partial(aria2_partial_file, output_root)
@@ -1603,7 +1643,7 @@ class YtDlpRunner:
                             else "yt-dlp 原生下载"
                         )
                         log_file.write(
-                            f"\n[{utc_now()}] CDN 节点失败或触发并发限流，"
+                            f"\n[{utc_now()}] CDN 节点发生不可恢复错误，"
                             "已切换到下一个备用节点；"
                             f"下一次尝试使用 {next_engine}\n"
                         )

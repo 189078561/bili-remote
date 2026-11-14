@@ -119,8 +119,8 @@ def test_parse_aria2_progress_reports_parallel_download() -> None:
 def test_aria2_defaults_are_balanced_for_bilibili(settings) -> None:
     runner = YtDlpRunner(settings, None)
     args = runner._aria2_args()
-    assert "--max-connection-per-server=16" in args
-    assert "--split=16" in args
+    assert "--max-connection-per-server=8" in args
+    assert "--split=8" in args
     assert "--min-split-size=20M" in args
     assert "--piece-length=5M" in args
     assert "--summary-interval=1" in args
@@ -131,7 +131,7 @@ def test_aria2_connections_downgrade_after_cdn_rate_limits(settings) -> None:
     settings.aria2_resume_retries = 2
     runner = YtDlpRunner(settings, None)
 
-    assert runner._aria2_connection_plan() == (16, 8, 4)
+    assert runner._aria2_connection_plan() == (8, 6, 4)
     assert "--max-connection-per-server=8" in runner._aria2_args(8)
     assert "--split=8" in runner._aria2_args(8)
 
@@ -146,6 +146,24 @@ def test_cdn_rate_limit_and_temporary_statuses_are_recoverable() -> None:
     )
     assert all(YtDlpRunner._is_cdn_failure(message) for message in messages)
     assert not YtDlpRunner._is_cdn_failure("disk full: status 507")
+
+
+def test_rate_limits_keep_the_current_cdn_and_partial_download() -> None:
+    assert not YtDlpRunner._should_rotate_cdn(
+        "ERROR: unable to download video data: HTTP Error 567"
+    )
+    assert not YtDlpRunner._should_rotate_cdn(
+        "ERROR: HTTP Error 429: Too Many Requests"
+    )
+    assert not YtDlpRunner._should_rotate_cdn(
+        "ERROR: HTTP Error 503: Service Unavailable"
+    )
+    assert YtDlpRunner._should_rotate_cdn(
+        "ERROR: unable to download video data: HTTP Error 403"
+    )
+    assert YtDlpRunner._should_rotate_cdn(
+        "ERROR: connection reset by peer"
+    )
 
 
 def test_tv_formats_have_stable_ids() -> None:

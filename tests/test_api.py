@@ -282,7 +282,7 @@ def test_aria2_failure_falls_back_to_native_downloader(
         job = wait_for_job(client, job_id, {"completed", "failed"})
         assert job["status"] == "completed", job
         log = client.get(f"/api/jobs/{job_id}/log").json()["content"]
-        assert "aria2c 多连接下载已启用：16 连接，分片 5M" in log
+        assert "aria2c 多连接下载已启用：配置 8 连接，当前 8 连接" in log
         assert "__ARIA__using external downloader" in log
         assert "使用断点续传重试" in log
         assert "aria2c 连续中断，已清理临时分片，回退到 yt-dlp 原生下载" in log
@@ -339,11 +339,11 @@ def test_aria2_downgrades_connections_before_native_fallback(
         job = wait_for_job(client, created.json()["id"], {"completed", "failed"})
         assert job["status"] == "completed", job
         log = client.get(f"/api/jobs/{job['id']}/log").json()["content"]
-        assert "CDN 限流时按 x16 → x8 → x4 自动降档" in log
+        assert "CDN 限流时按 x8 → x6 → x4 自动降档" in log
         assert "HTTP Error 567" in log
         assert "HTTP Error 429" in log
-        assert "via aria2c x16" in log
         assert "via aria2c x8" in log
+        assert "via aria2c x6" in log
         assert "via aria2c x4" in log
         assert "回退到 yt-dlp 原生下载" not in log
 
