@@ -1,8 +1,40 @@
 # 工作台前端验证记录
 
+## 模块 03：一级资源浏览与选择（2026-11-15）
+
+环境：分支 `codex/workbench-resource-browser-v2`，工作区 `/opt/bili-remote-wt-workbench-resource-browser-v2`，基于 `11c3000`。测试使用 isolated FastAPI fixture、真实登录/CSRF 和真实 `/api/files/*` 文件服务；文件和 SQLite 均位于 pytest 临时目录，浏览器为 Chromium。未读取生产 `.env`、Cookie、数据库或媒体，未启动生产 Compose。
+
+### 已执行命令
+
+| 检查 | 结果 |
+| --- | --- |
+| `python3 tests/v2/workbench/build_frontend.py` | 通过，重新生成本地静态入口 |
+| `node --check bili_remote/static/v2/workbench/workbench.js` | 通过 |
+| `python3 tests/v2/workbench/build_frontend.py --check` | 通过，模板与生成入口一致 |
+| `python3 scripts/dev_test.py workbench --filter test_real_tools_screenshot_collage_download_report_and_torrent --maxfail 1` | **1 passed**，刷新后从一级浏览器重新选择合成资源 |
+| `python3 scripts/dev_test.py workbench --maxfail 1` | **29 passed，0 failed，1 warning，60.17 秒** |
+| `git diff --check` | 通过（提交前复跑） |
+
+唯一 warning 是现有 Starlette/httpx 弃用提示；没有为测试升级宿主依赖。
+
+### 覆盖事实
+
+- 初始无资源时直接显示 `[data-wb="resource-browser"]`，studio 隐藏；四类入口实际为下载、种子、图片、发布资料。
+- 使用真实 `/api/files/browse` 浏览目录、进入目录、返回上级和当前目录搜索；选择单文件、多文件、目录后显示暂存摘要。
+- 勾选期间 `wb.resources` 保持为空；点击“使用所选资源”后才提交 `wb.select`。当前已有资源时重新打开选择器，关闭后原资源保持不变。
+- 文件管理/下载入口的 `select(resources, {context, origins})` 交接直接显示 studio；已有上下文不重复调用资源解析。
+- 选择器在桌面和移动端使用普通文档流，测试断言 `body` 的 `overflowY` 不是 `hidden`；删除旧资源抽屉模板、sheet 专属规则和固定遮罩布局。
+- 复用共享 FileBrowser 和既有指纹/安全校验；异步引用解析完成后才提交切换，旧选择不会覆盖新上下文。人工编辑保护仍由原 `select` 确认逻辑负责。
+
+### 本次边界
+
+本次只验证模块 03 前端交互与真实文件 API，不运行全量测试，不修改后端、数据库、TMDB、命名规则、下载引擎或其他模块。没有部署、重启 Docker、操作生产数据或开始模块 04。
+
+## 历史基线（2026-11-04）
+
 日期：2026-11-04（Asia/Shanghai）。源码基线 `db43176`，当前开发分支 `codex/workbench-v2`。所有服务均为测试夹具创建的回环临时服务，用后关闭；合成文件与 SQLite 位于 pytest 临时目录。界面截图仅在被忽略的本 worktree `.dev/`，没有生产数据。
 
-## 已执行命令
+### 历史命令
 
 | 检查 | 结果 |
 | --- | --- |
@@ -12,11 +44,11 @@
 | `python3 scripts/dev_test.py workbench` | **22 passed，0 failed，0 skipped，1 warning，33.18 秒**；包含最终刷新真实产物检查 |
 | `git diff --check` | 通过；提交前另查暂存差异和文件白名单 |
 
-全量包含既有 210 项与本模块 11 项 pytest 测试；其中一项还运行 Node 内置测试器的 3 个传输契约用例。Starlette/httpx 弃用提示属于既有环境警告，未通过升级依赖消除。
+历史记录中的全量结果包含既有 210 项与本模块 11 项 pytest 测试；其中一项还运行 Node 内置测试器的 3 个传输契约用例。Starlette/httpx 弃用提示属于既有环境警告，未通过升级依赖消除。该结果不是本次模块 03 分支的运行结果。
 
 使用只读共享解释器 `/opt/bili-remote/.venv/bin/python`（Python 3.11.2）与现有 Node v24.18.0。正式 Python >=3.12 回归尚未验证，未升级宿主环境。
 
-## 真实本地运行证明
+### 历史本地运行证明
 
 - 使用真实 FastAPI 应用、现有认证/CSRF、FileBrowser/FileService、processing 队列和独立数据库。
 - 原生静态入口可直接在运行本分支的测试应用中访问；登录后读取文件目录，未登录只显示登录提示。不是通过静态假数据页面验收。
@@ -28,7 +60,7 @@
 - 新入口刷新后发布字段为空；已完成的真实制种任务可通过“查看产物”再次读取下载链接。
 - 390/768/1440 宽度覆盖；无页面横向溢出。四视图、常驻识别区、独立复制及键盘 tablist 实现；测试使用真实浏览器 Chromium。
 
-## 测试替身边界
+### 历史测试替身边界
 
 当前分支没有 V2 识别/命名/主标题/副标题/组合/统一任务接口，不能把如下前端契约测试称为这些后端已完成：
 
@@ -42,7 +74,7 @@
 
 现有 BDInfo 后端测试仍通过，但本工作台没有用真实蓝光盘目录和实际 BDInfo 命令完成端到端验证。只读报告没有可复用 ArtifactRef，尚不能进入完整发布组合；不能用临时 ID 冒充产物。
 
-## 完成审计
+### 历史完成审计
 
 | 用户要求 | 当前证据 | 结论 |
 | --- | --- | --- |

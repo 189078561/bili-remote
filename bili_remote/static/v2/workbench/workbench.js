@@ -5,6 +5,8 @@
   const val = field => field?.value ?? "";
   const key = task => `${task.kind}:${task.id}`;
   const node = (tag, text, className) => { const el = document.createElement(tag); if (text != null) el.textContent = text; if (className) el.className = className; return el; };
+  const parentPath = value => { const parts = String(value || "").split("/").filter(part => part && part !== "." && part !== ".."); parts.pop(); return parts.join("/"); };
+  const resourceKind = item => item?.is_dir || item?.kind === "directory" ? "目录" : ({video:"视频", image:"图片", torrent:"种子", text:"文本"}[item?.kind] || "文件");
   function safeURL(value, local = false) {
     try { const url = new URL(value, global.location.href); return ["http:", "https:"].includes(url.protocol) && (!local || url.origin === global.location.origin) && !url.username && !url.password ? url.href : null; } catch { return null; }
   }
@@ -17,7 +19,7 @@
     constructor(host, {api = new global.BiliWorkbenchAPI(), FileBrowser = global.FileBrowser, pollInterval = 2000} = {}) {
       if (!host) throw new Error("工作台缺少挂载节点");
       this.host = host; this.api = api; this.FileBrowser = FileBrowser; this.pollInterval = pollInterval;
-      this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
+      this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.resourcePickerOpen = true; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
       this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.previewKey = null; this.previewUndo = false; this.renameBatch = null; this.episodeOverrides = {}; this.content = ""; this.images = []; this.artifacts = []; this.links = [];
       this.fieldVersions = {}; this.tasks = new Map(); this.jobs = new Map(); this.notified = new Set(); this.applied = new Set(); this.pending = new Set(); this.timers = new Set(); this.abort = new AbortController(); this.destroyed = false;
       this.listen(); this.setTab("content"); this.setupLayout();
@@ -31,16 +33,23 @@
           rootKeys: ["downloads", "torrents", "images", "release_info"], selectionType: "both", allowMultiple: true,
           onSelectionChange: items => this.stageSelection(items),
           onLoadStart: () => this.stageSelection(this.browser?.selectedItems() || []),
-          onConfirm: async items => { this.selecting = true; try { const accepted = await this.select(items); if (accepted) this.openPanel(null); return accepted; } finally { this.selecting = false; } }, confirmLabel: "使用所选资源", title: "资源文件"
+          onConfirm: async items => { this.selecting = true; try { const accepted = await this.select(items); if (accepted) this.closeResourcePicker(); return accepted; } finally { this.selecting = false; } }, confirmLabel: "使用所选资源", title: "资源文件"
         });
         try { await this.browser.init(); } catch (error) { this.el("browser").textContent = error.message; this.notice(error.message, true); }
       } else this.el("browser").textContent = "统一文件浏览器尚未加载，请由主页面加载共享组件。";
+      this.syncResourcePicker();
       await this.refreshTasks(true);
       return this;
     }
     listen() {
       const opts = {signal: this.abort.signal};
       this.host.addEventListener("click", event => {
+        const resourceAction = event.target.closest("[data-resource-action]");
+        if (resourceAction && !resourceAction.disabled) {
+          if (resourceAction.dataset.resourceAction === "up") this.navigateResourceUp();
+          else if (resourceAction.dataset.resourceAction === "close") this.closeResourcePicker();
+          return;
+        }
         const layout = event.target.closest("[data-layout]");
         if (layout) this.openPanel(layout.dataset.layout === "close" || layout.dataset.layout === "edit" ? null : layout.dataset.layout);
         const format = event.target.closest("[data-format]");
@@ -93,8 +102,13 @@
     }
     setupLayout() {
       this.host.addEventListener("keydown", event => {
-        if (!this.activePanel || document.querySelector('#modal:not(.hidden)') || document.querySelector('dialog[open]')) return;
-        if (event.key === "Escape") { event.preventDefault(); this.openPanel(null); }
+        if (document.querySelector('#modal:not(.hidden)') || document.querySelector('dialog[open]')) return;
+        if (event.key === "Escape") {
+          if (this.activePanel) { event.preventDefault(); this.openPanel(null); }
+          else if (this.resourcePickerOpen && this.resources.length) { event.preventDefault(); this.closeResourcePicker(); }
+          return;
+        }
+        if (!this.activePanel) return;
         if (event.key === "Tab") {
           const sheet = this.host.querySelector(`[data-sheet="${this.activePanel}"]`);
           const nodes = [...sheet.querySelectorAll('button,input,select,textarea,summary,a[href],[tabindex="0"]')].filter(el => !el.disabled && el.getClientRects().length);
@@ -104,17 +118,71 @@
       }, {signal:this.abort.signal});
     }
     setLayoutView(view) { this.openPanel(view === "preview" ? "preview" : null); }
-    setResourceDrawer(open) { this.openPanel(open ? "resources" : null); }
+    setResourceDrawer(open) { if (open) this.openResourcePicker(); else this.closeResourcePicker(); }
+    syncResourcePicker() {
+      const picker = this.el("resource-browser"), studio = this.el("studio");
+      if (!picker || !studio) return;
+      picker.hidden = !this.resourcePickerOpen;
+      studio.hidden = this.resourcePickerOpen;
+      const toggle = this.host.querySelector('[data-layout="resources"]');
+      toggle?.setAttribute("aria-expanded", String(this.resourcePickerOpen));
+      const label = this.el("resource-action-label");
+      if (label) label.textContent = this.resources.length ? "更换资源" : "选择资源";
+      const close = this.host.querySelector('[data-resource-action="close"]');
+      if (close) close.hidden = !this.resources.length;
+      const up = this.host.querySelector('[data-resource-action="up"]');
+      if (up) up.disabled = !this.browser?.rootKey || !this.browser?.path;
+      const note = this.el("resource-browser-note"), root = this.browser?.root?.();
+      if (note) note.textContent = this.browser?.rootKey
+        ? `当前目录：${root?.label || this.browser.rootKey} / ${this.browser.path || "根目录"}`
+        : "正在读取下载、种子、图片与发布资料目录…";
+      const items = this.pendingSelection;
+      const list = this.el("selection-list");
+      list?.replaceChildren();
+      for (const item of items) {
+        const row = node("div", null, "wb-selection-item"); row.setAttribute("role", "listitem");
+        const path = item.relative_path || "";
+        const name = path.split("/").filter(Boolean).pop() || "根目录";
+        const rootLabel = this.browser?.root(item.root_key)?.label || item.root_key || "资源";
+        const copy = node("div", null, "wb-selection-copy");
+        copy.append(node("strong", name), node("small", `${rootLabel} / ${path || "根目录"}`));
+        row.append(copy, node("span", resourceKind(item), "wb-selection-type"));
+        list?.append(row);
+      }
+      const count = this.el("selection-count");
+      if (count) count.textContent = items.length ? `${items.length} 项` : "未选择";
+      const status = this.el("selection-status");
+      if (status) status.textContent = items.length
+        ? `已勾选 ${items.length} 项；${this.resources.length ? "确认后将切换当前资源，人工编辑会先请求确认。" : "确认前不会改变当前资源。"}`
+        : "选择视频或整季目录，确认后使用。";
+    }
+    openResourcePicker() {
+      if (!this.el("resource-browser")) return;
+      this.resourcePickerOpen = true;
+      this.syncResourcePicker();
+    }
+    closeResourcePicker() {
+      if (!this.resources.length) return false;
+      this.resourcePickerOpen = false;
+      this.syncResourcePicker();
+      this.host.querySelector('[data-layout="resources"]')?.focus();
+      return true;
+    }
+    navigateResourceUp() {
+      if (!this.browser?.rootKey || !this.browser.path) return;
+      const path = parentPath(this.browser.path);
+      this.browser.navigate(this.browser.rootKey, path).catch(error => this.notice(error.message, true));
+      this.syncResourcePicker();
+    }
     openPanel(name) {
-
+      if (name === "resources") { this.openResourcePicker(); return; }
       if (name && !this.host.querySelector(`[data-sheet="${name}"]`)) return;
       if (!this.activePanel && name) this.panelReturnFocus = document.activeElement;
-      this.activePanel = name; this.drawerOpen = name === "resources";
+      this.activePanel = name;
       this.host.classList.toggle("wb-panel-open", !!name);
       this.host.querySelector('.wb-backdrop').hidden = !name;
       this.host.querySelector('.wb-surface').inert = !!name;
       this.host.querySelectorAll('[data-sheet]').forEach(el => el.hidden = el.dataset.sheet !== name);
-      this.host.querySelector('[data-layout="resources"]').setAttribute("aria-expanded", String(this.drawerOpen));
       if (name) this.host.querySelector(`[data-sheet="${name}"] button`)?.focus();
       else { this.panelReturnFocus?.focus(); this.panelReturnFocus = null; }
     }
@@ -269,7 +337,7 @@
     }
     stageSelection(items) {
       this.pendingSelection = items.slice();
-      this.el("selection-status").textContent = `已勾选 ${items.length} 项，点击后正式切换工作资源。`;
+      this.syncResourcePicker();
     }
     async select(items, {context = null, origins = []} = {}) {
       // Validate candidates before touching the active resource or any edited content.
@@ -282,7 +350,7 @@
       } catch (error) { this.notice(error.message, true); return false; }
       const selectedSignature = signature(resources), selectionVersion = ++this.selectionVersion, previousEpoch = this.epoch;
       const includesDirectory = resources.some(item => item.kind === "directory");
-      if (!includesDirectory && (selectedSignature === signature(this.resources) || selectedSignature === this.selectionSignature)) return true;
+      if (!includesDirectory && (selectedSignature === signature(this.resources) || selectedSignature === this.selectionSignature)) { this.closeResourcePicker(); return true; }
       if (includesDirectory || signature(resources, false) === signature(this.resources, false)) {
         // Browse uses quick fingerprints; handoffs use canonical V2 references. Compare
         // through the existing reference service before treating the same path as new.
@@ -293,11 +361,12 @@
           return false;
         }
         if (selectionVersion !== this.selectionVersion || previousEpoch !== this.epoch || this.destroyed) return false;
-        if (signature(resources) === signature(this.resources)) { this.selectionSignature = selectedSignature; return true; }
+        if (signature(resources) === signature(this.resources)) { this.selectionSignature = selectedSignature; this.closeResourcePicker(); return true; }
       }
       if (this.dirty.size && !global.confirm("当前资源有人工编辑的标题、副标题或简介。切换资源将清空这些编辑及当前发布产物。是否确认切换？取消可继续编辑和复制当前内容。")) return false;
       const epoch = ++this.epoch;
       this.versions = {}; this.resources = resources; this.selectionSignature = selectedSignature;
+      this.closeResourcePicker();
       this.context = null; this.origins = origins; this.dirty.clear(); this.editVersion++;
       this.cancelTimer(this.composeTimer); this.contextChanged("selection");
       this.images = []; this.artifacts = []; this.links = []; this.episodeOverrides = {}; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();

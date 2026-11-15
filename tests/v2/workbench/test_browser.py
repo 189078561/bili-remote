@@ -18,11 +18,10 @@ def live_server(settings):
 
 
 def show_panel(page, name=None):
-    """Follow the visible sheet controls without mounting or changing business state."""
+    """Follow visible sheet controls or return from the first-level picker."""
     if name == 'content':
         name = None
     target = name if name in ('resources', 'naming', 'preview', 'identity', 'changes') else ('tools' if name else None)
-    # Confirmation resolves asynchronously, then closes the picker itself.
     page.wait_for_function('!(window.wb || window.V2Workbench || window.workbench)?.selecting')
     active_name = page.evaluate('document.querySelector(".wb-sheet:not([hidden])")?.dataset.sheet || null')
     active = page.locator(f'[data-sheet="{active_name}"]')
@@ -32,6 +31,21 @@ def show_panel(page, name=None):
             return
         if active.is_visible():
             active.locator('.wb-sheet-heading button').click()
+    picker = page.locator('[data-wb="resource-browser"]')
+    studio = page.locator('[data-wb="studio"]')
+    if target == 'resources':
+        if picker.is_visible():
+            return
+        page.locator('[data-layout="resources"]:visible').first.click()
+        expect(picker).to_be_visible()
+        expect(studio).to_be_hidden()
+        return
+    if picker.is_visible():
+        back = page.locator('[data-resource-action="close"]:visible')
+        assert back.count(), '工作台尚未选择资源，无法进入业务面板'
+        back.click()
+        expect(studio).to_be_visible()
+        expect(picker).to_be_hidden()
     if name:
         key = 'data-tab' if target == 'tools' else 'data-layout'
         page.locator(f'[{key}="{name}"]:visible').first.click()
@@ -246,6 +260,13 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         page.goto(base_url + '/static/v2/workbench/index.html')
         expect(page.locator('[data-workbench]')).to_be_visible()
         assert page.locator('[data-edit="release_title"]').input_value() == ''
+        expect(page.locator('[data-wb="resource-browser"]')).to_be_visible()
+        show_panel(page, 'resources')
+        page.locator('.file-row[data-path="Media"]').click()
+        show_panel(page, 'resources')
+        page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
+        page.get_by_role('button', name='使用所选资源', exact=True).click()
+        expect(page.locator('[data-wb="studio"]')).to_be_visible()
         page.locator('.wb-tasks > summary').click()
         task_card = page.locator('.wb-task', has_text='torrent_build')
         task_card.get_by_role('button', name='查看产物').click()
@@ -336,12 +357,14 @@ def test_slow_responses_and_rename_confirmation(live_server):
 def test_task_identity_notifications_retry_cancel_and_refresh_without_content(live_server):
     base_url, _ = live_server
     playwright, browser, page, errors = browser_session(base_url)
+    requests = []
     tasks = [
         {"kind": "download", "id": 1, "task_type": "download", "status": "running", "progress": None, "cancel_allowed": True, "retry_allowed": False},
         {"kind": "processing", "id": 1, "task_type": "image_upload", "status": "failed", "progress": 30, "cancel_allowed": False, "retry_allowed": True, "error": "合成上传错误"},
     ]
     actions = []
     try:
+        v2_fixture(page, requests)
         page.route('**/api/v2/tasks?*', lambda route: route.fulfill(json={"items": tasks, "limit": 100, "offset": 0}))
         def action(route):
             actions.append(route.request.url)
@@ -355,6 +378,7 @@ def test_task_identity_notifications_retry_cancel_and_refresh_without_content(li
                 route.fulfill(status=404, json={})
         page.route('**/api/v2/tasks/*/*/*', action)
         mount(page)
+        page.evaluate("wb.select([{root_key:'downloads',relative_path:'Media/episode01.mp4',kind:'video',fingerprint:'fixture'}])")
         assert page.locator('.wb-task').count() == 2
         assert page.locator('.wb-task progress').first.get_attribute('value') is None
         assert page.locator('[data-wb="notices"]').inner_text() == ''
@@ -410,6 +434,83 @@ def test_real_standalone_entry_authentication_search_and_no_storage(live_server)
         expect(visitor.locator('[data-entry-status]')).to_contain_text('请先登录')
         expect(visitor.locator('[data-workbench]')).to_be_hidden()
         anonymous.close()
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server):
+    base_url, app = live_server
+    media = app.state.services.settings.download_root / 'Media'
+    (media / 'episode02.mp4').write_bytes(b'synthetic-second-episode')
+    playwright, browser, page, errors = browser_session(base_url)
+    requests = []
+    try:
+        v2_fixture(page, requests)
+        # Let the real resource-reference service compute the recursive
+        # directory fingerprint while metadata/render calls remain synthetic.
+        page.route('**/api/v2/resources/reference', lambda route: route.continue_())
+        mount(page)
+        picker = page.locator('[data-wb="resource-browser"]')
+        studio = page.locator('[data-wb="studio"]')
+        expect(picker).to_be_visible()
+        expect(studio).to_be_hidden()
+        labels = page.locator('[data-wb="browser"] .root-shortcut strong').all_inner_texts()
+        assert labels == ['资源下载目录', '种子目录', '图片目录', '发布信息目录']
+        assert page.evaluate("getComputedStyle(document.body).overflowY") != 'hidden'
+
+        page.locator('.file-row[data-path="Media"]').click()
+        expect(page.locator('[data-wb="resource-browser-note"]')).to_contain_text('Media')
+        up = page.locator('[data-resource-action="up"]')
+        expect(up).to_be_enabled()
+        search = page.locator('[data-wb="browser"]').get_by_role('searchbox', name='搜索当前目录')
+        search.fill('episode02')
+        expect(page.locator('[data-wb="browser"] .file-row')).to_have_count(1)
+        expect(page.locator('.file-row[data-path="Media/episode02.mp4"]')).to_be_visible()
+        search.fill('')
+        expect(page.locator('[data-wb="browser"] .file-row')).to_have_count(2)
+
+        for name in ('episode01.mp4', 'episode02.mp4'):
+            page.locator(f'.file-row[data-path="Media/{name}"] .file-check').check()
+        expect(page.locator('[data-wb="selection-count"]')).to_have_text('2 项')
+        expect(page.locator('[data-wb="selection-list"] .wb-selection-item')).to_have_count(2)
+        assert page.evaluate('wb.resources.length') == 0
+        assert page.evaluate('wb.pendingSelection.length') == 2
+
+        up.click()
+        expect(page.locator('[data-wb="resource-browser-note"]')).to_contain_text('根目录')
+        expect(page.locator('[data-wb="selection-count"]')).to_have_text('未选择')
+        page.locator('.file-row[data-path="Media"] .file-check').check()
+        expect(page.locator('[data-wb="selection-list"]')).to_contain_text('目录')
+        expect(page.locator('[data-wb="selection-count"]')).to_have_text('1 项')
+        page.get_by_role('button', name='使用所选资源', exact=True).click()
+        expect(studio).to_be_visible()
+        expect(picker).to_be_hidden()
+        assert page.evaluate("wb.resources[0].relative_path === 'Media' && wb.resources[0].kind === 'directory'")
+        expect(page.locator('[data-wb="resource-action-label"]')).to_have_text('更换资源')
+        assert len([path for path, _ in requests if path == 'resources/resolve']) == 1
+
+        page.locator('[data-layout="resources"]').click()
+        expect(picker).to_be_visible()
+        expect(studio).to_be_hidden()
+        expect(page.locator('[data-resource-action="close"]')).to_be_visible()
+        assert page.evaluate("getComputedStyle(document.body).overflowY") != 'hidden'
+        page.locator('[data-resource-action="close"]').click()
+        expect(studio).to_be_visible()
+        assert page.evaluate("wb.resources[0].relative_path === 'Media' && wb.resources[0].kind === 'directory'")
+
+        mount(page)
+        expect(picker).to_be_visible()
+        handoff = context(10)
+        resource = handoff['resources'][0]
+        assert page.evaluate('async ({resource, context}) => wb.select([resource], {context})',
+                             {'resource': resource, 'context': handoff}) is True
+        expect(studio).to_be_visible()
+        expect(picker).to_be_hidden()
+        assert page.evaluate('wb.resourcePickerOpen') is False
+        assert page.evaluate('wb.resources[0].relative_path') == resource['relative_path']
+        assert len([path for path, _ in requests if path == 'resources/resolve']) == 1
+        assert not errors, errors
     finally:
         browser.close()
         playwright.stop()
