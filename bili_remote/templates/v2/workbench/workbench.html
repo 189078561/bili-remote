@@ -1,41 +1,69 @@
 <section class="br-workbench" data-workbench aria-label="发种工作台">
   <div class="wb-surface">
-    <header class="wb-resource-bar" aria-label="当前工作资源">
-      <div class="wb-resource-mark"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#film"/></svg></div>
-      <div class="wb-resource-info"><h1>发种工作台</h1><p class="wb-current-media" data-wb="resource">尚未选择媒体</p><p data-wb="context-summary">从文件管理或下载页进入，直接使用已选资源。</p><div class="wb-resource-facts"><span data-wb="resource-media"></span><span data-wb="resource-status" role="status">尚未选择资源</span></div></div>
-      <div class="wb-resource-actions"><button type="button" class="wb-quiet" data-layout="resources" aria-controls="wb-resources" aria-expanded="true"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#folder"/></svg><span data-wb="resource-action-label">选择资源</span></button><button type="button" class="wb-primary" data-layout="preview"><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"/></svg>完整预览</button></div>
-    </header>
     <section id="wb-resources" class="wb-resource-picker" data-wb="resource-browser" aria-labelledby="wb-resource-picker-title">
-      <header class="wb-resource-picker-heading">
-        <div><p class="wb-eyebrow">下载、种子、图片与发布资料 · 文件或整季目录</p><h2 id="wb-resource-picker-title">选择工作资源</h2><p class="wb-note" data-wb="resource-browser-note">单击高亮，双击打开文件夹或使用视频。也可勾选多个视频。</p></div>
-        <button type="button" class="wb-quiet" data-resource-action="close" hidden>返回当前资源</button>
-      </header>
+      <h2 id="wb-resource-picker-title">媒体选择</h2>
       <div class="wb-resource-browser" data-wb="browser"></div>
-      <section class="wb-selection-summary" aria-labelledby="wb-selection-heading">
-        <div class="wb-selection-heading"><div><h3 id="wb-selection-heading">当前已选项目</h3><p class="wb-note">确认前不会改变当前资源，也不会覆盖人工编辑。</p></div><span data-wb="selection-count" class="wb-selection-count">未选择</span></div>
+      <section class="wb-selection-summary" aria-label="当前媒体与勾选">
+        <div class="wb-current-resource">
+          <div><strong data-wb="resource">尚未选择媒体</strong><p class="wb-note" data-wb="context-summary"></p>
+          <div class="wb-resource-facts"><span data-wb="resource-media"></span><span data-wb="resource-status" role="status"></span></div></div>
+          <span data-wb="selection-count" class="wb-selection-count" hidden></span>
+        </div>
         <div class="wb-selection-list" data-wb="selection-list" role="list" aria-label="当前已选项目"></div>
-        <p class="wb-note" data-wb="selection-status" role="status">选择视频或整季目录，确认后使用。</p>
+        <p class="wb-note" data-wb="selection-status" role="status">单击高亮，双击打开目录或使用视频。</p>
       </section>
     </section>
     <div class="wb-studio" data-wb="studio">
+      <section class="wb-tool-launcher" id="wb-operations" aria-labelledby="wb-ops-heading">
+        <h2 id="wb-ops-heading">操作</h2>
+        <p data-wb="tool-help" class="wb-note">请先选择工作媒体。</p>
+        <div class="wb-tool-buttons">
+          <button type="button" data-action="torrent" disabled><span data-button-label>制作种子</span></button>
+          <button type="button" data-action="report" disabled><span data-button-label>生成 MediaInfo</span></button>
+          <button type="button" data-action="bdinfo" disabled><span data-button-label>生成 BDInfo</span></button>
+          <button type="button" data-action="screenshots" disabled><span data-button-label>生成截图</span></button>
+          <button type="button" data-action="upload" disabled><span data-button-label>生成图床链接</span></button>
+          <a href="/" data-tool-settings class="wb-tool-settings">工具参数在设置中调整</a>
+        </div>
+      </section>
+      <section class="wb-output-summary" id="wb-tool-output" aria-label="输出">
+        <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="output" aria-controls="wb-collapse-output" aria-expanded="true"><svg class="ws-icon wb-chevron" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><strong>输出</strong><small data-wb="output-status"></small></button></div>
+        <div id="wb-collapse-output" class="wb-collapse open"><div class="wb-collapse-inner">
+          <p data-wb="output-empty" class="wb-note">执行操作后，进度和结果会显示在这里。</p>
+        <div data-wb="tool-progress-torrent" class="wb-tool-progress" role="status"></div>
+        <div data-wb="torrents"></div>
+        <div data-wb="tool-progress-report" class="wb-tool-progress" role="status"></div>
+        <div data-wb="tool-progress-bdinfo" class="wb-tool-progress" role="status"></div>
+        <div data-wb="reports"></div>
+        <div data-wb="tool-progress-images" class="wb-tool-progress" role="status"></div>
+        <div data-wb="images" class="wb-images"></div>
+        <div data-wb="tool-progress-upload" class="wb-tool-progress" role="status"></div>
+        <div data-wb="upload-links" class="wb-result-block"></div>
+        </div></div>
+      </section>
       <section class="wb-naming" id="wb-naming">
-        <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="naming" aria-controls="wb-collapse-naming" aria-expanded="true"><svg class="ws-icon wb-chevron" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><strong>智能重命名</strong><small>匹配作品 · 实时预览</small></button></div>
-        <div id="wb-collapse-naming" class="wb-collapse open"><div class="wb-collapse-inner">
-        <div class="wb-section-heading"><h2 data-wb="identity-title">影视匹配</h2><span class="wb-match-status" data-wb="match-status">待匹配</span></div>
-        <div class="wb-identity-summary"><div><strong data-wb="identity-name">尚未匹配影视资料</strong><p class="wb-provider-status" data-wb="provider-status">选择资源后识别</p></div></div>
-      <details class="wb-diagnostics"><summary>识别与预检提示</summary><p data-wb="issues" role="status" class="wb-issues"></p></details><div class="wb-inline"><h3>多语言名称</h3><label>使用已有译名<select data-wb="title-choice" disabled><option value="">暂无名称候选</option></select></label><p class="wb-note">命名名称可在主页面直接修改，不会改变已确认的影视身份。</p><button type="button" data-action="resolve" disabled>重新识别</button></div>
+        <div class="wb-section-heading"><h2>作品匹配与发布标题</h2><span class="wb-match-status" data-wb="match-status">待匹配</span></div>
         <div class="wb-identity-controls">
           <label>TMDB 作品搜索<input data-wb="query" placeholder="输入作品名称或 TMDB ID" maxlength="200"></label>
           <label>影视类型<select data-wb="media-type"><option value="series">电视剧</option><option value="anime">动画</option><option value="movie">电影</option></select></label>
           <button type="button" data-action="search">搜索资料</button>
         </div>
         <div data-wb="candidates" class="wb-candidates"></div>
-        <div class="wb-name-controls">
+        <p class="wb-identity-summary"><strong data-wb="identity-name">尚未匹配影视资料</strong> <span class="wb-note" data-wb="provider-status"></span></p>
+        <details class="wb-diagnostics"><summary>识别与预检提示</summary><p data-wb="issues" role="status" class="wb-issues"></p></details>
+        <div class="wb-name-controls wb-title-fields">
           <label>中文名<input data-wb="title-zh" maxlength="200"></label>
           <label>英文名<input data-wb="title-en" maxlength="200" placeholder="无可靠英文名时可手动填写"></label>
-          <label>名称组合<select data-wb="title-combination"><option value="both">中英双语</option><option value="zh">中文</option><option value="en">英文</option></select></label>
-          <label class="wb-title-control">当前命名用名（可自定义）<input data-wb="selected-title" placeholder="输入作品名称"></label>
           <label>年份<input data-wb="year" type="number" min="1888" max="2100" step="1" placeholder="自动识别"></label>
+          <label>名称组合<select data-wb="title-combination"><option value="both">中英双语</option><option value="zh">中文</option><option value="en">英文</option></select></label>
+        </div>
+        <div class="wb-field"><div class="wb-field-bar"><label for="wb-title">主标题</label><span data-lock="release_title" class="wb-note"></span><div><button type="button" data-action="title" disabled>重新生成</button><button type="button" data-copy="release_title" disabled>复制</button></div></div><textarea id="wb-title" data-edit="release_title" rows="1" placeholder="识别后自动生成，也可以直接编辑"></textarea></div>
+        <div class="wb-field"><div class="wb-field-bar"><label for="wb-subtitle">副标题</label><span data-lock="subtitle" class="wb-note"></span><div><button type="button" data-action="subtitle" disabled>重新生成</button><button type="button" data-copy="subtitle" disabled>复制</button></div></div><textarea id="wb-subtitle" data-edit="subtitle" rows="1" placeholder="根据识别资料生成副标题"></textarea></div>
+        <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="naming" aria-controls="wb-collapse-naming" aria-expanded="false"><svg class="ws-icon wb-chevron" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><strong>智能重命名参数</strong></button></div>
+        <div id="wb-collapse-naming" class="wb-collapse" inert aria-hidden="true"><div class="wb-collapse-inner">
+        <div class="wb-inline wb-name-alternatives"><label>使用已有译名<select data-wb="title-choice" disabled><option value="">暂无名称候选</option></select></label><button type="button" data-action="resolve" disabled>重新识别</button></div>
+        <div class="wb-name-controls wb-rename-fields">
+          <label class="wb-title-control">当前命名用名（可自定义）<input data-wb="selected-title" placeholder="输入作品名称"></label>
           <label>季号<input data-wb="season" type="number" min="0" step="1"></label>
           <label>集号<input data-wb="episode" type="number" min="1" step="1" placeholder="自动识别"></label>
           <label>处理范围<select data-wb="scope"><option value="single">单集 / 单视频</option><option value="season">整季</option></select></label>
@@ -67,51 +95,12 @@
         </details>
         </div></div>
       </section>
-      <section class="wb-config">
-        <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="config" aria-controls="wb-collapse-config" aria-expanded="false"><svg class="ws-icon wb-chevron" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><strong>配置</strong><small>截图 · 报告 · 本地制种 · 图床</small></button></div>
-        <div id="wb-collapse-config" class="wb-collapse"><div class="wb-collapse-inner wb-config-inner">
-          <fieldset class="wb-tool-config"><legend>截图与视频</legend>
-            <div class="wb-inline"><label>输出方式<select data-wb="image-mode"><option value="single">单图 / 多张独立图片</option><option value="collage">多图拼成单图</option></select></label><label>截取张数<input data-wb="image-count" type="number" min="1" max="120" placeholder="使用设置"></label><label>拼图列数<input data-wb="image-columns" type="number" min="1" max="10" placeholder="使用设置"></label><label>拼图行数<input data-wb="image-rows" type="number" min="1" max="12" placeholder="按张数自动"></label></div>
-            <div class="wb-inline"><label>范围方式<select data-wb="range-mode"><option value="seconds">跳过片头片尾</option><option value="percent">按视频百分比</option></select></label><label>开始百分比<input data-wb="start-percent" type="number" min="0" max="99" value="5"></label><label>结束百分比<input data-wb="end-percent" type="number" min="1" max="100" value="95"></label></div>
-            <div class="wb-inline"><label>跳过片头（秒）<input data-wb="skip-start" type="number" min="0" max="86400" placeholder="使用设置"></label><label>跳过片尾（秒）<input data-wb="skip-end" type="number" min="0" max="86400" placeholder="使用设置"></label></div>
-            <div class="wb-inline"><label>图片格式<select data-wb="image-format"><option value="">使用设置</option><option value="png">PNG</option><option value="jpg">JPEG</option></select></label><label>信息条与边框<select data-wb="image-style"><option value="">使用设置</option><option value="script">脚本样式</option><option value="plain">原始画面</option></select></label></div>
-            <label>HDR / DV 转 SDR<select data-wb="hdr-processor"><option value="">使用全局设置</option><option value="auto">自动</option><option value="libplacebo">libplacebo</option><option value="zscale">zscale</option></select></label>
-            <p class="wb-note">字幕关联在智能重命名的逐集规则中处理；当前截图接口不提供独立外挂字幕开关。</p>
-          </fieldset>
-          <fieldset class="wb-tool-config"><legend>媒体报告</legend><p class="wb-note">生成完整报告；普通视频使用 MediaInfo，蓝光目录使用 BDInfo。发布预览沿用服务端路径脱敏。</p></fieldset>
-          <fieldset class="wb-tool-config"><legend>本地种子</legend><label>Tracker（每行一个；留空使用设置）<textarea data-wb="trackers" rows="3" placeholder="https://tracker.example/announce"></textarea></label><label>分块大小<select data-wb="piece-length"><option value="">使用全局设置</option><option value="auto">自动</option><option value="256k">256 KiB</option><option value="1m">1 MiB</option><option value="4m">4 MiB</option><option value="16m">16 MiB</option></select></label><label class="wb-check">私有种子<select data-wb="private"><option value="">使用全局设置</option><option value="true">是</option><option value="false">否</option></select></label></fieldset>
-          <fieldset class="wb-tool-config"><legend>图床</legend><label>服务商<select data-wb="image-provider"><option value="">使用全局设置</option><option value="catbox">Catbox</option><option value="imgbb">ImgBB</option><option value="pixhost">Pixhost</option></select></label><p class="wb-note">使用已有截图，不重新截取。</p></fieldset>
-        </div></div>
-      </section>
-      <section class="wb-tool-launcher" id="wb-operations" aria-labelledby="wb-ops-heading">
-        <h2 id="wb-ops-heading">操作</h2>
-        <p data-wb="tool-help" class="wb-note">请先选择工作媒体。</p>
-        <div class="wb-tool-buttons">
-          <button type="button" data-action="torrent" disabled><span data-button-label>制作种子</span></button>
-          <button type="button" data-action="report" disabled><span data-button-label>生成 MediaInfo</span></button>
-          <button type="button" data-action="bdinfo" disabled><span data-button-label>生成 BDInfo</span></button>
-          <button type="button" data-action="screenshots" disabled><span data-button-label>生成截图</span></button>
-          <button type="button" data-action="upload" disabled><span data-button-label>生成图床链接</span></button>
-        </div>
-      </section>
-      <section class="wb-output-summary" id="wb-tool-output" aria-label="输出">
-        <h2>输出</h2><p data-wb="output-empty" class="wb-note">执行操作后，进度和结果会显示在这里。</p>
-        <div data-wb="tool-progress-torrent" class="wb-tool-progress" role="status"></div>
-        <div data-wb="torrents"></div>
-        <div data-wb="tool-progress-report" class="wb-tool-progress" role="status"></div>
-        <div data-wb="tool-progress-bdinfo" class="wb-tool-progress" role="status"></div>
-        <div data-wb="reports"></div>
-        <div data-wb="tool-progress-images" class="wb-tool-progress" role="status"></div>
-        <div data-wb="images" class="wb-images"></div>
-        <div data-wb="tool-progress-upload" class="wb-tool-progress" role="status"></div>
-        <div data-wb="upload-links" class="wb-result-block"></div>
-      </section>
-      <section class="wb-publishing" id="wb-panel-content" aria-labelledby="wb-edit-heading"><div class="wb-section-heading"><div><h2 id="wb-edit-heading">发布内容</h2></div><span class="wb-note">即时组合 · 人工编辑优先</span></div>
-
-        <div class="wb-field"><div class="wb-field-bar"><label for="wb-title">主标题</label><span data-lock="release_title" class="wb-note"></span><div><button type="button" data-action="title" disabled>重新生成</button><button type="button" data-copy="release_title" disabled>复制</button></div></div><textarea id="wb-title" data-edit="release_title" rows="1" placeholder="识别后自动生成，也可以直接编辑"></textarea></div>
-        <div class="wb-field"><div class="wb-field-bar"><label for="wb-subtitle">副标题</label><span data-lock="subtitle" class="wb-note"></span><div><button type="button" data-action="subtitle" disabled>重新生成</button><button type="button" data-copy="subtitle" disabled>复制</button></div></div><textarea id="wb-subtitle" data-edit="subtitle" rows="1" placeholder="根据识别资料生成副标题"></textarea></div>
+      <section class="wb-publishing" id="wb-panel-content" aria-label="发种简介">
+        <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="overview" aria-controls="wb-collapse-overview" aria-expanded="false"><svg class="ws-icon wb-chevron" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><strong>发种简介</strong></button></div>
+        <div id="wb-collapse-overview" class="wb-collapse" inert aria-hidden="true"><div class="wb-collapse-inner">
         <div class="wb-field"><div class="wb-field-bar"><label for="wb-overview">简介</label><span data-lock="overview" class="wb-note"></span><button type="button" data-copy="overview" disabled>复制</button></div><div class="wb-format-tools" aria-label="简介格式"><button type="button" data-format="b" aria-label="加粗">B</button><button type="button" data-format="i" aria-label="斜体">I</button><button type="button" data-format="url">链接</button><button type="button" data-format="img">图片</button><span>BBCode</span></div><textarea id="wb-overview" data-edit="overview" rows="5" placeholder="影视简介；支持人工编辑及 [b]粗体[/b]、[img]图片链接[/img] 等 BBCode"></textarea></div>
 
+        </div></div>
       </section>
 
       <section id="wb-publish-preview" class="wb-inline-preview" aria-labelledby="wb-preview-heading">

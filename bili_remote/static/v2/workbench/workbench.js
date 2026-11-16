@@ -27,8 +27,6 @@
       this.host = host; this.api = api; this.choose = choose; this.change = change; this.error = error;
       this.roots = []; this.rootKey = null; this.path = ""; this.page = 1; this.ticket = 0;
       this.checked = new Map(); this.abort = new AbortController();
-      this.rootNav = node("nav", null, "wb-picker-roots");
-      this.rootNav.setAttribute("aria-label", "媒体目录入口");
       this.crumbs = node("nav", null, "wb-picker-path");
       this.crumbs.setAttribute("aria-label", "当前位置");
       this.list = node("div", null, "wb-picker-list");
@@ -58,7 +56,7 @@
       this.pager = node("div", null, "wb-picker-tools");
       this.pager.append(this.prev, this.next);
       footer.append(this.open, this.use, this.useDir, this.commitChecked);
-      host.replaceChildren(this.rootNav, this.crumbs, toolbar, this.status, this.list, this.pager, footer);
+      host.replaceChildren(this.crumbs, toolbar, this.status, this.list, this.pager, footer);
       this.sync();
     }
     button(label, fn) {
@@ -72,12 +70,11 @@
     selectable(item) { return item?.allowed && (item.is_dir || item.kind === "video"); }
     async init() {
       try {
-        const keys = ["downloads", "torrents", "images", "release_info"];
         const roots = await this.api.request("/api/files/roots?scope=browse");
         if (this.abort.signal.aborted) return;
-        this.roots = keys.map(key => roots.find(root => root.key === key)).filter(Boolean);
+        this.roots = roots.filter(root => root.key === "downloads");
         const first = this.roots.find(root => root.available !== false);
-        if (!first) throw new Error("没有可访问的媒体目录");
+        if (!first) throw new Error("资源下载目录不可用");
         await this.navigate(first.key, "");
       } catch (error) { if (!this.abort.signal.aborted) this.status.textContent = error.message; }
     }
@@ -126,13 +123,6 @@
       }
     }
     renderNavigation() {
-      this.rootNav.replaceChildren(...this.roots.map(root => {
-        const button = this.button(root.label, () => this.navigate(root.key, ""));
-        button.className = "root-shortcut";
-        button.setAttribute("aria-pressed", String(root.key === this.rootKey));
-        button.disabled = root.available === false;
-        return button;
-      }));
       const root = this.root(), parts = this.path.split("/").filter(Boolean);
       this.crumbs.replaceChildren(this.button(root.label, () => this.navigate(root.key, "")));
       parts.forEach((part, i) => {
@@ -183,7 +173,7 @@
     }
     async commit(items) {
       if (!items.length || this.committing || this.list.inert || !this.directoryReady) return;
-      this.committing = true; this.sync();
+      this.committing = true; this.list.inert = true; this.sync();
       try {
         if (await this.choose(items)) {
           this.checked.clear();
@@ -192,7 +182,7 @@
           }
           this.notify();
         }
-      } finally { this.committing = false; this.sync(); }
+      } finally { this.committing = false; this.list.inert = false; this.sync(); }
     }
     async commitDirectory() {
       if (!this.path || this.list.inert) return;
@@ -207,6 +197,7 @@
       const busy = this.list.inert || this.committing;
       this.up.disabled = !this.path || this.committing;
       this.refresh.disabled = !this.rootKey || this.committing;
+      this.search.disabled = this.committing;
       this.open.hidden = !this.highlight?.is_dir;
       this.open.disabled = busy;
       this.use.hidden = !this.selectable(this.highlight);
@@ -224,7 +215,7 @@
     constructor(host, {api = new global.BiliWorkbenchAPI(), pollInterval = 2000} = {}) {
       if (!host) throw new Error("工作台缺少挂载节点");
       this.host = host; this.api = api; this.pollInterval = pollInterval;
-      this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.resourcePickerOpen = true; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
+      this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
       this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.previewKey = null; this.previewUndo = false; this.renameBatch = null; this.episodeOverrides = {}; this.content = ""; this.images = []; this.artifacts = []; this.links = [];
       this.fieldVersions = {}; this.tasks = new Map(); this.jobs = new Map(); this.notified = new Set(); this.applied = new Set(); this.pending = new Set(); this.timers = new Set(); this.abort = new AbortController(); this.destroyed = false;
       this.cancelPending = new Set(); this.stopAcks = new Set(); this.actionErrors = new Map();
@@ -236,7 +227,6 @@
     button(action) { return this.host.querySelector(`[data-action="${action}"]`); }
     async init() {
       this.syncCollapses();
-      this.syncResourcePicker();
       // The embedded advanced naming module may also be used elsewhere;
       // suppress only its duplicate resource-picker entry in this host.
       const advanced = this.el("naming-panel");
@@ -255,7 +245,6 @@
       this.controls();
       await this.browser.init();
       await this.refreshTasks(true);
-      this.loadToolDefaults();
       return this;
     }
     async chooseMedia(items) {
@@ -263,18 +252,6 @@
       this.selecting = true;
       try { return await this.select(items); }
       finally { this.selecting = false; }
-    }
-    async loadToolDefaults() {
-      try {
-        const result = await this.api.request("/api/settings");
-        if (this.destroyed) return;
-        const defaults = result.values || {};
-        for (const [name, key] of Object.entries({"image-count":"collage_default_total", "image-columns":"collage_default_columns", "image-rows":"collage_default_rows"})) {
-          if (Number.isInteger(defaults[key])) this.el(name).placeholder = String(defaults[key]);
-        }
-        const provider = this.el("image-provider");
-        if (defaults.image_host_provider) provider.options[0].textContent = `使用全局设置（${defaults.image_host_provider}）`;
-      } catch { /* The existing submission APIs still resolve server defaults. */ }
     }
     listen() {
       const opts = {signal: this.abort.signal};
@@ -288,11 +265,13 @@
         dialog.addEventListener("cancel", event => { event.preventDefault(); this.closeDialog(dialog); }, opts);
       }
       this.host.addEventListener("click", event => {
-        if (event.target.closest('[data-resource-action="close"]')) { this.closeResourcePicker(); return; }
+        if (event.target.closest("[data-tool-settings]")) {
+          const entry = document.getElementById("settings-entry");
+          if (entry) { event.preventDefault(); entry.click(); }
+          return;
+        }
         const collapse = event.target.closest("[data-collapse]");
-        if (collapse) { event.preventDefault(); this.toggleCollapse(collapse); return; }
-        const layout = event.target.closest("[data-layout]");
-        if (layout) this.openPanel(layout.dataset.layout);
+        if (collapse) { event.preventDefault(); this.setCollapse(collapse.dataset.collapse, collapse.getAttribute("aria-expanded") !== "true"); return; }
         const format = event.target.closest("[data-format]");
         if (format) {
           const editor = this.host.querySelector('[data-edit="overview"]'), start=editor.selectionStart, end=editor.selectionEnd;
@@ -324,14 +303,6 @@
           this.nameEdits?.add(event.target.dataset.wb); this.scheduleNamingOverride();
         }
       }, opts);
-      const imageControls=()=>{
-        const collage=this.el('image-mode').value==='collage',percent=this.el('range-mode').value==='percent';
-        this.el('image-columns').disabled=!collage;this.el('image-rows').disabled=!collage;
-        this.el('start-percent').disabled=!percent;this.el('end-percent').disabled=!percent;
-        this.el('skip-start').disabled=percent;this.el('skip-end').disabled=percent;
-      };
-      for(const key of ['image-mode','image-columns','image-rows','range-mode'])this.el(key).addEventListener('input',imageControls,opts);
-      imageControls();
       this.el("query").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); this.run("search", this.button("search")); } }, opts);
       this.el("format").addEventListener("change", () => { this.editVersion++; this.scheduleCompose(); }, opts);
       this.el("title-choice").addEventListener("change", () => {
@@ -345,39 +316,20 @@
       if (action) this.button(action)?.scrollIntoView({block:"nearest"});
     }
     syncCollapses() {
-      this.host.querySelectorAll("[data-collapse]").forEach(button => {
-        const panel = this.host.querySelector(`#${CSS.escape(button.getAttribute("aria-controls"))}`);
-        if (!panel) return;
-        const open = button.getAttribute("aria-expanded") !== "false";
-        button.setAttribute("aria-expanded", String(open));
-        panel.classList.toggle("open", open);
-        panel.setAttribute("aria-hidden", String(!open));
-        panel.inert = !open;
-      });
+      this.host.querySelectorAll("[data-collapse]").forEach(button =>
+        this.setCollapse(button.dataset.collapse, button.getAttribute("aria-expanded") === "true"));
     }
-    toggleCollapse(button) {
-      const panel = this.host.querySelector(`#${CSS.escape(button.getAttribute("aria-controls"))}`);
-      if (!panel) return;
-      const open = button.getAttribute("aria-expanded") !== "true";
+    setCollapse(name, open) {
+      const button = this.host.querySelector(`[data-collapse="${name}"]`);
+      const panel = this.host.querySelector(`#wb-collapse-${name}`);
+      if (!open && panel.contains(document.activeElement)) button.focus({preventScroll: true});
       button.setAttribute("aria-expanded", String(open));
       panel.classList.toggle("open", open);
       panel.setAttribute("aria-hidden", String(!open));
       panel.inert = !open;
     }
     setLayoutView(view) { if (view === "preview") this.openPanel(view); }
-    setResourceDrawer(open) { if (open) this.openResourcePicker(); else this.closeResourcePicker(); }
-    syncResourcePicker() {
-      const picker = this.el("resource-browser"), studio = this.el("studio");
-      if (!picker || !studio) return;
-      picker.hidden = !this.resourcePickerOpen;
-      studio.hidden = false;
-      const toggle = this.host.querySelector('[data-layout="resources"]');
-      toggle?.setAttribute("aria-expanded", String(this.resourcePickerOpen));
-      const label = this.el("resource-action-label");
-      if (label) label.textContent = this.resources.length ? "更换资源" : "选择资源";
-      const close = this.host.querySelector('[data-resource-action="close"]');
-      if (close) close.hidden = !this.resources.length;
-
+    renderSelection() {
       const items = this.pendingSelection;
       const list = this.el("selection-list");
       list?.replaceChildren();
@@ -392,32 +344,17 @@
         list?.append(row);
       }
       const count = this.el("selection-count");
-      if (count) count.textContent = items.length ? `${items.length} 项` : "未选择";
+      count.hidden = !items.length;
+      count.textContent = items.length ? `已勾选 ${items.length} 项` : "";
       const status = this.el("selection-status");
       if (status) status.textContent = items.length
         ? `已勾选 ${items.length} 项；${this.resources.length ? "确认后将切换当前资源，人工编辑会先请求确认。" : "确认前不会改变当前资源。"}`
         : this.selectionHint || "单击高亮；双击打开目录或直接使用视频。";
     }
-    openResourcePicker() {
-      if (!this.el("resource-browser")) return;
-      this.resourcePickerOpen = true;
-      this.syncResourcePicker();
-    }
-    closeResourcePicker() {
-      if (!this.resources.length) return false;
-      this.resourcePickerOpen = false;
-      this.syncResourcePicker();
-      if (this.el("resource-browser").contains(document.activeElement) || document.activeElement === document.body) this.host.querySelector('[data-layout="resources"]')?.focus({preventScroll:true});
-      return true;
-    }
     openPanel(name) {
-      if (name === "resources") { this.openResourcePicker(); return; }
-      const target = {preview:"wb-publish-preview", naming:"wb-naming", changes:"wb-naming-files", identity:"wb-naming"}[name];
-      if (!target || !this.resources.length) return;
-      if (name !== "preview") {
-        const toggle = this.host.querySelector('[data-collapse="naming"]');
-        if (toggle.getAttribute("aria-expanded") === "false") this.toggleCollapse(toggle);
-      }
+      const target = {resources:"wb-resources", preview:"wb-publish-preview", naming:"wb-naming", changes:"wb-naming-files", identity:"wb-naming"}[name];
+      if (!target) return;
+      if (["naming", "changes"].includes(name)) this.setCollapse("naming", true);
       const section = this.host.querySelector(`#${target}`);
       if (name === "changes") section.open = true;
       section.scrollIntoView({block:"start"});
@@ -458,7 +395,6 @@
       this.el("resource-media").textContent = [common('resolution'),common('video_codec'),common('audio_codec'),common('audio_channels'),ctx?.episode?.season ? `第 ${val(ctx.episode.season)} 季` : '',ctx?.episode?.scope==='season'?'整季':ctx?.episode?.episode?`第 ${val(ctx.episode.episode)} 集`:'',ctx?`${files.length} 个媒体文件`:''].filter(Boolean).join(' · ');
       const identified=files.filter(file=>Number(val(file.episode?.episode))>0).length;
       this.el('season-summary').textContent=ctx?.episode?.scope==='season'?`共 ${files.length} 个媒体文件 · 已识别集号 ${identified} · 待确认 ${files.length-identified} · 命名冲突 ${this.preview?.conflicts?.length??ctx?.conflicts?.length??0}`:'';
-      this.el("identity-title").textContent = "影视匹配";
       this.el("identity-name").textContent = identity ? (ctx.titles?.find(title=>title.source !== 'manual')?.text || val(ctx.metadata?.title) || '已匹配作品') : '尚未匹配影视资料';
       this.el("match-status").textContent = identity?.confirmed ? '已确认' : identity ? '待确认' : '待匹配';
       this.el("match-status").classList.toggle('confirmed',Boolean(identity?.confirmed));
@@ -519,6 +455,7 @@
       this.pending.add(pendingKey);
       this.toolErrors.delete(action);
       this.setButtonBusy(button, true);
+      if (tools[action]) this.setCollapse("output", true);
       this.renderToolProgress();
       try {
         const handlers = {resolve: () => this.resolve(), search: () => this.search(), overrides: () => this.resolve(null, this.overrides()), rules: () => this.applyRules(), naming: () => this.naming(), undo: () => this.showUndoPreview(), apply: () => this.applyRename(), title: () => this.generate("release_title", true), subtitle: () => this.generate("subtitle", true), probe: () => this.probe(), screenshots: () => this.screenshots(), report: () => this.report(), bdinfo: () => this.report("bdinfo"), torrent: () => this.torrent(), upload: () => this.upload()};
@@ -616,7 +553,7 @@
     }
     stageSelection(items, hint = "") {
       this.selectionHint = hint; this.pendingSelection = items.slice();
-      this.syncResourcePicker();
+      this.renderSelection();
     }
     async select(items, {context = null, origins = []} = {}) {
       // Validate candidates before touching the active resource or any edited content.
@@ -629,7 +566,7 @@
       } catch (error) { this.notice(error.message, true); return false; }
       const selectedSignature = signature(resources), selectionVersion = ++this.selectionVersion, previousEpoch = this.epoch;
       const includesDirectory = resources.some(item => item.kind === "directory");
-      if (!includesDirectory && (selectedSignature === signature(this.resources) || selectedSignature === this.selectionSignature)) { this.closeResourcePicker(); return true; }
+      if (!includesDirectory && (selectedSignature === signature(this.resources) || selectedSignature === this.selectionSignature)) return true;
       if (includesDirectory || signature(resources, false) === signature(this.resources, false)) {
         // Browse uses quick fingerprints; handoffs use canonical V2 references. Compare
         // through the existing reference service before treating the same path as new.
@@ -640,7 +577,7 @@
           return false;
         }
         if (selectionVersion !== this.selectionVersion || previousEpoch !== this.epoch || this.destroyed) return false;
-        if (signature(resources) === signature(this.resources)) { this.selectionSignature = selectedSignature; this.closeResourcePicker(); return true; }
+        if (signature(resources) === signature(this.resources)) { this.selectionSignature = selectedSignature; return true; }
       }
       const edited = this.dirty.size || this.nameEdits?.size || this.manualNaming;
       const active = Object.keys(tools).some(action => this.busy(action) || this.toolActive(action));
@@ -653,7 +590,8 @@
       this.closeDialog(this.el("task-log-dialog"), false);
       this.nameEdits = new Set(); this.manualNaming = false; this.namesIdentity = null; this.namesInitialized = false;
       this.versions = {}; this.resources = resources; this.selectionSignature = selectedSignature;
-      this.closeResourcePicker();
+      this.setCollapse("naming", false);
+      this.setCollapse("overview", false);
       this.context = null; this.origins = origins; this.dirty.clear(); this.renameBatch = null; this.el("rename-list").replaceChildren(); this.editVersion++;
       this.cancelTimer(this.composeTimer); this.contextChanged("selection");
       this.imageTask = null; this.images = []; this.artifacts = []; this.links = []; this.renderToolProgress(); this.episodeOverrides = {}; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
@@ -720,7 +658,7 @@
       this.invalidateRename();
       this.overrideTimer = this.later(() => { if (this.context && !this.destroyed) this.naming().catch(error => this.notice(error.message, true)); }, 320);
     }
-    async resolve(selection = null, manual_overrides = {}) {
+    async resolve(selection = null, manual_overrides = {}, candidateButton = null) {
       if (!this.resources.length) throw new Error("请先选择资源");
       if (this.pendingAdjustmentEpoch === this.epoch) { manual_overrides = {...this.overrides(), ...manual_overrides}; this.rememberRules(); }
       this.invalidateRename(); this.invalidateContent(); const current = this.stamp("context");
@@ -749,7 +687,16 @@
       this.pendingAdjustmentEpoch = null;
       this.resources = response.context.resources; this.contextChanged();
       for (const name of ["release_title", "subtitle"]) if (!this.dirty.has(name)) this.setField(name, "");
-      this.renderContext(); await this.generateAll();
+      this.renderContext();
+      const candidates = this.el("candidates");
+      if (selection && candidates.contains(candidateButton)) {
+        const restoreFocus = candidates.contains(document.activeElement) || document.activeElement === document.body;
+        candidates.replaceChildren();
+        this.setCollapse("naming", true);
+        this.setCollapse("overview", true);
+        if (restoreFocus) this.el("title-zh").focus({preventScroll: true});
+      }
+      await this.generateAll();
       const probeKey = JSON.stringify(this.resources);
       if (current() && this.probedResources !== probeKey && (!this.context.files?.length || this.context.files.some(file => !file.probe))) {
         this.probedResources = probeKey;
@@ -864,7 +811,12 @@
     async search() {
       const query = this.el("query").value.trim(); if (!query) throw new Error("请输入作品名称"); const current = this.stamp("search"), text = query;
       const result = await this.api.search(query, this.el("media-type").value); if (!current() || text !== this.el("query").value.trim()) return;
-      const container = this.el("candidates"); container.replaceChildren();
+      const container = this.el("candidates");
+      container.replaceChildren();
+      if (result.items.length) {
+        this.setCollapse("naming", false);
+        this.setCollapse("overview", false);
+      }
       if(result.warnings?.length) container.append(node('p',result.warnings.map(x=>x.message).join('；'),'wb-note'));
       if (!result.items.length) container.append(node("p", "未找到候选，可以调整名称后重试。", "wb-note"));
       result.items.forEach(candidate => {
@@ -872,7 +824,7 @@
         const info=node('span',null,'wb-candidate-copy');info.append(node('strong',candidate.title||candidate.name||candidate.id),node('small',[candidate.original_title,candidate.year,({movie:'电影',series:'剧集',anime:'动画'})[candidate.media_type],candidate.provider?`${candidate.provider.toUpperCase()} #${candidate.id}`:null].filter(Boolean).join(' · ')));button.append(info);
         const poster=safeURL(candidate.poster_url);if(candidate.poster_url&&poster){const image=node('img');image.alt='';image.src=poster;image.referrerPolicy='no-referrer';image.onerror=()=>image.remove();button.prepend(image);}
         button.type = "button"; button.disabled = !this.resources.length;
-        button.onclick = () => this.withButton(button, () => this.resolve({provider: candidate.provider, id: String(candidate.id), media_type: candidate.media_type})); container.append(button);
+        button.onclick = () => this.withButton(button, () => this.resolve({provider: candidate.provider, id: String(candidate.id), media_type: candidate.media_type}, {}, button)); container.append(button);
       });
     }
     setField(name, value) {
@@ -1021,23 +973,12 @@
       return {epoch, scope: signature(canonical)};
     }
     async screenshots() {
-      const total = this.el("image-count").value, columns = this.el("image-columns").value;
-      if (total && (!Number.isInteger(Number(total)) || Number(total) < 1 || Number(total) > 120)) throw new Error("张数需在 1–120 之间");
-      const skipStart = Number(this.el("skip-start").value), skipEnd = Number(this.el("skip-end").value);
-      if (![skipStart, skipEnd].every(value => Number.isFinite(value) && value >= 0 && value <= 86400)) throw new Error("跳过时长必须在 0–86400 秒之间");
-      const extra={};
-      if (total) extra.total = Number(total);
-      if (columns && this.el("image-mode").value === "collage") extra.columns = Number(columns);
-      const rows=this.el('image-rows').value;if(rows && this.el("image-mode").value === "collage"){if(!Number.isInteger(Number(rows))||Number(rows)<1||Number(rows)>12)throw new Error('行数需在 1–12 之间');extra.rows=Number(rows);}
-      if(this.el('range-mode').value==='percent'){const start=Number(this.el('start-percent').value),end=Number(this.el('end-percent').value);if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end>100||start>=end)throw new Error('百分比范围需要满足 0 ≤ 开始 < 结束 ≤ 100');extra.start_percent=start;extra.end_percent=end;}
-      if(this.el('image-format').value)extra.format=this.el('image-format').value;
-      if(this.el('image-style').value)extra.style=this.el('image-style').value;
-      if (this.el("hdr-processor").value) extra.hdr_processor = this.el("hdr-processor").value;
-      if (this.el("skip-start").value && this.el("range-mode").value === "seconds") extra.skip_start_seconds = skipStart;
-      if (this.el("skip-end").value && this.el("range-mode").value === "seconds") extra.skip_end_seconds = skipEnd;
       const scope = await this.toolScope();
       if (!scope) return;
-      const result = await this.api.request("/api/files/screenshots", {...extra, sources: this.sources(), output_mode: this.el("image-mode").value, auto_upload: false});
+      const {values} = await this.api.request("/api/settings");
+      if (this.epoch !== scope.epoch || this.destroyed) return;
+      const output_mode = values?.screenshot_output_mode === "collage" ? "collage" : "single";
+      const result = await this.api.request("/api/files/screenshots", {sources: this.sources(), output_mode, auto_upload: false});
       this.track(result.task, {type: "screenshot", session: result.session_id, ...scope});
     }
     async report(type = "report") {
@@ -1058,17 +999,18 @@
     async torrent() {
       const source = this.resources[0], scope = await this.toolScope();
       if (!scope) return;
-      const trackers = this.el("trackers").value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-      const result = await this.api.request("/api/torrents/jobs", {source_root_key: source.root_key, source_relative_path: source.relative_path, ...(this.el("private").value ? {private: this.el("private").value === "true"} : {}), overwrite: false, ...(this.el("piece-length").value ? {piece_length:this.el("piece-length").value} : {}), ...(trackers.length ? {trackers} : {})});
+      const result = await this.api.request("/api/torrents/jobs", {
+        source_root_key: source.root_key, source_relative_path: source.relative_path, overwrite: false
+      });
       this.track(result.task, {type: "torrent", ...scope});
     }
     async upload() {
       if (this.images.length > 50) throw new Error("每次最多上传 50 张图片，请减少截取数量");
-      const images = this.images, provider = this.el("image-provider").value;
+      const images = this.images;
       const scope = await this.toolScope();
       if (!scope || images !== this.images) return;
       const screenshot = this.imageTask;
-      const result = await this.api.request("/api/uploads/jobs", {items: images.map(x => ({root_key: "images", relative_path: x.path})), ...(provider ? {provider} : {})});
+      const result = await this.api.request("/api/uploads/jobs", {items: images.map(x => ({root_key: "images", relative_path: x.path}))});
       this.track(result.task, {type: "upload", ...scope, images, screenshot});
     }
     static receipts() {
@@ -1211,6 +1153,10 @@
       const empty = this.el("output-empty"), message = this.restoring === this.epoch ? "正在读取当前媒体的工具任务…" : "执行操作后，进度和结果会显示在这里。";
       if (empty.textContent !== message) empty.textContent = message;
       this.el("output-empty").hidden = this.restoring !== this.epoch && (this.toolTasks.size > 0 || this.toolErrors.size > 0 || Object.keys(tools).some(action => this.busy(action)));
+      const working = Object.keys(tools).some(action => this.busy(action) || this.toolActive(action));
+      const label = working ? "处理中" : this.toolErrors.size ? "有操作失败" : this.toolTasks.size ? "查看任务与结果" : "";
+      const headingStatus = this.el("output-status");
+      if (headingStatus.textContent !== label) headingStatus.textContent = label;
       for (const [action, [type, panel]] of Object.entries(tools)) {
         const target = this.el(`tool-progress-${panel}`);
         const id = this.toolTasks.get(type), task = this.tasks.get(id), submitting = this.busy(action);

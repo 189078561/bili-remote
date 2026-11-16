@@ -21,11 +21,12 @@ def show_panel(page, name=None):
     """Navigate inline sections without opening any sheet."""
     page.wait_for_function('!(window.wb || window.V2Workbench || window.workbench)?.selecting')
     if name == 'resources':
-        picker = page.locator('[data-wb="resource-browser"]')
-        if not picker.is_visible():
-            page.locator('[data-layout="resources"]:visible').click()
-        expect(picker).to_be_visible()
+        expect(page.locator('[data-wb="resource-browser"]')).to_be_visible()
         return
+    if name is None:
+        overview = page.locator('[data-collapse="overview"]')
+        if overview.get_attribute('aria-expanded') == 'false':
+            overview.click()
     if name in ('naming', 'identity'):
         toggle = page.locator('[data-collapse="naming"]')
         if toggle.get_attribute('aria-expanded') == 'false':
@@ -35,6 +36,7 @@ def show_panel(page, name=None):
             if details.get_attribute('open') is None:
                 details.locator(':scope > summary').click()
     elif name == 'changes':
+        show_panel(page, 'identity')
         details = page.locator('#wb-naming-files')
         if details.get_attribute('open') is None:
             details.locator(':scope > summary').click()
@@ -209,7 +211,7 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         page.locator('[data-workbench] .file-row[data-path="Media/episode01.mp4"] .file-check').check()
         page.get_by_role('button', name='使用所选资源', exact=True).click()
         expect(page.locator('[data-wb="resource-media"]')).to_contain_text('1 个媒体文件')
-        show_panel(page, None)
+        show_panel(page, 'identity')
         page.locator('[data-wb="selected-title"]').fill('Synthetic Tool Flow')
         show_panel(page, None)
         show_panel(page, 'naming')
@@ -218,12 +220,11 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         show_panel(page, None)
         page.locator('[data-edit="overview"]').fill('Synthetic overview for complete publishing flow')
         show_panel(page, 'images')
-        page.locator('[data-collapse="config"]').click()
-        page.locator('[data-wb="skip-start"]').fill('0')
-        page.locator('[data-wb="skip-end"]').fill('0')
+        database = app.state.services.database
         for mode, total in [('single', '1'), ('single', '2'), ('collage', '4')]:
-            page.locator('[data-wb="image-mode"]').select_option(mode)
-            page.locator('[data-wb="image-count"]').fill(total)
+            database.update_settings({'screenshot_output_mode': mode, 'collage_default_total': total,
+                                      'collage_default_layout_mode': 'count', 'collage_default_content_type': 'custom',
+                                      'collage_custom_skip_start': '0', 'collage_custom_skip_end': '0'})
             previous = page.evaluate('wb.images[0]?.path')
             show_panel(page, 'images')
             page.locator('[data-action="screenshots"]').click()
@@ -480,25 +481,55 @@ def test_module03_signed_in_main_page_inline_media_and_layout(live_server):
         host = page.locator('#publish-view [data-workbench]')
         assert host.locator('.unified-file-browser,.wb-sheet').count() == 0
         order = host.evaluate("""el => [...el.querySelectorAll(
-            '[data-wb=resource-browser], #wb-naming, .wb-config, #wb-operations, #wb-tool-output, #wb-panel-content, #wb-publish-preview'
+            '[data-wb=resource-browser], #wb-naming, #wb-operations, #wb-tool-output, #wb-panel-content, #wb-publish-preview'
         )].map(section => section.id || section.className)""")
         assert order[0] == 'wb-resources'
-        assert order[1:] == ['wb-naming', 'wb-config', 'wb-operations', 'wb-tool-output', 'wb-panel-content', 'wb-publish-preview']
+        assert order[1:] == ['wb-operations', 'wb-tool-output', 'wb-naming', 'wb-panel-content', 'wb-publish-preview']
         expect(host.locator('[data-action=report]')).to_be_disabled()
         picker = host.locator('[data-wb=browser]')
         picker.locator('.file-row[data-path="Media"]').dblclick()
         picker.locator('.file-row[data-path="Media/episode01.mp4"]').dblclick()
-        expect(host.locator('[data-wb=resource-browser]')).to_be_hidden()
+        expect(host.locator('[data-wb=resource-browser]')).to_be_visible()
         expect(host.locator('[data-wb=context-summary]')).to_contain_text('Media/episode01.mp4')
         expect(host.locator('[data-action=report]')).to_be_enabled()
         title = host.locator('[data-wb=title-zh]')
+        naming = host.locator('[data-collapse=naming]')
+        overview = host.locator('[data-collapse=overview]')
+        expect(naming).to_have_attribute('aria-expanded', 'false')
+        expect(overview).to_have_attribute('aria-expanded', 'false')
         title.fill('合成片名')
-        collapse = host.locator('[data-collapse=naming]')
-        collapse.click()
-        expect(collapse).to_have_attribute('aria-expanded', 'false')
-        assert title.evaluate('el => !!el.closest("[inert]")')
-        collapse.click()
+        expect(title).to_be_visible()
+        expect(host.locator('[data-edit=release_title]')).to_be_visible()
+        v2_fixture(page, [])
+        page.route('**/api/v2/metadata/search?*', lambda route: route.fulfill(json={'items': [
+            {'provider': 'tmdb', 'id': '42', 'title': '合成剧集候选', 'media_type': 'series'}]}))
+        host.locator('[data-action=search]').click()
+        candidate = host.get_by_role('button', name=re.compile('合成剧集候选'))
+        expect(candidate).to_be_visible()
+        expect(naming).to_have_attribute('aria-expanded', 'false')
+        candidate.click()
+        expect(candidate).to_have_count(0)
+        expect(naming).to_have_attribute('aria-expanded', 'true')
+        expect(overview).to_have_attribute('aria-expanded', 'true')
         expect(title).to_have_value('合成片名')
+        host.locator('[data-action=search]').click()
+        expect(candidate).to_be_visible()
+        expect(overview).to_have_attribute('aria-expanded', 'false')
+        candidate.click()
+        expect(overview).to_have_attribute('aria-expanded', 'true')
+        naming.click()
+        expect(overview).to_have_attribute('aria-expanded', 'true')
+        expect(title).to_be_visible()
+        output = host.locator('[data-collapse=output]')
+        output.click()
+        expect(output).to_have_attribute('aria-expanded', 'false')
+        assert host.locator('[data-wb=reports]').evaluate('el => !!el.closest("[inert]")')
+        output.click()
+        expect(output).to_have_attribute('aria-expanded', 'true')
+        expect(host.locator('[data-wb=trackers], [data-wb=image-mode]')).to_have_count(0)
+        host.locator('[data-tool-settings]').click()
+        expect(page.locator('#settings-view')).to_be_visible()
+        page.locator('.app-tabs [data-view=publish]').click()
         page.set_viewport_size({'width':390,'height':844})
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         assert not errors, errors
@@ -507,7 +538,7 @@ def test_module03_signed_in_main_page_inline_media_and_layout(live_server):
         playwright.stop()
 
 
-def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server):
+def test_first_level_resource_picker_stays_visible_with_downloads_only(live_server):
     base_url, app = live_server
     media = app.state.services.settings.download_root / 'Media'
     (media / 'episode02.mp4').write_bytes(b'synthetic-second-episode')
@@ -523,8 +554,8 @@ def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server
         studio = page.locator('[data-wb="studio"]')
         expect(picker).to_be_visible()
         expect(studio).to_be_visible()
-        labels = page.locator('[data-wb="browser"] .root-shortcut').all_inner_texts()
-        assert labels == ['资源下载目录', '种子目录', '图片目录', '发布信息目录']
+        expect(picker.get_by_role('navigation', name='当前位置')).to_have_text('资源下载目录')
+        expect(picker.get_by_role('button', name=re.compile('种子目录|图片目录|发布信息目录'))).to_have_count(0)
         assert page.evaluate("getComputedStyle(document.body).overflowY") != 'hidden'
 
         directory = page.locator('.file-row[data-path="Media"]')
@@ -548,30 +579,21 @@ def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server
 
         for name in ('episode01.mp4', 'episode02.mp4'):
             page.locator(f'.file-row[data-path="Media/{name}"] .file-check').check()
-        expect(page.locator('[data-wb="selection-count"]')).to_have_text('2 项')
+        expect(page.locator('[data-wb="selection-count"]')).to_have_text('已勾选 2 项')
         expect(page.locator('[data-wb="selection-list"] .wb-selection-item')).to_have_count(2)
         assert page.evaluate('wb.resources.length') == 0
         assert page.evaluate('wb.pendingSelection.length') == 2
 
         up.click()
         expect(page.get_by_role('navigation', name='当前位置')).to_have_text('资源下载目录')
-        expect(page.locator('[data-wb="selection-count"]')).to_have_text('未选择')
+        expect(page.locator('[data-wb="selection-count"]')).to_be_hidden()
         page.locator('.file-row[data-path="Media"]').dblclick()
         page.get_by_role('button', name='使用当前目录', exact=True).click()
         expect(studio).to_be_visible()
-        expect(picker).to_be_hidden()
-        assert page.evaluate("wb.resources[0].relative_path === 'Media' && wb.resources[0].kind === 'directory'")
-        expect(page.locator('[data-wb="resource-action-label"]')).to_have_text('更换资源')
-        assert len([path for path, _ in requests if path == 'resources/resolve']) == 1
-
-        page.locator('[data-layout="resources"]').click()
         expect(picker).to_be_visible()
-        expect(studio).to_be_visible()
-        expect(page.locator('[data-resource-action="close"]')).to_be_visible()
-        assert page.evaluate("getComputedStyle(document.body).overflowY") != 'hidden'
-        page.locator('[data-resource-action="close"]').click()
-        expect(studio).to_be_visible()
-        assert page.evaluate("wb.resources[0].relative_path === 'Media' && wb.resources[0].kind === 'directory'")
+        page.wait_for_function("wb.context?.resources[0]?.relative_path === 'Media' && wb.resources[0].kind === 'directory'")
+        assert len([path for path, _ in requests if path == 'resources/resolve']) == 1
+        expect(picker.get_by_role('navigation', name='当前位置')).to_contain_text('Media')
 
         mount(page)
         expect(picker).to_be_visible()
@@ -580,8 +602,7 @@ def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server
         assert page.evaluate('async ({resource, context}) => wb.select([resource], {context})',
                              {'resource': resource, 'context': handoff}) is True
         expect(studio).to_be_visible()
-        expect(picker).to_be_hidden()
-        assert page.evaluate('wb.resourcePickerOpen') is False
+        expect(picker).to_be_visible()
         assert page.evaluate('wb.resources[0].relative_path') == resource['relative_path']
         assert len([path for path, _ in requests if path == 'resources/resolve']) == 1
         assert not errors, errors
@@ -777,11 +798,12 @@ def test_file_checks_stage_without_reset_and_resource_switch_requires_confirmati
         show_panel(page, None)
         show_panel(page, 'naming')
         page.locator('[data-action="naming"]').click()
+        page.wait_for_function('!wb.busy("naming") && !wb.timers.has(wb.composeTimer)')
         expect(page.locator('[data-wb="rename"]')).to_be_visible()
         expect(page.locator('[data-wb="output"]')).to_contain_text('保留人工简介')
         before = page.evaluate(snapshot)
         assert before['artifacts'] and before['preview']
-        for name in ('episode02.mp4', 'episode03.mp4'):
+        for name in ('episode01.mp4', 'episode02.mp4', 'episode03.mp4'):
             show_panel(page, 'resources')
             page.locator(f'.file-row[data-path="Media/{name}"] .file-check').check()
             assert page.evaluate(snapshot) == before
@@ -804,7 +826,7 @@ def test_file_checks_stage_without_reset_and_resource_switch_requires_confirmati
             'Media/episode01.mp4', 'Media/episode02.mp4', 'Media/episode03.mp4']
         assert page.evaluate('[...wb.dirty]') == []
         assert page.evaluate('wb.artifacts') == []
-        assert page.evaluate('wb.preview.context_revision === wb.context.revision')
+        page.wait_for_function('wb.preview?.context_revision === wb.context?.revision')
         assert page.evaluate('wb.epoch') > before['epoch']
         assert len([path for path, _ in requests if path == 'resources/resolve']) == 2
         expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
@@ -1023,6 +1045,7 @@ def test_late_report_submission_tracks_old_task_without_changing_current_resourc
         old_epoch = page.evaluate('wb.epoch')
         page.evaluate("wb.select([{root_key:'downloads',relative_path:'B.mp4',kind:'file',fingerprint:'B'}])")
         show_panel(page, None)
+        show_panel(page, None)
         page.locator('[data-edit="overview"]').fill('B 的人工简介')
         task = {'kind': 'processing', 'id': 881, 'task_type': 'media_report', 'status': 'queued',
                 'progress': None, 'artifact_refs': [], 'cancel_allowed': False, 'retry_allowed': False}
@@ -1073,15 +1096,16 @@ def test_workbench_inline_progress_and_logs_preserve_mobile_form(live_server):
         page.locator('[data-resource-action="select"]').click()
         expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
 
-        trackers = page.locator('[data-wb="trackers"]')
-        collapse = page.locator('[data-collapse="config"]')
+        expect(page.locator('[data-wb="trackers"]')).to_have_count(0)
+        collapse = page.locator('[data-collapse="overview"]')
         collapse.click()
-        trackers.fill('https://tracker.example/announce')
+        overview = page.locator('[data-edit="overview"]')
+        overview.fill('手机端简介')
         collapse.click()
         expect(collapse).to_have_attribute('aria-expanded', 'false')
-        assert trackers.evaluate('el => !!el.closest("[inert]")')
+        assert overview.evaluate('el => !!el.closest("[inert]")')
         collapse.click()
-        expect(trackers).to_have_value('https://tracker.example/announce')
+        expect(overview).to_have_value('手机端简介')
         assert len([path for path, _ in requests if path == 'resources/resolve']) == 1
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
 
@@ -1095,12 +1119,16 @@ def test_workbench_inline_progress_and_logs_preserve_mobile_form(live_server):
         assert len(submissions) == 1
         current[:] = [task]
         submissions[0].fulfill(json={'task': task})
-        bar = progress.get_by_role('progressbar')
+        bar = progress.get_by_role('progressbar', include_hidden=True)
         expect(progress).to_contain_text('排队中')
         assert bar.get_attribute('aria-valuenow') is None
         bar.evaluate('el => { window.originalBar = el; }')
+        output_toggle = page.locator('[data-collapse="output"]')
+        output_toggle.click()
         current[0] = {**task, 'status': 'running', 'progress': 42, 'cancel_allowed': True}
         expect(bar).to_have_attribute('aria-valuenow', '42')
+        expect(output_toggle).to_have_attribute('aria-expanded', 'false')
+        output_toggle.click()
         assert bar.evaluate('el => el === window.originalBar')
         expect(button).to_be_disabled()
 
