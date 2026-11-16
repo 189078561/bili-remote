@@ -103,3 +103,9 @@ V2 TaskRef 仅有 artifact_refs，没有旧任务 result/input。前端接受真
 - 工作台按现有 TaskRef 关联进度。例如 `{"kind":"processing","id":81,"task_type":"torrent_build","status":"running","progress":42}` 显示 42%；`progress:null` 不渲染百分比。返回实际可读取产物后才在当前资源下显示生成成功。图片、报告和种子消费既有产物引用；日志用原接口读取最近 100 行。
 - 验证：前端生成一致性、Node 语法和 Git 差异检查通过；`python3 scripts/dev_test.py workbench` 共 30 项通过，未运行仓库全量测试。真实工具链只处理临时合成视频，图床使用替身；移动端为 Chromium 390px 和触摸友好入口模拟，并非实体手机验收。
 - 未合并或推送；依照当前工作区限制未接触生产数据库、Docker 或凭据，未部署。
+
+### 主页面接入复核
+
+- 在本分支用隔离测试应用运行 `python3 scripts/dev_test.py integration --filter 'main_page_real_resource_naming_publish or final_ui_download_to_publish_and_undo or final_ui_empty_and_long_content_matrix'`：文件管理 → 主工作台、移动端长内容与复制 2 项通过。
+- 原版下载 → 工作台 → 改名/撤销用例在 `[data-action=apply]` 处被 Playwright 严格模式拦截：主页面和审阅面板均有确认按钮，基线 `d59cd96` 已如此。仅在临时测试适配器中把选择器限定为 `[data-sheet=changes] [data-action=apply]` 后，整个隔离链路通过（离线上游样本、临时文件、真实服务）。未修改归整合会话所有的测试。整合建议同步该一行选择器修正，保留两个既有入口。
+- `v2-integration` 工作树有重叠的未提交文件；不要直接拷贝覆盖。由整合会话核对其当前版本后合入工作台提交 `8d71e13`；本次没有合并、部署或接触生产数据。
