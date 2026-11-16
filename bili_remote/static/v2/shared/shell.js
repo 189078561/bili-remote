@@ -35,21 +35,7 @@
   document.addEventListener("app:notice", event => notice(event.detail?.text, event.detail?.error));
 
   const titles = {home: "首页", files: "文件管理", publish: "发种工作台", download: "B站下载", settings: "设置"};
-  const nav = $("app-navigation"), toggle = $("nav-toggle"), backdrop = $("nav-backdrop");
-  const mobile = matchMedia("(max-width: 900px)");
-  function syncNavigation() {
-    if (window.BILI_V2) { nav.inert = false; return; }
-    const opened = document.body.classList.contains("nav-open") && mobile.matches;
-    backdrop.hidden = !opened;
-    toggle.setAttribute("aria-expanded", String(opened));
-    nav.inert = mobile.matches && !opened;
-  }
-  function closeNavigation(restore = false) {
-    document.body.classList.remove("nav-open");
-    syncNavigation();
-    if (restore) toggle?.focus();
-  }
-  if (backdrop) backdrop.onclick = () => closeNavigation(true);
+  const nav = $("app-navigation");
   document.querySelector("[data-home-link]")?.addEventListener("click", event => {
     event.preventDefault(); nav.querySelector('[data-view="home"]').click();
   });
@@ -57,10 +43,6 @@
     const menu = document.querySelector(".account-menu");
     if (menu && !menu.contains(event.target)) menu.open = false;
   });
-  // ui.js retains the existing toggle handler; observe its state rather than double-toggle.
-  new MutationObserver(syncNavigation).observe(document.body, {attributes: true, attributeFilter: ["class"]});
-  mobile.addEventListener("change", () => closeNavigation());
-  syncNavigation();
   document.addEventListener("app:view", event => {
     const view = event.detail.view;
     $("app-page-label").textContent = titles[view] || "文件管理";
@@ -68,26 +50,18 @@
       const selected = (tab.dataset.view || (tab.id === "settings-entry" ? "settings" : "")) === view;
       tab.setAttribute("aria-current", selected ? "page" : "false");
     });
-    closeNavigation();
-    // Move keyboard focus out of the now-hidden drawer and into the selected page.
+    // Move keyboard focus into the selected page.
     if (nav.contains(document.activeElement)) $("app-content").focus({preventScroll: true});
   });
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") {
       if (!$("modal").classList.contains("hidden")) return;
       if (!$("task-center").hidden) { setDrawer(false); event.preventDefault(); }
-      else if (document.body.classList.contains("nav-open")) closeNavigation(true);
     }
     if(event.key === 'Tab' && !$("task-center").hidden && $("modal").classList.contains('hidden')) {
       const nodes=[...$("task-center").querySelectorAll('button,select,a[href],summary')].filter(el=>!el.disabled&&el.getClientRects().length);
       if(event.shiftKey && document.activeElement===nodes[0]){event.preventDefault();nodes.at(-1)?.focus();}
       else if(!event.shiftKey && document.activeElement===nodes.at(-1)){event.preventDefault();nodes[0]?.focus();}
-    }
-    if (event.key === "Tab" && mobile.matches && document.body.classList.contains("nav-open")) {
-      const controls = [toggle, ...nav.querySelectorAll("button")];
-      const first = controls[0], last = controls.at(-1);
-      if (event.shiftKey && document.activeElement === first) { last.focus(); event.preventDefault(); }
-      else if (!event.shiftKey && document.activeElement === last) { first.focus(); event.preventDefault(); }
     }
   });
 
@@ -122,12 +96,10 @@
   }
   async function refreshProcessing() {
     if (processingRequest) return processingRequest;
-    processingRequest = api(window.BILI_V2 ? "/api/v2/tasks?limit=500" : "/api/tasks?limit=500")
+    processingRequest = api("/api/v2/tasks?limit=500")
       .then(result => {
-        if (window.BILI_V2) {
-          receive("processing", result.items.filter(task => task.kind === "processing"));
-          receive("download", result.items.filter(task => task.kind === "download"));
-        } else receive("processing", result);
+        receive("processing", result.items.filter(task => task.kind === "processing"));
+        receive("download", result.items.filter(task => task.kind === "download"));
       })
       .catch(error => failed("processing", error))
       .finally(() => { processingRequest = null; });
@@ -149,18 +121,18 @@
     return request;
   }
   function setDrawer(open) {
-    if (open) { drawerReturn = document.activeElement; closeNavigation(); }
+    if (open) drawerReturn = document.activeElement;
     if(open && $("task-center").hidden) {
       drawerInert=[document.querySelector('.app-shell'),document.querySelector('.topbar')].map(el=>[el,el.inert]);
       drawerInert.forEach(([el])=>el.inert=true);
-    } else if(!open) {drawerInert.forEach(([el,value])=>el.inert=value);drawerInert=[];syncNavigation();}
+    } else if(!open) {drawerInert.forEach(([el,value])=>el.inert=value);drawerInert=[];}
     $("task-center").hidden = !open;
     $("task-center-backdrop").hidden = !open;
     $("task-center-toggle").setAttribute("aria-expanded", String(open));
     if (open) { render(); $("task-center-close").focus(); refreshProcessing(); }
     else (drawerReturn?.isConnected ? drawerReturn : $("task-center-toggle")).focus();
   }
-  async function refresh() { await Promise.allSettled([loadJobs(), refreshProcessing()]); }
+  async function refresh() { await refreshProcessing(); }
   function taskCard(kind, task) {
     const card = node("article", null, "task-card");
     card.dataset.taskKey = `${kind}:${task.id}`;
@@ -181,12 +153,12 @@
     const actions = node("div", null, "button-row");
     const base = kind === "download" ? `/api/jobs/${task.id}` : `/api/tasks/${task.id}`;
     const mutate = async action => {
-      await api(`${window.BILI_V2 ? `/api/v2/tasks/${kind}/${task.id}` : base}/${action}`, {method: "POST"});
+      await api(`/api/v2/tasks/${kind}/${task.id}/${action}`, {method: "POST"});
       cache.delete(task.id);
       await refresh();
     };
-    if (["running", "queued"].includes(task.status) && (!window.BILI_V2 || task.cancel_allowed !== false)) actions.append(button("取消", () => mutate("cancel")));
-    if (["failed", "cancelled", "auth_required"].includes(task.status) && (window.BILI_V2 ? task.retry_allowed : (kind === "download" || !["file_operation","v2_rename_apply","v2_rename_undo"].includes(task.task_type)))) actions.append(button("重试", () => mutate("retry")));
+    if (["running", "queued"].includes(task.status) && task.cancel_allowed !== false) actions.append(button("取消", () => mutate("cancel")));
+    if (["failed", "cancelled", "auth_required"].includes(task.status) && task.retry_allowed) actions.append(button("重试", () => mutate("retry")));
     if (kind === "processing" && task.task_type === "file_operation" && ["failed", "cancelled"].includes(task.status)) actions.append(button("重新检查文件", () => { setDrawer(false); openBusinessView("files"); }));
     actions.append(button("日志", async () => {
       const result = await api(`${base}/${kind === "download" ? "log" : "logs"}`);

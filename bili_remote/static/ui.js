@@ -5,7 +5,6 @@
   const aliases = {uploads:"uploads", torrents:"torrents", "release-info":"release-info"};
   function openTool(kind) {
     if (kind === "screenshots") return window.CollageTool.openRecent();
-    if (window.SeedAssistant) return SeedAssistant.openTool(aliases[kind] || kind);
     const content = document.getElementById(`${aliases[kind] || kind}-view`);
     if (!content) return;
     // Restore the previous tool before replacing the dialog, including stacked selectors.
@@ -37,11 +36,6 @@
     if (tool) { document.querySelectorAll(".file-history-menu").forEach(n=>n.open=false); openTool(tool.dataset.fileTool); }
     if (event.target.closest("[data-open-settings]")) openSettingsPage();
   });
-  const toggle = document.getElementById("nav-toggle");
-  toggle?.addEventListener("click", () => {
-    const expanded = document.body.classList.toggle("nav-open");
-    toggle.setAttribute("aria-expanded", String(expanded));
-  });
   document.addEventListener("app:view", event => {
     if(returnContext && event.detail.view !== "settings") {
       const context=returnContext; returnContext=null;
@@ -50,7 +44,5 @@
         else openTool(context.kind);
       },0);
     }
-    document.body.classList.remove("nav-open");
-    toggle?.setAttribute("aria-expanded", "false");
   });
 })();

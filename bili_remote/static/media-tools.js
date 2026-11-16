@@ -258,10 +258,6 @@
         ...[...inputs].map(([key, input]) => [key, input.value]),
       ]);
     const set = (data) => {
-      if(scope === "publish") {
-        const description = byId("publish-description");
-        if(description && (!description.value || [extras.overview,extras.ptgen_text].includes(description.value))) description.value=data.ptgen_text || data.overview || "";
-      }
       revision++;
       err.textContent="";
       recovery.hidden = true;
@@ -523,140 +519,14 @@
     label.append(select);
     host.append(label);
   }
-  function readPublish() {
-    const fields = editors.get("publish")?.read() || {};
-    for (const key of [
-      "subtitle",
-      "keywords",
-      "season",
-      "resolution",
-      "source",
-      "hdr",
-      "video_codec",
-      "audio_codec",
-      "group",
-      "category",
-      "quality",
-      "region",
-      "tags",
-      "report_wrapper",
-    ])
-      fields[key] = byId(`publish-${key}`)?.value || "";
-    for (const key of ["classification_confirmed", "encoder_confirmed"])
-      fields[key] = Boolean(byId(`publish-${key}`)?.checked);
-    if (byId("publish-poster_upload_id")?.value)
-      fields.poster_upload_id = Number(byId("publish-poster_upload_id").value);
-    else fields.poster_upload_id = null;
-    const selected = [
-      ...document.querySelectorAll("#publish-reports input:checked"),
-    ].map((n) => n.value);
-    if (byId("publish-reports")?.dataset.loaded) fields.report_ids = selected;
-    return fields;
-  }
-  let reportVersion = 0;
-  async function selectPublishReport(id) {
-    const version = ++reportVersion;
-    const host = byId("publish-reports");
-    host.replaceChildren();
-    delete host.dataset.loaded;
-    if (!id) return;
-    const doc = await api(`/api/release-info/${id}`);
-    if (version !== reportVersion) return;
-    host.dataset.loaded = "true";
-    const media = doc.media || {};
-    const saved = media.metadata || {};
-    const current = editors.get("publish").read();
-    for (const [key, value] of Object.entries(saved))
-      if (!current[key]) current[key] = value;
-    editors.get("publish").set(current);
-    for (const r of media.reports || []) {
-      const label = el("label", null, "check-row");
-      const check = el("input");
-      check.type = "checkbox";
-      check.value = r.id;
-      check.checked = Boolean(r.valid);
-      label.append(
-        check,
-        el(
-          "span",
-          `${r.kind} · ${r.source} ${r.valid ? "" : "（不满足发布要求）"}`,
-        ),
-      );
-      const details = el("details");
-      details.append(
-        el("summary", "查看原始报告"),
-        el("pre", r.text, "log-output"),
-      );
-      host.append(label, details);
-    }
-    const sample = (media.videos || []).find((v) => v.details)?.details || {};
-    for (const key of ["resolution", "video_codec", "audio_codec", "hdr"])
-      if (byId(`publish-${key}`) && !byId(`publish-${key}`).value)
-        byId(`publish-${key}`).value = sample[key] || "";
-    if (media.disc_kind === "bluray" && !byId("publish-quality").value) byId("publish-quality").value = "Blu-ray";
-    const reps = byId("release-representatives");
-    if (reps) reps.value = "";
-  }
-  function fillPublish(fields) {
-    editors.get("publish")?.set(fields || {});
-    for (const [key, value] of Object.entries(fields || {})) {
-      const input = byId(`publish-${key}`);
-      if (input) {
-        if (input.type === "checkbox") input.checked = Boolean(value);
-        else if (typeof value !== "object") input.value = value || "";
-      }
-    }
-  }
-  async function useInPublish(type, record) {
-    const source = {root_key:record.source_root_key,relative_path:record.source_relative_path};
-    try {const meta=await api(`/api/files/meta?${new URLSearchParams({root_key:source.root_key,path:source.relative_path})}`);source.is_dir=Boolean(meta.is_dir || meta.item?.is_dir);} catch {}
+  async function useInPublish(_type, record) {
+    const source = {root_key:record.source_root_key, relative_path:record.source_relative_path};
     if (document.querySelector("#modal .file-tool-dialog")) closeModal();
-    if (!await window.BiliModules.openPublishResource(source)) return;
-    if (type === "release") {
-      byId("publish-release-select").value = String(record.id);
-      await selectPublishReport(record.id);
-    } else byId("publish-torrent-select").value = String(record.id);
-    document.getElementById("publish-view").dispatchEvent(new Event("input",{bubbles:true}));
+    await window.BiliModules.openPublishResource(source);
   }
 
   function boot() {
     mountEditor("release");
-    mountEditor("publish");
-    byId("publish-metadata")?.addEventListener("metadata:changed", () => {
-      const fields = editors.get("publish")?.read() || {};
-      if (!byId("publish-category").value)
-        byId("publish-category").value = String(fields.genres).includes("动画")
-          ? "Animation"
-          : fields.media_type === "tv"
-            ? "TV"
-            : fields.media_type === "movie"
-              ? "Movie"
-              : "";
-      if (!byId("publish-region").value)
-        byId("publish-region").value = (fields.countries || []).join(" / ");
-    });
-    byId("publish-release-select")?.addEventListener("change", () =>
-      selectPublishReport(byId("publish-release-select").value),
-    );
-    byId("publish-generate-title")?.addEventListener("click", () => {
-      const f = readPublish();
-      const tokens = [
-        f.title_en,
-        f.year,
-        f.season ? "S" + f.season.padStart(2, "0") : "",
-        f.resolution,
-        f.source,
-        f.hdr,
-        f.video_codec,
-        f.audio_codec,
-      ].filter(Boolean);
-      byId("publish-title").value =
-        tokens.map((s) => s.trim().replace(/[\s.]+/g, ".")).join(".") +
-        (f.group ? "-" + f.group : "");
-      byId("publish-subtitle").value = [f.title_zh || f.title_en, f.keywords]
-        .filter(Boolean)
-        .join(" ");
-    });
     for (const scope of ["uploads", "release", "torrents"]) {
       const id = storage.get(`media-job-${scope}`);
       if (id) watch(scope, id);
@@ -678,9 +548,6 @@
     optical,
     metadata: (scope) => editors.get(scope)?.read() || {},
     setMetadata: (scope, v) => editors.get(scope)?.set(v),
-    readPublish,
-    fillPublish,
-    selectPublishReport,
     useInPublish,
     storage,
   };

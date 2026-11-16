@@ -328,3 +328,6 @@ body:has(.br-workbench :is(.wb-image-dialog,.wb-task-log-dialog)[open]) {overflo
 .wb-report-card pre {overflow:auto;overscroll-behavior:contain;}
 .wb-tool-error:not(:empty) {padding-inline-start:8px;border-inline-start:2px solid var(--ws-danger);}
 .wb-tool-progress button {min-height:38px;}
+
+.wb-resource-info > .wb-current-media {font-size:15px;font-weight:600;color:var(--ws-ink);margin:5px 0 2px;overflow-wrap:anywhere;}
+.wb-resource-info > .wb-current-media + p {margin-top:2px;}

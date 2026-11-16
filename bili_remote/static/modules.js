@@ -3,21 +3,13 @@
 
   const state = {
     uploads: [],
-    selectedUploads: [], selectedPublishUploads: [],
+    selectedUploads: [],
     releaseDocuments: [],
     torrentBuilds: [],
     currentReleaseAnalysis: null,
     currentReleaseDocumentId: null,
-    currentPublish: null,
     releaseSource: null,
     torrentSource: null,
-    publishSource: null,
-    publishDirty: false,
-    publishVersion: 0,
-    publishEditVersion: 0,
-    publishSourcesVersion: 0,
-    publishRestored: false,
-    publishSessions: [],
     loading: new Set()
   };
 
@@ -169,55 +161,7 @@
     return card;
   }
 
-  // Overview ------------------------------------------------------
-  function summaryCard(label, value, detail, target) {
-    const card = node("article", "card overview-card");
-    card.append(node("p", "eyebrow", label));
-    card.append(node("strong", "overview-value", value));
-    card.append(node("p", "muted", detail));
-    if (target) {
-      const open = button("打开", "button ghost small");
-      open.addEventListener("click", () => openBusinessView(target));
-      card.append(open);
-    }
-    return card;
-  }
-
-  async function loadOverview() {
-    if (window.BILI_V2 && window.V2Home) return V2Home.load();
-    const host = byId("home-summary");
-    const refresh = byId("home-refresh");
-    if (!host || host.hidden || state.loading.has("home")) return;
-    state.loading.add("home");
-    busy(refresh, true);
-    host.replaceChildren(summaryCard("状态", "读取中", "正在汇总任务与模块状态。"));
-    try {
-      const results = await Promise.allSettled([
-        api("/api/tasks?limit=100"),
-        api("/api/uploads?limit=100"),
-        api("/api/release-info?limit=100"),
-        api("/api/torrents?limit=100")
-      ]);
-      const [tasksResult, uploadsResult, releasesResult, torrentsResult] = results;
-      const tasks = tasksResult.status === "fulfilled" ? tasksResult.value : [];
-      const uploads = uploadsResult.status === "fulfilled" ? uploadsResult.value.items || [] : [];
-      const releases = releasesResult.status === "fulfilled" ? releasesResult.value.items || [] : [];
-      const torrents = torrentsResult.status === "fulfilled" ? torrentsResult.value.items || [] : [];
-      const running = tasks.filter(task => ["running", "queued"].includes(task.status)).length;
-      const failed = tasks.filter(task => task.status === "failed").length;
-      const uploaded = uploads.filter(item => item.status === "completed").length;
-      const cards = [
-        summaryCard("后台任务", tasksResult.status === "fulfilled" ? String(running) : "读取失败", tasksResult.status === "fulfilled" ? (failed ? `${failed} 个失败任务` : "没有失败任务") : tasksResult.reason.message, "files"),
-        summaryCard("图床上传", uploadsResult.status === "fulfilled" ? String(uploaded) : "读取失败", uploadsResult.status === "fulfilled" ? `${uploads.length} 条最近上传记录` : uploadsResult.reason.message, "uploads"),
-        summaryCard("媒体报告", releasesResult.status === "fulfilled" ? String(releases.length) : "读取失败", releasesResult.status === "fulfilled" ? "可复用的原始报告与描述" : releasesResult.reason.message, "release-info"),
-        summaryCard("种子", torrentsResult.status === "fulfilled" ? String(torrents.length) : "读取失败", torrentsResult.status === "fulfilled" ? "本地生成的种子文件" : torrentsResult.reason.message, "torrents")
-      ];
-      host.replaceChildren(...cards);
-    } finally {
-      state.loading.delete("home");
-      busy(refresh, false);
-    }
-  }
+  function loadOverview() { return window.V2Home?.load(); }
 
   // Image hosting -------------------------------------------------
   function uploadImageUrl(record) {
@@ -735,278 +679,10 @@
   }
 
   // Publishing ----------------------------------------------------
-  function publishSourcePayload() {
-    return state.publishSource ? {source_root_key:state.publishSource.root_key,source_relative_path:state.publishSource.relative_path} : {};
-  }
-  function normalizePath(path) {return String(path || "").replace(/^\/+|\/+$/g, "");}
-  function sameSource(root,path) {
-    return Boolean(state.publishSource && root === state.publishSource.root_key && normalizePath(path) === normalizePath(state.publishSource.relative_path));
-  }
-  function withinSource(source) {
-    if (!state.publishSource || source.root_key !== state.publishSource.root_key) return false;
-    const current=normalizePath(state.publishSource.relative_path), path=normalizePath(source.relative_path);
-    return path === current || (state.publishSource.is_dir && path.startsWith(current + "/"));
-  }
-  function markPublishDirty() {
-    state.publishEditVersion++;
-    state.publishDirty=true;
-    byId("publish-dirty").textContent="有未保存修改";
-  }
-  function clearPublish() {
-    state.currentPublish=null;
-    state.selectedPublishUploads=[];
-    ToolUI.fillPublish({});
-    byId("publish-view").querySelectorAll("input,textarea").forEach(input=>{
-      if(input.type === "checkbox") input.checked=false; else input.value="";
-    });
-    for(const key of ["category","quality","release-select","torrent-select","poster_upload_id"]) byId(`publish-${key}`).value="";
-    ToolUI.selectPublishReport(null);
-    byId("publish-output-title").textContent="发布内容";
-    byId("publish-warnings").replaceChildren();
-    state.publishDirty=false;
-    byId("publish-dirty").textContent="";
-    ToolUI.storage.set("publish-current-session",null);
-  }
   async function openPublishResource(source) {
-    if(state.publishDirty && !window.confirm("当前发布资料有未保存修改，放弃修改并切换资源？")) return false;
-    state.publishVersion++;
-    clearPublish();
-    state.publishSource={...source,relative_path:normalizePath(source.relative_path)};
-    byId("publish-resource-label").textContent=sourceLabel(state.publishSource);
-    state.publishRestored=true;
-    openBusinessView("publish");
-    await loadPublishSources(true);
-    return true;
-  }
-  async function selectPublishSource() {
-    const selected=await pickOne({title:"选择发布资源",selectionType:"both",confirmLabel:"使用此资源"});
-    if(selected) await openPublishResource(selected);
-  }
-  async function loadPublishSources(autoAssociate = false) {
-    const version=++state.publishSourcesVersion;
-    const refresh = byId("publish-refresh"); busy(refresh,true);
-    try {
-      const [releaseResult,torrentResult,uploadResult,sessionResult] = await Promise.all([
-        api("/api/release-info?limit=200"),api("/api/torrents?limit=200"),
-        api("/api/uploads?limit=200&status=completed"),api("/api/files/screenshots/sessions?limit=200")
-      ]);
-      if(version !== state.publishSourcesVersion) return;
-      const releaseSelect=byId("publish-release-select"), torrentSelect=byId("publish-torrent-select");
-      const previousRelease=releaseSelect.value || state.currentPublish?.release_document_id;
-      const previousTorrent=torrentSelect.value || state.currentPublish?.torrent_build_id;
-      // Saved references may be older than the recent-record window.
-      const missing=[];
-      const include=(items,id,path)=>{
-        if(id && !items.some(item=>Number(item.id)===Number(id))) missing.push(
-          api(`${path}/${id}`).then(record=>items.push(record)).catch(error=>{
-            throw new Error(`无法恢复关联记录 #${id}：${error.message}`);
-          })
-        );
-      };
-      include(releaseResult.items,previousRelease,"/api/release-info");
-      include(torrentResult.items,previousTorrent,"/api/torrents");
-      const savedImages=new Set([...(state.currentPublish?.image_upload_ids || []),...state.selectedPublishUploads]);
-      const posterId=Number(byId("publish-poster_upload_id").value || state.currentPublish?.metadata?.poster_upload_id || 0);
-      if(posterId)savedImages.add(posterId);
-      for(const id of savedImages)include(uploadResult.items,id,"/api/uploads");
-      await Promise.all(missing);
-      if(version !== state.publishSourcesVersion) return;
-      const docs=(releaseResult.items || []).filter(r=>sameSource(r.source_root_key,r.source_relative_path) || Number(r.id)===Number(previousRelease));
-      const builds=(torrentResult.items || []).filter(r=>sameSource(r.source_root_key,r.source_relative_path) || Number(r.id)===Number(previousTorrent));
-      releaseSelect.replaceChildren(new Option(docs.length ? "选择报告" : "尚无同一资源的报告", ""));
-      for(const doc of docs) releaseSelect.append(new Option(`${doc.title} · ${doc.source_relative_path} · #${doc.id}`,String(doc.id)));
-      torrentSelect.replaceChildren(new Option("不关联种子", ""));
-      for(const build of builds) torrentSelect.append(new Option(`${build.name} · ${build.source_relative_path} · #${build.id}`,String(build.id)));
-      if([...releaseSelect.options].some(o=>o.value===String(previousRelease))) releaseSelect.value=String(previousRelease);
-      else if(autoAssociate && docs.length===1) {releaseSelect.value=String(docs[0].id); await ToolUI.selectPublishReport(docs[0].id);}
-      if(version !== state.publishSourcesVersion) return;
-      if([...torrentSelect.options].some(o=>o.value===String(previousTorrent))) torrentSelect.value=String(previousTorrent);
-      else if(autoAssociate && builds.length===1) torrentSelect.value=String(builds[0].id);
-      state.publishSessions=(sessionResult.sessions || []).filter(session=>(session.sources || []).some(withinSource)).map(session=>session.id);
-      const bound=new Set([...(state.currentPublish?.image_upload_ids || []),...state.selectedPublishUploads]);
-      if(posterId)bound.add(posterId);
-      const all=byId("publish-show-all-images")?.checked;
-      const uploads=(uploadResult.items || []).filter(r=>all || state.publishSessions.includes(r.session_id) || bound.has(Number(r.id)));
-      renderPublishUploads(uploads);
-      if(!state.publishSource && !state.currentPublish) message("publish-message","先选择资源，再关联已有结果。影视资料也可直接手动填写。","success");
-    } catch(error) {if(version===state.publishSourcesVersion)message("publish-message",error.message);}
-    finally {if(version===state.publishSourcesVersion)busy(refresh,false);}
-  }
-
-  function renderPublishUploads(uploads) {
-    const host = byId("publish-upload-list");
-    if (!host) return;
-    if (!uploads.length) {
-      host.replaceChildren(node("span", "muted", "暂无匹配截图。可在文件管理中上传，或展开选择其他已有图片。"));
-      return;
-    }
-    host.replaceChildren();
-    const poster = byId("publish-poster_upload_id"); const previousPoster=poster.value || (!state.publishDirty ? state.currentPublish?.metadata?.poster_upload_id : "") || "";
-    poster.replaceChildren(new Option("使用影视资料中的海报链接", ""));
-    for (const upload of uploads) {
-      poster.append(new Option(upload.source_name || `图片 #${upload.id}`, String(upload.id)));
-      const label = node("label", "publish-upload-item");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.value = String(upload.id);
-      input.checked=state.selectedPublishUploads.includes(Number(upload.id));
-      input.addEventListener("change",()=>{const id=Number(upload.id);state.selectedPublishUploads=state.selectedPublishUploads.filter(value=>value!==id);if(input.checked)state.selectedPublishUploads.push(id);markPublishDirty();renderPublishUploads(uploads);});
-      label.append(input);
-      const image = node("img");
-      image.src = uploadImageUrl(upload) || upload.thumbnail_url || upload.remote_url;
-      image.alt = upload.source_name || "已上传图片";
-      image.loading = "lazy";
-      image.addEventListener("error", () => image.remove());
-      const position=state.selectedPublishUploads.indexOf(Number(upload.id));
-      label.append(image, node("span", null, `${position >= 0 ? position+1+". " : ""}${upload.source_name || `上传 #${upload.id}`}`));
-      if(position >= 0) for(const [text,delta] of [["↑",-1],["↓",1]]) {
-        const move=button(text);move.setAttribute("aria-label",`${text === "↑" ? "上移" : "下移"}截图 ${upload.id}`);
-        move.disabled=position+delta<0 || position+delta>=state.selectedPublishUploads.length;
-        move.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();const ids=state.selectedPublishUploads;[ids[position],ids[position+delta]]=[ids[position+delta],ids[position]];markPublishDirty();renderPublishUploads(uploads);});
-        label.append(move);
-      }
-      host.append(label);
-    }
-    poster.value = previousPoster;
-  }
-
-  function publishPayload() {
-    return {
-      title: byId("publish-title").value.trim(),
-      release_document_id: byId("publish-release-select").value ? Number(byId("publish-release-select").value) : null,
-      torrent_build_id: byId("publish-torrent-select").value ? Number(byId("publish-torrent-select").value) : null,
-      image_upload_ids: state.selectedPublishUploads.filter(id=>Array.from(document.querySelectorAll("#publish-upload-list input:checked")).some(input=>Number(input.value)===id)),
-      metadata: {...ToolUI.readPublish(),resource_is_dir:Boolean(state.publishSource?.is_dir)},
-      ...publishSourcePayload(),
-      description: byId("publish-description").value || ToolUI.metadata("publish").ptgen_text || ToolUI.metadata("publish").overview || ""
-    };
-  }
-
-  function showPublish(record, preserveEdits = false) {
-    state.currentPublish = record;
-    state.publishDirty=preserveEdits;
-    byId("publish-dirty").textContent=preserveEdits ? "有未保存修改" : "已保存";
-    ToolUI.storage.set("publish-current-session",record.id);
-    const card = byId("publish-output-card");
-    card.classList.remove("hidden");
-    byId("publish-output-title").textContent = `${record.status === "ready" ? "就绪" : "草稿"} · ${record.title || `发布辅助 #${record.id}`}`;
-    const warnings = byId("publish-warnings");
-    warnings.replaceChildren();
-    for (const item of record.warnings || []) warnings.append(node("p", (record.metadata?.checks?.errors || []).includes(item) ? "form-error" : "muted", item));
-    renderPublishFormat();
-    byId("publish-update").disabled = false;
-  }
-
-  function renderPublishFormat() {
-    if (!state.currentPublish) return;
-    const format = byId("publish-format-select").value;
-    const content = state.currentPublish[format] || "";
-    byId("publish-output").value = content;
-  }
-
-  async function createPublish() {
-    if(state.currentPublish) return updatePublish();
-    const version=state.publishVersion;
-    const editVersion=state.publishEditVersion;
-    const target = byId("publish-create");
-    const payload = publishPayload();
-    busy(target, true);
-    try {
-      const record = await api("/api/publish/sessions", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      });
-      if(version !== state.publishVersion) return;
-      showPublish(record,editVersion !== state.publishEditVersion);
-      message("publish-message", "发布内容已生成，请检查后再复制。", "success");
-      await loadPublishSessions();
-    } catch (error) {
-      message("publish-message", error.message);
-    } finally {
-      busy(target, false);
-    }
-  }
-
-  async function updatePublish() {
-    if (!state.currentPublish) return createPublish();
-    const version=state.publishVersion;
-    const editVersion=state.publishEditVersion;
-    const target = byId("publish-update");
-    busy(target, true);
-    try {
-      const record = await api(`/api/publish/sessions/${state.currentPublish.id}`, {
-        method: "PUT",
-        body: JSON.stringify(publishPayload())
-      });
-      if(version !== state.publishVersion) return;
-      showPublish(record,editVersion !== state.publishEditVersion);
-      message("publish-message", "发布内容已更新。", "success");
-      await loadPublishSessions();
-    } catch (error) {
-      message("publish-message", error.message);
-    } finally {
-      busy(target, false);
-    }
-  }
-
-  async function loadPublishSessions() {
-    const host = byId("publish-list");
-    if (!host) return;
-    try {
-      const result = await api("/api/publish/sessions?limit=200");
-      const items = result.items || [];
-      if (!items.length) {
-        host.replaceChildren(empty("暂无发布辅助记录。"));
-        return;
-      }
-      host.replaceChildren();
-      for (const session of items) {
-        const open = button("打开");
-        open.addEventListener("click", () => openPublishSession(session.id));
-        host.append(recordCard({
-          title: session.title || `发布辅助 #${session.id}`,
-          meta: [
-            `${session.image_upload_ids?.length || 0} 张图片 · ${session.torrent_build_id ? "已关联种子" : "未关联种子"}`,
-            `更新于 ${formatTime(session.updated_at)}`
-          ],
-          status: session.status,
-          actions: [open]
-        }));
-      }
-    } catch (error) {
-      host.replaceChildren(empty(error.message));
-    }
-  }
-
-  async function openPublishSession(sessionId) {
-    if(state.publishDirty && !window.confirm("放弃当前未保存修改并打开草稿？")) return;
-    const version=++state.publishVersion;
-    try {
-      const record = await api(`/api/publish/sessions/${sessionId}`);
-      if(version !== state.publishVersion) return;
-      clearPublish();
-      state.currentPublish=record;
-      state.publishSource=record.source_root_key ? {root_key:record.source_root_key,relative_path:record.source_relative_path,is_dir:Boolean(record.metadata?.resource_is_dir)} : null;
-      byId("publish-resource-label").textContent=state.publishSource ? sourceLabel(state.publishSource) : "历史草稿 · 未记录源资源";
-      await loadPublishSources();
-      if(version !== state.publishVersion) return;
-      await ToolUI.selectPublishReport(record.release_document_id);
-      if(version !== state.publishVersion) return;
-      ToolUI.fillPublish(record.metadata || {});
-      document.querySelectorAll("#publish-reports input").forEach(input=>{input.checked=(record.metadata?.report_ids || record.metadata?.report_sources?.map(r=>r.id) || []).includes(input.value);});
-      byId("publish-title").value = record.title || "";
-      byId("publish-release-select").value = record.release_document_id || "";
-      byId("publish-torrent-select").value = record.torrent_build_id || "";
-      byId("publish-description").value = record.description || "";
-      state.selectedPublishUploads=[...(record.image_upload_ids || [])];
-      document.querySelectorAll("#publish-upload-list input").forEach(input => {
-        input.checked = (record.image_upload_ids || []).includes(Number(input.value));
-      });
-      showPublish(record);
-      message("publish-message", "已载入发布辅助记录。", "success");
-    } catch (error) {
-      message("publish-message", error.message);
-    }
+    if (!source || !window.AppResources) return false;
+    const meta = await api("/api/files/meta?" + new URLSearchParams({root_key:source.root_key,path:source.relative_path}));
+    return AppResources.openWorkbench([{...meta, root_key: source.root_key}]);
   }
 
   function renderReports(document) {
@@ -1022,16 +698,6 @@
     if(scope==="torrents") await loadTorrentBuilds();
     if(scope==="uploads") await loadUploads();
   });
-  document.addEventListener("tools:use-screenshots",async event=>{
-    await loadPublishSources();
-    const result=await api("/api/uploads?limit=500&status=completed");
-    const visible=new Set([...document.querySelectorAll("#publish-upload-list input")].map(input=>Number(input.value)));
-    state.selectedPublishUploads=(result.items || []).filter(r=>r.session_id===event.detail.sessionId && visible.has(Number(r.id))).map(r=>Number(r.id));
-    document.querySelectorAll("#publish-upload-list input").forEach(input=>{input.checked=state.selectedPublishUploads.includes(Number(input.value));});
-    markPublishDirty();
-  });
-  for(const id of ["torrent-piece","torrent-output","release-output","publish-report_wrapper","publish-format-select"]) byId(id)?.addEventListener("input",event=>{event.target.dataset.dirty="true";});
-
   // Wiring --------------------------------------------------------
   function wireNavigation() {
     document.addEventListener("app:view", event => {
@@ -1041,14 +707,6 @@
       else if (view === "release-info") loadReleaseDocuments();
       else if (view === "torrents") {
         loadTorrentBuilds();
-      } else if (view === "publish" && !window.BILI_V2) {
-        loadPublishSources();
-        loadPublishSessions();
-        if(!state.publishRestored) {
-          state.publishRestored=true;
-          const id=ToolUI.storage.get("publish-current-session");
-          if(id) openPublishSession(id);
-        }
       }
     });
   }
@@ -1092,42 +750,9 @@
     byId("torrent-refresh")?.addEventListener("click", loadTorrentBuilds);
   }
 
-  function wirePublish() {
-    if (window.BILI_V2) return;
-    byId("publish-refresh")?.addEventListener("click", loadPublishSources);
-    byId("publish-source-select")?.addEventListener("click",()=>selectPublishSource().catch(error=>message("publish-message",error.message)));
-    byId("publish-show-all-images")?.addEventListener("change",()=>loadPublishSources());
-    byId("publish-new")?.addEventListener("click",()=>{
-      if(state.publishDirty && !window.confirm("放弃当前未保存修改并新建草稿？"))return;
-      state.publishVersion++; clearPublish(); state.publishSource=null;
-      byId("publish-resource-label").textContent="尚未选择资源"; loadPublishSources();
-    });
-    byId("publish-view")?.addEventListener("input",markPublishDirty);
-    byId("publish-view")?.addEventListener("change",markPublishDirty);
-    byId("publish-view")?.addEventListener("metadata:changed",markPublishDirty);
-    window.addEventListener("beforeunload",event=>{if(state.publishDirty){event.preventDefault();event.returnValue="";}});
-    byId("publish-locate")?.addEventListener("click",()=>{
-      openBusinessView("files");
-      if(state.publishSource) document.dispatchEvent(new CustomEvent("files:locate",{detail:state.publishSource}));
-    });
-    byId("publish-create")?.addEventListener("click", createPublish);
-    byId("publish-update")?.addEventListener("click", updatePublish);
-    byId("publish-format-select")?.addEventListener("change", renderPublishFormat);
-    byId("publish-copy")?.addEventListener("click", async () => {
-      try {
-        if(state.publishDirty || !state.currentPublish) await createPublish();
-        if(state.publishDirty || !state.currentPublish) return;
-        await copyText(byId("publish-output").value);
-        message("publish-message", "当前格式内容已复制", "success");
-      } catch (error) {
-        message("publish-message", error.message);
-      }
-    });
-  }
-
   function applyToolSettings(settings, forceScope = null) {
     const values=settings?.values || {};
-    const fields={"torrent-trackers":"torrent_default_trackers","torrent-private":"torrent_default_private","torrent-piece":"torrent_default_piece_length","torrent-source-tag":"torrent_default_source","torrent-output":"torrent_output_relative_path","release-output":"release_info_output_relative_path","release-format":"release_info_default_format","publish-report_wrapper":"publish_report_wrapper","publish-format-select":"publish_default_format"};
+    const fields={"torrent-trackers":"torrent_default_trackers","torrent-private":"torrent_default_private","torrent-piece":"torrent_default_piece_length","torrent-source-tag":"torrent_default_source","torrent-output":"torrent_output_relative_path","release-output":"release_info_output_relative_path","release-format":"release_info_default_format"};
     for(const [id,key]of Object.entries(fields)) {
       const input=byId(id); if(!input)continue;
       const force=forceScope==="torrents"?id.startsWith("torrent-"):forceScope==="release"?id.startsWith("release-"):false;
@@ -1144,7 +769,6 @@
 
   document.addEventListener("settings-updated", event => {
     applyToolSettings(event.detail);
-    if (event.detail) loadPublishSources();
   });
 
   wireNavigation();
@@ -1152,7 +776,6 @@
   wireUploads();
   wireRelease();
   wireTorrents();
-  wirePublish();
   applyToolSettings(typeof appSettings !== "undefined" ? appSettings : null);
 
   document.addEventListener("file-tool:open",event=>{
@@ -1162,7 +785,7 @@
   });
   async function runFileTool(kind,items,rootKey) {
     const sources=items.map(item=>({...item,root_key:item.root_key || rootKey}));
-    if(kind === "publish") return window.SeedAssistant ? SeedAssistant.select(sources) : openPublishResource(sources[0]);
+    if(kind === "publish") return openPublishResource(sources[0]);
     const scope={report:"release-info",torrent:"torrents",upload:"uploads"}[kind];
     FileTools.open(scope);
     applyToolSettings(appSettings,kind === "report" ? "release" : "torrents");
@@ -1184,5 +807,5 @@
       }
     } catch(error) {message(kind === "report" ? "release-message" : "torrent-message",error.message);}
   }
-  window.BiliModules = {openPublishSession, assistantSnapshot:()=>({fields:{title:byId("publish-title").value,subtitle:byId("publish-subtitle").value,description:byId("publish-description").value},metadata:ToolUI.readPublish(),publishId:state.currentPublish?.id,source:state.publishSource}), loadOverview, loadUploads, loadPublishSources, openReleaseDocument,openPublishResource,runFileTool,publishSourcePayload};
+  window.BiliModules = {openPublishResource, runFileTool};
 })();

@@ -694,6 +694,7 @@
         summary();
       } catch (error) { showError(error.message); }
     });
+    listen(document, "bili:account-changed", refreshAccount);
     listen($("[data-login-web]"), "click", () => options.onLogin?.("web"));
     listen($("[data-login-tv]"), "click", () => options.onLogin?.("tv"));
     listen($("[data-logout-web]"), "click", async () => {

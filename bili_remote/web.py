@@ -86,13 +86,10 @@ def asset_version() -> str:
         APP_DIR / "static" / "media-tools.css",
         APP_DIR / "static" / "ui.js",
         APP_DIR / "static" / "ui.css",
-        APP_DIR / "static" / "assistant.css",
-        APP_DIR / "static" / "assistant.js",
         APP_DIR / "static" / "settings.js",
         APP_DIR / "static" / "settings-fields.js",
         APP_DIR / "static" / "settings-profiles.js",
         APP_DIR / "static" / "styles.css",
-        APP_DIR / "static" / "workspace.js",
         APP_DIR / "static" / "workspace.css",
     )
     paths += tuple((APP_DIR / "static" / "v2").rglob("*.js")) + tuple((APP_DIR / "static" / "v2").rglob("*.css"))
@@ -788,7 +785,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/legacy", response_class=HTMLResponse)
     @app.get("/", response_class=HTMLResponse)
     @app.get("/settings", response_class=HTMLResponse)
     async def index(
@@ -808,22 +804,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             response.headers["Cache-Control"] = "no-store"
             return response
-        settings_values = service_container.database.get_settings()
         response = templates.TemplateResponse(
             request=request,
             name="index.html",
             context={
                 "app_name": app_settings.app_name,
-                "v2_enabled": request.url.path != "/legacy" and request.query_params.get("legacy") != "1",
                 "csrf": session.csrf,
                 "username": session.username,
-                "ytdlp_version": app_settings.ytdlp_version,
-                "single_template": settings_values["single_output_template"],
-                "playlist_template": settings_values["playlist_output_template"],
-                "download_root": str(service_container.files.category_root("downloads").path),
-                "workspace_roots": {
-                    key: str(path) for key, path in app_settings.workspace_roots.items()
-                },
                 "asset_version": asset_version(),
             },
         )

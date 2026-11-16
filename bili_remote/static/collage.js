@@ -277,7 +277,6 @@
       closeModal();
       if (source) await window.BiliModules.openPublishResource(source);
       else openBusinessView("publish");
-      document.dispatchEvent(new CustomEvent("tools:use-screenshots", {detail:{sessionId:state.sessionId}}));
     });
     generationSection.replaceChildren(sourceSummary, defaultsSummary);
     const generationActions = node("div", "button-row");

@@ -607,7 +607,7 @@ def test_resource_switch_discards_old_identity_and_preview_markup_is_inert(live_
         newest['resources'] = [{'root_key': 'downloads', 'relative_path': 'B.mp4', 'kind': 'file', 'fingerprint': 'B'}]
         newest['selected_title']['value'] = '最新资源 B'
         held[1].fulfill(json={'context': newest, 'changes': [], 'capabilities': []})
-        expect(page.locator('[data-wb="resource"]')).to_contain_text('最新资源 B')
+        expect(page.locator('[data-wb="resource"]')).to_have_text('B.mp4')
         held[0].fulfill(json={'context': context(3), 'changes': [], 'capabilities': []})
         page.wait_for_timeout(100)
         assert page.evaluate('wb.context.revision') == 8

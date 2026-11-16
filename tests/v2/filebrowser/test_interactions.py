@@ -9,8 +9,6 @@ from test_browser_modules import browser_session, live_server  # noqa: F401
 
 def mount(page, *, adapter=False, page_size=20):
     page.set_default_timeout(7000)
-    if page.viewport_size['width'] <= 768:
-        page.locator('#nav-toggle').click()
     page.locator('[data-view="files"]').click()
     page.locator('#file-browser-host .file-row').first.wait_for()
     page.evaluate('mediaBrowser.destroy()')
@@ -55,7 +53,7 @@ def test_core_file_operations_and_editor_conflict(live_server):
     try:
         host = mount(page)
         select(host, 'note.txt')
-        host.get_by_role('button', name='预览/编辑', exact=True).click()
+        more_action(host, '预览/编辑')
         editor = page.get_by_role('textbox', name='note.txt 文本内容')
         expect(editor).to_have_value('original')
         (root / 'note.txt').write_text('external edit', encoding='utf-8')
@@ -72,7 +70,7 @@ def test_core_file_operations_and_editor_conflict(live_server):
         assert (root / 'note.txt').read_text() == 'saved content'
 
         select(host, 'note.txt')
-        host.get_by_role('button', name='重命名', exact=True).click()
+        more_action(host, '重命名')
         page.get_by_role('textbox', name='新文件名（不含扩展名）').fill('renamed')
         page.locator('#modal').get_by_role('button', name='保存', exact=True).click()
         expect(host.locator('.file-row[data-path="renamed.txt"]')).to_be_visible()
@@ -89,7 +87,7 @@ def test_core_file_operations_and_editor_conflict(live_server):
         # Directory ordinary rename retains its contents.
         host.locator('.file-breadcrumbs').get_by_role('button', name='资源下载目录').click()
         select(host, 'Destination')
-        host.get_by_role('button', name='重命名', exact=True).click()
+        more_action(host, '重命名')
         page.get_by_role('textbox', name='新名称', exact=True).fill('Archive')
         page.locator('#modal').get_by_role('button', name='保存', exact=True).click()
         expect(host.locator('.file-row[data-path="Archive"]')).to_be_visible()
@@ -289,19 +287,18 @@ def test_mobile_tree_breadcrumb_search_paging_image_and_selection(live_server, w
         host.get_by_role('searchbox').fill('entry00')
         expect(host.locator('.file-row')).to_have_count(1)
         expect(host.locator('.selection-count')).to_have_text('未选择')
-        if width <= 768:
+        if width <= 600:
             host.get_by_role('button', name='目录树', exact=True).click()
-        expect(host.locator('.file-tree-pane')).to_be_visible()
-        host.locator('.tree-root-label').filter(has_text='图片目录').click()
+        host.locator('.root-shortcut').filter(has_text='图片目录').click()
         expect(host.get_by_role('searchbox')).to_have_value('')
         expect(host.locator('.file-row[data-path="pixel.png"]')).to_be_visible()
         select(host, 'pixel.png')
-        host.get_by_role('button', name='预览/编辑', exact=True).click()
+        more_action(host, '预览/编辑')
         image = page.locator('.image-preview-frame img')
         expect(image).to_be_visible()
         page.wait_for_function('document.querySelector(".image-preview-frame img").naturalWidth > 0')
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-        if width <= 768:
+        if width <= 600:
             assert host.locator('.file-browser-shell').evaluate('el => getComputedStyle(el).gridTemplateColumns').count(' ') == 0
         assert not errors
     finally:
@@ -330,7 +327,7 @@ def test_shared_context_handoff_and_media_values(live_server):
         page.wait_for_function('window.workbenchContext?.revision === 7')
         more_action(host, '智能命名')
         page.wait_for_function('window.namingContext === window.workbenchContext')
-        host.get_by_role('button', name='预览/编辑', exact=True).click()
+        more_action(host, '预览/编辑')
         expect(page.locator('.fb-media-info')).to_contain_text('H265（ffprobe）')
         expect(page.locator('.fb-media-info')).to_contain_text('未知')
         assert len(calls) == 1

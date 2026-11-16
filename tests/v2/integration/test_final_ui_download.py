@@ -42,7 +42,7 @@ def test_final_ui_download_states_and_episode_quality(live_server):
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             page.screenshot(path=str(ARTIFACTS / f'download-selected-{width}.png'))
         page.locator('[data-download-form] button[type=submit]').click()
-        expect(page.locator('[data-notice]')).to_contain_text('任务已加入', timeout=15000)
+        expect(page.locator('.dv2-job')).to_have_count(6, timeout=15000)
         jobs = services.database.list_jobs(limit=100)
         assert len(jobs) == 6
         assert next(job for job in jobs if job['source_url'].endswith('ep6'))['format_selector'] == '136+30280'
