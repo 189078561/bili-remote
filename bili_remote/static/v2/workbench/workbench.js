@@ -4,6 +4,8 @@
   const terminal = task => ["completed", "failed", "cancelled"].includes(task.status);
   const taskLabels = {queued: "排队中", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已取消", auth_required: "需要登录"};
   const tools = {screenshots: ["screenshot", "images"], report: ["report", "report"], bdinfo: ["bdinfo", "bdinfo"], torrent: ["torrent", "torrent"], upload: ["upload", "upload"]};
+  const toolTypes = {screenshot:"screenshot", report:"v2_media_report", bdinfo:"v2_media_report", torrent:"torrent_build", upload:"image_upload"};
+  const receiptKey = "bili:workbench:tool-receipts:v1";
   const val = field => field?.value ?? "";
   const key = task => `${task.kind}:${task.id}`;
   const node = (tag, text, className) => { const el = document.createElement(tag); if (text != null) el.textContent = text; if (className) el.className = className; return el; };
@@ -225,6 +227,7 @@
       this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.resourcePickerOpen = true; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
       this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.previewKey = null; this.previewUndo = false; this.renameBatch = null; this.episodeOverrides = {}; this.content = ""; this.images = []; this.artifacts = []; this.links = [];
       this.fieldVersions = {}; this.tasks = new Map(); this.jobs = new Map(); this.notified = new Set(); this.applied = new Set(); this.pending = new Set(); this.timers = new Set(); this.abort = new AbortController(); this.destroyed = false;
+      this.cancelPending = new Set(); this.stopAcks = new Set(); this.actionErrors = new Map();
       this.toolTasks = new Map(); this.toolErrors = new Map(); this.resultErrors = new Map();
       this.buttonLabels = new WeakMap(); this.copyFeedback = new WeakMap(); this.dialogState = new WeakMap(); this.torrentIds = new Set();
       this.listen();
@@ -552,12 +555,14 @@
       const help = this.el("tool-help");
       const text = !has ? "请先选择工作媒体。" : this.resources.length > 1 ? "已选择多个文件；报告或制种请选择单文件或整个目录。" :
         this.images.length ? "操作使用当前媒体。图床复用下方已有截图。" : "操作使用当前媒体。生成截图后可上传图床。";
-      if (help.textContent !== text) help.textContent = text;
+      const hint = this.resources.length === 1 && this.resources[0].kind !== "directory" ? `${text} BDInfo 需要蓝光目录。` : text;
+      if (help.textContent !== hint) help.textContent = hint;
       for (const action of Object.keys(tools)) {
         const button = this.button(action), active = this.busy(action) || this.toolActive(action);
         const reportBusy = action === "report" && (this.busy("bdinfo") || this.toolActive("bdinfo")) || action === "bdinfo" && (this.busy("report") || this.toolActive("report"));
         if (active !== button.hasAttribute("aria-busy")) this.setButtonBusy(button, active);
-        button.disabled = active || reportBusy || (action === "upload" ? !this.images.length : action === "screenshots" ? !has : this.resources.length !== 1);
+        button.disabled = active || this.restoring === this.epoch || reportBusy ||
+          (action === "bdinfo" && this.resources[0]?.kind !== "directory") || (action === "upload" ? !this.images.length : action === "screenshots" ? !has : this.resources.length !== 1);
       }
     }
     applyable() {
@@ -651,7 +656,7 @@
       this.closeResourcePicker();
       this.context = null; this.origins = origins; this.dirty.clear(); this.renameBatch = null; this.el("rename-list").replaceChildren(); this.editVersion++;
       this.cancelTimer(this.composeTimer); this.contextChanged("selection");
-      this.images = []; this.artifacts = []; this.links = []; this.renderToolProgress(); this.episodeOverrides = {}; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
+      this.imageTask = null; this.images = []; this.artifacts = []; this.links = []; this.renderToolProgress(); this.episodeOverrides = {}; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
       for (const field of Object.keys(this.fields)) this.setField(field, "");
       ["images", "reports", "torrents", "upload-links", "issues", "candidates", "media"].forEach(name => this.el(name).replaceChildren());
       ["naming-rule", "subtitle-rule", "title-rule", "selected-title", "season", "episode", "year", "resolution", "video-codec", "audio-codec"].forEach(name => this.el(name).value = "");
@@ -676,6 +681,7 @@
       } catch (error) {
         if (epoch === this.epoch) { this.el("issues").textContent = error.message; this.notice(error.message, true); }
       }
+      if (this.context && epoch === this.epoch && !this.destroyed) await this.restoreTools(epoch);
       this.controls();
       return !this.destroyed && epoch === this.epoch;
     }
@@ -1007,10 +1013,17 @@
       this.track(response.task, {type: "probe", epoch});
     }
     sources() { return this.resources.map(({root_key, relative_path}) => ({root_key, relative_path})); }
+    async toolScope() {
+      const epoch = this.epoch, resources = this.resources;
+      if (!resources.length) throw new Error("请先选择工作媒体");
+      const canonical = this.context ? resources : await Promise.all(resources.map(resource => this.api.request("/api/v2/resources/reference", resource)));
+      if (this.epoch !== epoch || this.destroyed) return null;
+      return {epoch, scope: signature(canonical)};
+    }
     async screenshots() {
       const total = this.el("image-count").value, columns = this.el("image-columns").value;
       if (total && (!Number.isInteger(Number(total)) || Number(total) < 1 || Number(total) > 120)) throw new Error("张数需在 1–120 之间");
-      const epoch = this.epoch, skipStart = Number(this.el("skip-start").value), skipEnd = Number(this.el("skip-end").value);
+      const skipStart = Number(this.el("skip-start").value), skipEnd = Number(this.el("skip-end").value);
       if (![skipStart, skipEnd].every(value => Number.isFinite(value) && value >= 0 && value <= 86400)) throw new Error("跳过时长必须在 0–86400 秒之间");
       const extra={};
       if (total) extra.total = Number(total);
@@ -1022,10 +1035,13 @@
       if (this.el("hdr-processor").value) extra.hdr_processor = this.el("hdr-processor").value;
       if (this.el("skip-start").value && this.el("range-mode").value === "seconds") extra.skip_start_seconds = skipStart;
       if (this.el("skip-end").value && this.el("range-mode").value === "seconds") extra.skip_end_seconds = skipEnd;
+      const scope = await this.toolScope();
+      if (!scope) return;
       const result = await this.api.request("/api/files/screenshots", {...extra, sources: this.sources(), output_mode: this.el("image-mode").value, auto_upload: false});
-      this.track(result.task, {type: "screenshot", session: result.session_id, epoch});
+      this.track(result.task, {type: "screenshot", session: result.session_id, ...scope});
     }
     async report(type = "report") {
+      if (this.resources.length !== 1) throw new Error("请选择一个视频或一个目录");
       const epoch = this.epoch, source = this.resources[0];
       if (type === "bdinfo" || source.kind === "directory") {
         if (source.kind !== "directory") throw new Error("BDInfo 需要选择蓝光目录");
@@ -1035,26 +1051,83 @@
         if (epoch !== this.epoch) return;
       }
       const canonical = this.context ? source : await this.api.request("/api/v2/resources/reference", source);
-      if (epoch !== this.epoch) return;
+      if (epoch !== this.epoch || this.destroyed) return;
       const result = await this.api.request("/api/v2/reports", canonical);
-      this.track(result.task, {type, epoch});
+      this.track(result.task, {type, epoch, scope: signature([canonical])});
     }
     async torrent() {
-      const source = this.resources[0], epoch = this.epoch;
+      const source = this.resources[0], scope = await this.toolScope();
+      if (!scope) return;
       const trackers = this.el("trackers").value.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
       const result = await this.api.request("/api/torrents/jobs", {source_root_key: source.root_key, source_relative_path: source.relative_path, ...(this.el("private").value ? {private: this.el("private").value === "true"} : {}), overwrite: false, ...(this.el("piece-length").value ? {piece_length:this.el("piece-length").value} : {}), ...(trackers.length ? {trackers} : {})});
-      this.track(result.task, {type: "torrent", epoch});
+      this.track(result.task, {type: "torrent", ...scope});
     }
     async upload() {
       if (this.images.length > 50) throw new Error("每次最多上传 50 张图片，请减少截取数量");
-      const epoch = this.epoch, images = this.images, provider = this.el("image-provider").value;
+      const images = this.images, provider = this.el("image-provider").value;
+      const scope = await this.toolScope();
+      if (!scope || images !== this.images) return;
+      const screenshot = this.imageTask;
       const result = await this.api.request("/api/uploads/jobs", {items: images.map(x => ({root_key: "images", relative_path: x.path})), ...(provider ? {provider} : {})});
-      this.track(result.task, {type: "upload", epoch, images});
+      this.track(result.task, {type: "upload", ...scope, images, screenshot});
+    }
+    static receipts() {
+      try {
+        const entries = JSON.parse(global.sessionStorage.getItem(receiptKey) || "[]");
+        return Array.isArray(entries) ? entries.filter(entry => Number.isSafeInteger(entry?.id) &&
+          entry.id > 0 && typeof entry.scope === "string" && Object.hasOwn(toolTypes, entry.type)).slice(-40) : [];
+      } catch { return []; }
+    }
+    updateReceipts(transform) {
+      try { global.sessionStorage.setItem(receiptKey, JSON.stringify(transform(Workbench.receipts()).slice(-40))); }
+      catch { /* Storage may be disabled. Live dispatch is unaffected. */ }
+    }
+    async restoreTools(epoch) {
+      const scope = signature(this.resources), receipts = Workbench.receipts().filter(entry => entry.scope === scope);
+      if (!receipts.length) return;
+      const current = () => !this.destroyed && this.epoch === epoch && signature(this.resources) === scope;
+      this.restoring = epoch;
+      this.syncToolButtons();
+      this.renderToolProgress();
+      try {
+        await Promise.all(receipts.map(async receipt => {
+          try {
+            const task = await this.api.request(`/api/tasks/${receipt.id}`);
+            const input = task.input;
+            if (!current() || task.id !== receipt.id || task.task_type !== toolTypes[receipt.type] || !input ||
+                this.toolTasks.has(receipt.type) || task.project_id != null) return;
+            const source = this.resources[0];
+            if (["report", "bdinfo"].includes(receipt.type) && (!input.resource || signature([input.resource]) !== scope)) return;
+            if (receipt.type === "torrent" && (input.source_root_key !== source.root_key || input.source_relative_path !== source.relative_path)) return;
+            if (receipt.type === "screenshot" && (!receipt.session || input.session_id !== receipt.session)) return;
+            if (receipt.type === "upload" && (!receipt.screenshot || !receipts.some(entry =>
+              entry.type === "screenshot" && `processing:${entry.id}` === receipt.screenshot))) return;
+            const item = {...this.api.legacyTask(task), legacy: this.api.tasksMode === "legacy"};
+            const id = key(item);
+            this.tasks.set(id, item);
+            this.jobs.set(id, {...receipt, epoch, restored: true, input});
+            this.applied.delete(id); this.resultErrors.delete(id);
+            this.toolTasks.set(receipt.type, id);
+          } catch { /* Missing/inaccessible tasks are not attached to the resource. */ }
+        }));
+      } finally {
+        if (this.restoring === epoch) this.restoring = null;
+        if (current()) {
+          this.renderTasks();
+          this.renderToolProgress(); this.syncToolButtons(); this.refreshTasks();
+        }
+      }
     }
     track(task, job) {
       const normalized = task.kind ? task : this.api.legacyTask(task), id = key(normalized);
       if (this.destroyed) return;
       this.tasks.set(id, normalized); this.jobs.set(id, job);
+      if (job.scope && normalized.kind === "processing" && Number.isSafeInteger(normalized.id) && Object.hasOwn(toolTypes, job.type)) {
+        const receipt = {id: normalized.id, scope: job.scope, type: job.type, session: job.session, screenshot: job.screenshot};
+        this.updateReceipts(entries => [...entries.filter(entry => entry.scope !== receipt.scope ||
+          entry.type !== receipt.type && !(receipt.type === "screenshot" && entry.type === "upload") &&
+          !(["report", "bdinfo"].includes(receipt.type) && ["report", "bdinfo"].includes(entry.type))), receipt]);
+      }
       if (job.epoch === this.epoch && (!job.images || job.images === this.images)) {
         if (Object.values(tools).some(([type]) => type === job.type)) this.toolTasks.set(job.type, id);
         if (!Object.values(tools).some(([type]) => type === job.type)) this.notice("任务已提交，完成后会通知");
@@ -1079,46 +1152,69 @@
         const listed = new Set(tasks.map(key));
         for (const id of this.jobs.keys()) {
           const previous = this.tasks.get(id);
-          if (!listed.has(id) && previous && !terminal(previous)) {
-            const detail = await this.api.request(previous.legacy ? `/api/tasks/${previous.id}` : `/api/v2/tasks/${previous.kind}/${previous.id}`);
-            tasks.push(previous.legacy ? this.api.legacyTask(detail) : detail);
+          if (!listed.has(id) && previous && (this.toolTasksHas(id) || this.jobs.get(id)?.epoch === this.epoch) && (!terminal(previous) || !this.applied.has(id) && previous.status === "completed")) {
+            try {
+              const detail = await this.api.request(previous.legacy ? `/api/tasks/${previous.id}` : `/api/v2/tasks/${previous.kind}/${previous.id}`);
+              tasks.push(previous.legacy ? this.api.legacyTask(detail) : detail);
+            } catch (error) {
+              if (this.toolTasksHas(id)) this.actionErrors.set(id, `状态读取失败：${error.message}`);
+            }
           }
         }
-        for (const task of tasks) {
+        const dependencyOrder = task => ({screenshot: 0, upload: 2}[this.jobs.get(key(task))?.type] ?? 1);
+        for (const task of [...tasks].sort((a,b) => dependencyOrder(a) - dependencyOrder(b))) {
           if (this.destroyed) return;
-          const id = key(task), previous = this.tasks.get(id); this.tasks.set(id, task);
+          const id = key(task), previous = this.tasks.get(id);
+          if (this.stopAcks.has(id) && terminal(previous || {}) && !terminal(task)) { this.stopAcks.delete(id); continue; }
+          this.stopAcks.delete(id);
+          this.tasks.set(id, task);
+          if (this.actionErrors.get(id)?.startsWith("进度暂时无法读取：") || this.actionErrors.get(id)?.startsWith("状态读取失败：")) this.actionErrors.delete(id);
           if (terminal(task)) {
+            this.cancelPending.delete(id);
+            if (!previous || !terminal(previous)) this.actionErrors.delete(id);
             const notification = `${id}:${task.status}:${task.finished_at || ""}`;
-            if (!global.AppTaskCenter && (!this.jobs.has(id) || this.jobs.get(id).epoch === this.epoch) && !initial && !this.notified.has(notification) && (!this.toolTasksHas(id) || task.status !== "completed") && (this.jobs.has(id) || (previous && !terminal(previous)))) { this.notice(`${task.task_type}：${{completed: "已完成", failed: "失败", cancelled: "已取消"}[task.status]}${task.error ? ` · ${task.error}` : ""}`, task.status === "failed"); }
+            if (!global.AppTaskCenter && (!this.jobs.has(id) || this.jobs.get(id).epoch === this.epoch) && !initial && !this.notified.has(notification) && !this.toolTasksHas(id) && (this.jobs.has(id) || (previous && !terminal(previous)))) { this.notice(`${task.task_type}：${{completed: "已完成", failed: "失败", cancelled: "已取消"}[task.status]}${task.error ? ` · ${task.error}` : ""}`, task.status === "failed"); }
             this.notified.add(notification);
             if (task.status === "completed" && this.jobs.has(id) && !this.applied.has(id)) {
               const job = this.jobs.get(id);
+              // A restored upload must wait for its screenshot job on the same media.
+              if (job.restored && job.type === "upload" && !this.applied.has(job.screenshot)) continue;
               this.renderToolProgress();
               try {
                 await this.applyTask(task, job);
-                if (!this.destroyed && job.epoch === this.epoch && this.toolTasksHas(id) && !global.AppTaskCenter) this.notice(`${task.task_type}：已完成`);
               } catch (error) {
                 if (!this.destroyed && job.epoch === this.epoch) {
                   this.resultErrors.set(id, error.message);
-                  this.notice(`产物读取失败：${error.message}`, true);
+                  if (!this.toolTasksHas(id)) this.notice(`产物读取失败：${error.message}`, true);
                 }
               }
-              this.applied.add(id);
+              if (this.jobs.get(id) === job) this.applied.add(id);
             }
           }
         }
         this.el("task-status").textContent = this.api.tasksMode === "legacy" ? "已连接现有工具队列；统一下载任务视图待接入。刷新仅恢复任务，不恢复发布内容。" : "刷新仅恢复任务进度和实际产物，不恢复发布内容。";
         this.renderTasks(); this.renderToolProgress(); this.syncToolButtons();
-      } catch (error) { if (!this.destroyed) this.el("task-status").textContent = `${error.message}；稍后自动重试`; }
+      } catch (error) {
+        if (!this.destroyed) {
+          this.el("task-status").textContent = `${error.message}；稍后自动重试`;
+          for (const id of this.toolTasks.values()) {
+            const task = this.tasks.get(id);
+            if (task && !terminal(task)) this.actionErrors.set(id, `进度暂时无法读取：${error.message}；将自动重试`);
+          }
+          this.renderToolProgress();
+        }
+      }
       finally { this.refreshing = false; if (!this.destroyed) this.pollTimer = this.later(() => this.refreshTasks(), this.pollInterval); }
     }
     toolTasksHas(id) { return [...this.toolTasks.values()].includes(id); }
     renderToolProgress() {
-      this.el("output-empty").hidden = this.toolTasks.size > 0 || this.toolErrors.size > 0 || Object.keys(tools).some(action => this.busy(action));
+      const empty = this.el("output-empty"), message = this.restoring === this.epoch ? "正在读取当前媒体的工具任务…" : "执行操作后，进度和结果会显示在这里。";
+      if (empty.textContent !== message) empty.textContent = message;
+      this.el("output-empty").hidden = this.restoring !== this.epoch && (this.toolTasks.size > 0 || this.toolErrors.size > 0 || Object.keys(tools).some(action => this.busy(action)));
       for (const [action, [type, panel]] of Object.entries(tools)) {
         const target = this.el(`tool-progress-${panel}`);
         const id = this.toolTasks.get(type), task = this.tasks.get(id), submitting = this.busy(action);
-        const error = this.toolErrors.get(action) || (!submitting && (this.resultErrors.get(id) || task?.error)) || "";
+        const error = this.toolErrors.get(action) || (!submitting && (this.resultErrors.get(id) || this.actionErrors.get(id) || task?.error)) || "";
         const phase = this.toolErrors.has(action) || this.resultErrors.has(id) && !submitting ? "failed" :
           submitting ? "submitting" : task?.status === "completed" && !this.applied.has(id) ? "reading" : task?.status || "";
         const status = {submitting: "正在提交…", reading: "正在读取结果…", ...taskLabels}[phase] || phase;
@@ -1139,17 +1235,16 @@
         }
         const [summary, track, reason, cancel] = target.children;
         const name = {screenshots:"截图", report:"MediaInfo", bdinfo:"BDInfo", torrent:"制作种子", upload:"图床"}[action];
-        cancel.hidden = !task?.cancel_allowed || !active || phase === "submitting";
-        cancel.onclick = () => this.withButton(cancel, async () => {
-          const result = await this.api.taskAction(this.tasks.get(id), "cancel");
-          this.tasks.set(key(result), result);
-          this.renderToolProgress(); this.syncToolButtons();
-          await this.refreshTasks();
-        });
+        const stopping = this.cancelPending.has(id);
+        cancel.hidden = !task?.cancel_allowed || !["queued", "running"].includes(phase);
+        cancel.disabled = stopping;
+        cancel.setAttribute("aria-label", `${stopping ? "正在停止…" : "停止"} · ${name}`);
+        if (cancel.textContent !== (stopping ? "正在停止…" : "停止")) cancel.textContent = stopping ? "正在停止…" : "停止";
+        cancel.onclick = () => this.cancelTool(id);
         const count = phase === "completed" && ["images", "upload"].includes(panel) ? ` · ${panel === "images" ? this.images.length : this.links.length} 项` :
           numbers?.[1] > 0 ? ` · ${numbers[0]}/${numbers[1]} 项` :
           panel === "torrent" && phase === "running" && Number.isFinite(data?.bytes) ? ` · 已读取 ${formatSize(data.bytes)}` : "";
-        const label = `${name}：${status}${count}${percent === null ? "" : ` · ${Math.round(percent)}%`}`;
+        const label = `${name}：${stopping && !terminal(task || {}) ? "正在停止，等待任务结束" : status}${count}${percent === null ? "" : ` · ${Math.round(percent)}%`}`;
         if (summary.textContent !== label) summary.textContent = label;
         if (reason.textContent !== error) reason.textContent = error;
         track.hidden = !active;
@@ -1158,6 +1253,27 @@
         else if (track.getAttribute("aria-valuenow") !== String(percent)) {
           track.setAttribute("aria-valuenow", String(percent));
           track.style.setProperty("--wb-progress", percent / 100);
+        }
+      }
+    }
+    async cancelTool(id) {
+      const task = this.tasks.get(id);
+      if (!task?.cancel_allowed || terminal(task) || this.cancelPending.has(id)) return;
+      this.cancelPending.add(id);
+      this.actionErrors.delete(id);
+      this.renderToolProgress();
+      try {
+        const result = await this.api.taskAction(task, "cancel");
+        if (this.destroyed) return;
+        if (!terminal(this.tasks.get(id) || {}) || terminal(result)) this.tasks.set(id, result);
+        if (terminal(result)) this.stopAcks.add(id);
+        this.refreshTasks();
+      } catch (error) {
+        this.cancelPending.delete(id);
+        this.actionErrors.set(id, error.message);
+      } finally {
+        if (!this.destroyed) {
+          this.renderToolProgress(); this.syncToolButtons();
         }
       }
     }
@@ -1197,17 +1313,27 @@
       }
       if (job.type === "probe") { await this.resolve(); return; }
       let detail = task;
-      if (!task.result && (job.type === "torrent" || !task.artifact_refs?.length)) detail = await this.api.request((task.legacy || job.type === "torrent" || job.type === "upload") ? `/api/tasks/${task.id}` : `/api/v2/tasks/${task.kind}/${task.id}`);
+      if (!task.result && (["torrent", "upload"].includes(job.type) || !task.artifact_refs?.length)) {
+        const data = await this.api.request((task.legacy || ["torrent", "upload"].includes(job.type)) ? `/api/tasks/${task.id}` : `/api/v2/tasks/${task.kind}/${task.id}`);
+        detail = {...task, ...data, artifact_refs: data.artifact_refs || data.result?.artifact_refs || task.artifact_refs};
+      }
+      if (!detail.artifact_refs && detail.result?.artifact_refs) detail = {...detail, artifact_refs: detail.result.artifact_refs};
       if (job.epoch !== this.epoch || this.destroyed) return;
       const latest = () => !this.destroyed && job.epoch === this.epoch && (!this.toolTasks.has(job.type) || this.toolTasks.get(job.type) === key(task));
       if (!latest() || job.images && job.images !== this.images) return;
+      if (job.type === "upload" && job.restored) {
+        const matches = job.input.items?.every(item => item.root_key === "images" && this.images.some(image => image.path === item.relative_path));
+        if (!matches || !job.input.items?.length || this.imageTask !== job.screenshot) throw new Error("关联的截图已变化，未恢复旧图床结果");
+      }
       if (job.type === "screenshot") {
         const session = await this.api.request(`/api/files/screenshots/${encodeURIComponent(job.session)}`); if (!latest()) return;
         const outputs = Object.values(session.final_outputs || {});
         const selected = outputs.length ? outputs : (session.videos || []).flatMap(v => v.items || []);
         const images = selected.filter(x => x.status === "completed" && x.available !== false).map(x => ({id: String(x.id || x.video_id), path: x.output_relative_path || x.relative_path, kind: session.params?.output_mode === "collage" ? "collage" : "screenshot"})).filter(x => x.path);
         if (!images.length) throw new Error("任务未返回可读取的截图，请检查任务日志");
-        this.images = images; this.toolTasks.delete("upload"); this.toolErrors.delete("upload");
+        this.images = images; this.imageTask = key(task);
+        if (this.jobs.get(this.toolTasks.get("upload"))?.screenshot !== this.imageTask) this.toolTasks.delete("upload");
+        this.toolErrors.delete("upload");
         this.artifacts = this.artifacts.filter(x => !["screenshot", "collage", "upload"].includes(x.kind)); this.links = []; this.renderUploadLinks();
         this.renderImages();
       }
@@ -1239,6 +1365,11 @@
           clear.type = "button";
           clear.onclick = () => {
             card.remove();
+            if (!this.el("reports").childElementCount) {
+              this.updateReceipts(entries => entries.filter(entry => entry.id !== task.id));
+              if (this.toolTasks.get(job.type) === key(task)) this.toolTasks.delete(job.type);
+            }
+            this.renderToolProgress();
             this.artifacts = this.artifacts.filter(value => value.kind !== "report" || value.id !== artifact.id);
             this.editVersion++; this.scheduleCompose();
           };

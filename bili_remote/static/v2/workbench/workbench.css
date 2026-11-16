@@ -321,3 +321,10 @@ body:has(.br-workbench :is(.wb-image-dialog,.wb-task-log-dialog)[open]) {overflo
  .br-workbench .wb-picker-tools button {min-height:44px;}
  .wb-config-inner {padding-inline:2px;}
 }
+
+
+/* Output controls stay with their result rather than in the task history. */
+.wb-report-card {padding:8px 0;}
+.wb-report-card pre {overflow:auto;overscroll-behavior:contain;}
+.wb-tool-error:not(:empty) {padding-inline-start:8px;border-inline-start:2px solid var(--ws-danger);}
+.wb-tool-progress button {min-height:38px;}

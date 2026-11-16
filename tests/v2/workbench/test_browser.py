@@ -198,13 +198,15 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
     app.state.services.image_hosts._client_factory = lambda *_: fake_upload
     path = app.state.services.settings.download_root / 'Media' / 'episode01.mp4'
     subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24', '-t', '3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', str(path)], check=True)
-    playwright, browser, page, errors = browser_session(base_url)
+    playwright, browser, page, errors = browser_session(base_url, legacy=False)
     try:
-        mount(page)
+        page.locator('.app-tabs [data-view=publish]').click()
+        page.wait_for_function('window.V2Workbench')
+        page.evaluate('window.wb = V2Workbench')
         show_panel(page, 'resources')
-        page.locator('.file-row[data-path="Media"]').dblclick()
+        page.locator('[data-workbench] .file-row[data-path="Media"]').dblclick()
         show_panel(page, 'resources')
-        page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
+        page.locator('[data-workbench] .file-row[data-path="Media/episode01.mp4"] .file-check').check()
         page.get_by_role('button', name='使用所选资源', exact=True).click()
         expect(page.locator('[data-wb="resource-media"]')).to_contain_text('1 个媒体文件')
         show_panel(page, None)
@@ -219,7 +221,7 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         page.locator('[data-collapse="config"]').click()
         page.locator('[data-wb="skip-start"]').fill('0')
         page.locator('[data-wb="skip-end"]').fill('0')
-        for mode, total in [('single', '1'), ('collage', '4')]:
+        for mode, total in [('single', '1'), ('single', '2'), ('collage', '4')]:
             page.locator('[data-wb="image-mode"]').select_option(mode)
             page.locator('[data-wb="image-count"]').fill(total)
             previous = page.evaluate('wb.images[0]?.path')
@@ -249,7 +251,14 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         page.screenshot(path=str(ROOT / '.dev/workbench-product-visual/tool-real-screenshots.png'))
         page.locator('[data-action="upload"]').click()
         expect(page.locator('[data-wb="upload-links"]')).to_contain_text('https://images.example/', timeout=30000)
+        expect(page.get_by_role('button', name='复制全部 BBCode')).to_be_visible()
         assert fake_upload.calls >= 1
+        page.route('**/api/uploads/jobs', lambda route: route.fulfill(status=422, json={'detail': '合成图床失败'}))
+        page.locator('[data-action=upload]').click()
+        expect(page.locator('[data-wb=tool-progress-upload]')).to_contain_text('合成图床失败')
+        expect(page.locator('[data-wb=images] img')).to_have_count(1)
+        expect(page.locator('[data-wb=upload-links]')).to_contain_text('https://images.example/')
+        page.unroute('**/api/uploads/jobs')
         show_panel(page, 'report')
         show_panel(page, 'report')
         page.locator('[data-action="report"]').click()
@@ -275,15 +284,25 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         assert page.locator('[data-edit="release_title"]').input_value() == ''
         expect(page.locator('[data-wb="resource-browser"]')).to_be_visible()
         show_panel(page, 'resources')
-        page.locator('.file-row[data-path="Media"]').dblclick()
+        page.locator('[data-workbench] .file-row[data-path="Media"]').dblclick()
         show_panel(page, 'resources')
-        page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
+        page.locator('[data-workbench] .file-row[data-path="Media/episode01.mp4"] .file-check').check()
         page.get_by_role('button', name='使用所选资源', exact=True).click()
         expect(page.locator('[data-wb="studio"]')).to_be_visible()
-        page.locator('.wb-tasks > summary').click()
-        task_card = page.locator('.wb-task', has_text='torrent_build')
-        task_card.get_by_role('button', name='查看产物').click()
-        expect(task_card.get_by_role('link', name='下载种子')).to_be_visible()
+        output = page.locator('#wb-tool-output')
+        expect(output.get_by_role('link', name='下载种子')).to_be_visible()
+        expect(output.locator('[data-wb=reports]')).to_contain_text('MediaInfo')
+        expect(output.locator('[data-wb=reports]')).not_to_contain_text(str(path.parent))
+        expect(output.locator('[data-wb=images] img')).to_have_count(1)
+        expect(output.locator('[data-wb=upload-links]')).to_contain_text('https://images.example/')
+        assert page.locator('.wb-tasks').get_attribute('open') is None
+        assert page.locator('[data-edit=overview]').input_value() != 'Synthetic overview for complete publishing flow'
+        output.get_by_role('button', name='清空', exact=True).click()
+        expect(output.locator('[data-wb=reports]')).to_be_empty()
+        expect(page.locator('[data-wb=output]')).not_to_contain_text('Complete name')
+        page.locator('[data-action=report]').click()
+        expect(output.locator('[data-wb=reports]')).to_contain_text('MediaInfo')
+        assert not page.locator('.wb-sheet').count()
         for task in app.state.services.database.list_processing_tasks():
             assert task['project_id'] is None
             assert not set(task['input']) & {'release_title', 'subtitle', 'overview', 'context', 'bbcode', 'html'}
@@ -704,7 +723,7 @@ def test_v2_task_artifact_refs_feed_upload_links_and_composition(live_server):
     try:
         v2_fixture(page, requests)
         page.route('**/api/v2/tasks?*', lambda route: route.fulfill(json={'items': tasks}))
-        page.route('**/api/v2/tasks/processing/31', lambda route: route.fulfill(json=tasks[0]))
+        page.route('**/api/tasks/31', lambda route: route.fulfill(json=tasks[0]))
         mount(page)
         page.evaluate("wb.select([{root_key:'downloads',relative_path:'Media/episode01.mp4',kind:'video',fingerprint:'fixture'}])")
         expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
@@ -1034,7 +1053,7 @@ def test_workbench_inline_progress_and_logs_preserve_mobile_form(live_server):
     requests, submissions, held_logs = [], [], []
     task = {'kind': 'processing', 'id': 81, 'task_type': 'torrent_build', 'status': 'queued',
             'progress': None, 'cancel_allowed': False, 'retry_allowed': False}
-    current = []
+    current, stop_calls = [], []
     try:
         page.set_viewport_size({'width': 390, 'height': 720})
         page.emulate_media(reduced_motion='reduce', color_scheme='dark')
@@ -1042,6 +1061,10 @@ def test_workbench_inline_progress_and_logs_preserve_mobile_form(live_server):
         page.route('**/api/v2/tasks?*', lambda route: route.fulfill(json={'items': current}))
         page.route('**/api/torrents/jobs', lambda route: submissions.append(route))
         page.route('**/api/tasks/81/logs?*', lambda route: held_logs.append(route))
+        def stop(route):
+            stop_calls.append(route.request.method)
+            route.fulfill(json={'task': current[0]})  # running until worker acknowledges
+        page.route('**/api/v2/tasks/processing/81/cancel', stop)
         mount(page)
         page.locator('.file-row[data-path="Media"]').click()
         page.locator('[data-resource-action="open"]').click()
@@ -1076,13 +1099,18 @@ def test_workbench_inline_progress_and_logs_preserve_mobile_form(live_server):
         expect(progress).to_contain_text('排队中')
         assert bar.get_attribute('aria-valuenow') is None
         bar.evaluate('el => { window.originalBar = el; }')
-        current[0] = {**task, 'status': 'running', 'progress': 42}
+        current[0] = {**task, 'status': 'running', 'progress': 42, 'cancel_allowed': True}
         expect(bar).to_have_attribute('aria-valuenow', '42')
         assert bar.evaluate('el => el === window.originalBar')
         expect(button).to_be_disabled()
 
-        current[0] = {**task, 'status': 'failed', 'error': '合成制种错误：源不可读'}
-        expect(progress).to_contain_text('合成制种错误：源不可读')
+        cancel = progress.get_by_role('button', name='停止 · 制作种子', exact=True)
+        cancel.click()
+        expect(progress).to_contain_text('正在停止，等待任务结束')
+        assert stop_calls == ['POST']
+        expect(progress.get_by_role('button', name='正在停止…')).to_be_disabled()
+        current[0] = {**task, 'status': 'cancelled'}
+        expect(progress).to_contain_text('已取消')
         expect(button).to_have_text('制作种子')
         expect(button).to_be_enabled()
         expect(page.get_by_role('link', name='下载种子')).to_have_count(0)
