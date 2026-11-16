@@ -93,3 +93,13 @@ V2 TaskRef 仅有 artifact_refs，没有旧任务 result/input。前端接受真
 当前顶层契约只把 `manual_overrides` 和 `expected_fingerprints` 写为 object；前端使用 selected_title/episode 的人工覆盖，以及 `root_key/relative_path` 为键的指纹映射。最终命名 router/shared schema 应核对这些细节，不能把当前缺少真实 schema 的请求拦截测试写成后端契约已验证。
 
 主标题规则在 ResourceContext.effective_rules 中没有正式注册字段，目前空规则请求交服务校验，用户可在调整区填写 template。整合会话应补齐主标题默认站点规则装配及完整 ReleaseTitleRule 校验；前端不会据 basename 伪造主标题作为降级。
+
+## minfo 式交互优化（后续分支）
+
+本节更新上述历史交付状态：`codex/workbench-minfo-motion-v2` 基于模块 03 的 `d59cd96`，当前 V2 识别、报告及任务接口已供测试应用使用。本次不新增后端路由，也不变更现有命名、媒体工具或任务执行契约。
+
+- 参考 minfo 源码的 PathBrowser 单击/双击事件分离、App.vue 配置折叠、ActionButtons 忙态、TaskProgressBar 进度过渡、OutputPanel / ImageLinksPanel 结果入场及 NoticeToast。使用现有主题与原生 DOM；折叠采用自适应网格高度，不照搬固定高度或第三方样式。
+- 仅修改工作台模板、对应生成入口、工作台 JS/CSS 及其浏览器测试。共享 FileBrowser 仍负责列表数据与四根安全校验；工作台只包装该实例的加载状态。共享任务刷新仍是唯一轮询来源，百分比变化只更新进度，不替换列表。
+- 工作台按现有 TaskRef 关联进度。例如 `{"kind":"processing","id":81,"task_type":"torrent_build","status":"running","progress":42}` 显示 42%；`progress:null` 不渲染百分比。返回实际可读取产物后才在当前资源下显示生成成功。图片、报告和种子消费既有产物引用；日志用原接口读取最近 100 行。
+- 验证：前端生成一致性、Node 语法和 Git 差异检查通过；`python3 scripts/dev_test.py workbench` 共 30 项通过，未运行仓库全量测试。真实工具链只处理临时合成视频，图床使用替身；移动端为 Chromium 390px 和触摸友好入口模拟，并非实体手机验收。
+- 未合并或推送；依照当前工作区限制未接触生产数据库、Docker 或凭据，未部署。

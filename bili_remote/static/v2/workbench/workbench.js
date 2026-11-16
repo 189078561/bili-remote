@@ -2,6 +2,8 @@
   "use strict";
   const instances = new WeakMap();
   const terminal = task => ["completed", "failed", "cancelled"].includes(task.status);
+  const taskLabels = {queued: "排队中", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已取消", auth_required: "需要登录"};
+  const tools = {screenshots: ["screenshot", "images"], report: ["report", "report"], torrent: ["torrent", "torrent"], upload: ["upload", "upload"]};
   const val = field => field?.value ?? "";
   const key = task => `${task.kind}:${task.id}`;
   const node = (tag, text, className) => { const el = document.createElement(tag); if (text != null) el.textContent = text; if (className) el.className = className; return el; };
@@ -19,9 +21,11 @@
     constructor(host, {api = new global.BiliWorkbenchAPI(), FileBrowser = global.FileBrowser, pollInterval = 2000} = {}) {
       if (!host) throw new Error("工作台缺少挂载节点");
       this.host = host; this.api = api; this.FileBrowser = FileBrowser; this.pollInterval = pollInterval;
-      this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.resourcePickerOpen = true; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
+      this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.resourcePickerOpen = true; this.resourceHighlight = null; this.activeTab = "content"; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
       this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.previewKey = null; this.previewUndo = false; this.renameBatch = null; this.episodeOverrides = {}; this.content = ""; this.images = []; this.artifacts = []; this.links = [];
       this.fieldVersions = {}; this.tasks = new Map(); this.jobs = new Map(); this.notified = new Set(); this.applied = new Set(); this.pending = new Set(); this.timers = new Set(); this.abort = new AbortController(); this.destroyed = false;
+      this.toolTasks = new Map(); this.toolErrors = new Map(); this.resultErrors = new Map();
+      this.buttonLabels = new WeakMap(); this.copyFeedback = new WeakMap(); this.dialogState = new WeakMap(); this.torrentIds = new Set();
       this.listen(); this.setTab("content"); this.setupLayout();
     }
     el(name) { return this.host.querySelector(`[data-wb="${name}"]`); }
@@ -32,24 +36,73 @@
           mode: "select-file", displayMode: "picker", scope: "browse",
           rootKeys: ["downloads", "torrents", "images", "release_info"], selectionType: "both", allowMultiple: true,
           onSelectionChange: items => this.stageSelection(items),
-          onLoadStart: () => this.stageSelection(this.browser?.selectedItems() || []),
+          onLoadStart: () => { this.clearResourceHighlight(); this.stageSelection(this.browser.selectedItems().map(item => ({...item, root_key: this.browser.rootKey}))); },
           onConfirm: async items => { this.selecting = true; try { const accepted = await this.select(items); if (accepted) this.closeResourcePicker(); return accepted; } finally { this.selecting = false; } }, confirmLabel: "使用所选资源", title: "资源文件"
         });
+        this.watchBrowserLoading();
         try { await this.browser.init(); } catch (error) { this.el("browser").textContent = error.message; this.notice(error.message, true); }
       } else this.el("browser").textContent = "统一文件浏览器尚未加载，请由主页面加载共享组件。";
+      this.syncCollapses();
       this.syncResourcePicker();
       await this.refreshTasks(true);
       return this;
     }
+    watchBrowserLoading() {
+      const browser = this.browser, host = this.el("browser"), list = browser.el?.list;
+      if (!list) return;
+      const load = browser.loadDirectory.bind(browser);
+      let latest = 0;
+      browser.loadDirectory = async options => {
+        const ticket = ++latest;
+        if (!host.hasAttribute("aria-busy")) list.style.minBlockSize = `${list.offsetHeight}px`;
+        host.setAttribute("aria-busy", "true");
+        this.el("browser-loading").hidden = false;
+        list.classList.remove("wb-list-ready");
+        try { return await load(options); }
+        finally {
+          if (ticket === latest && !this.destroyed) {
+            host.removeAttribute("aria-busy");
+            this.el("browser-loading").hidden = true;
+            list.style.removeProperty("min-block-size");
+            list.classList.add("wb-list-ready");
+            this.stageSelection(browser.selectedItems().map(item => ({...item, root_key: browser.rootKey})));
+          }
+        }
+      };
+    }
     listen() {
       const opts = {signal: this.abort.signal};
+      for (const dialog of [this.el("image-dialog"), this.el("task-log-dialog")]) {
+        let onBackdrop = false;
+        dialog.addEventListener("pointerdown", event => { onBackdrop = event.target === dialog; }, opts);
+        dialog.addEventListener("click", event => {
+          if ((onBackdrop && event.target === dialog) || event.target.closest("[data-image-close],[data-log-close]")) this.closeDialog(dialog);
+          onBackdrop = false;
+        }, opts);
+        dialog.addEventListener("cancel", event => { event.preventDefault(); this.closeDialog(dialog); }, opts);
+      }
+      this.host.querySelector('[role="tablist"]').addEventListener("keydown", event => {
+        const tabs = [...event.currentTarget.querySelectorAll("[data-tab]")], index = tabs.indexOf(event.target);
+        if (index < 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+        this.setTab(tabs[next].dataset.tab);
+        tabs[next].focus();
+      }, opts);
+      this.host.addEventListener("click", event => this.pickResourceRow(event), {...opts, capture: true});
+      this.host.addEventListener("dblclick", event => this.openResourceRow(event), {...opts, capture: true});
+      this.host.addEventListener("keydown", event => this.openResourceRowWithKeyboard(event), {...opts, capture: true});
       this.host.addEventListener("click", event => {
         const resourceAction = event.target.closest("[data-resource-action]");
         if (resourceAction && !resourceAction.disabled) {
-          if (resourceAction.dataset.resourceAction === "up") this.navigateResourceUp();
+          if (resourceAction.dataset.resourceAction === "open") this.openHighlightedResource();
+          else if (resourceAction.dataset.resourceAction === "select") this.selectHighlightedResource();
+          else if (resourceAction.dataset.resourceAction === "up") this.navigateResourceUp();
           else if (resourceAction.dataset.resourceAction === "close") this.closeResourcePicker();
           return;
         }
+        const collapse = event.target.closest("[data-collapse]");
+        if (collapse) { event.preventDefault(); this.toggleCollapse(collapse); return; }
         const layout = event.target.closest("[data-layout]");
         if (layout) this.openPanel(layout.dataset.layout === "close" || layout.dataset.layout === "edit" ? null : layout.dataset.layout);
         const format = event.target.closest("[data-format]");
@@ -67,7 +120,7 @@
           this.host.querySelectorAll("[data-preview-mode]").forEach(button => button.setAttribute("aria-pressed", String(button === previewMode)));
         }
         const tab = event.target.closest("[data-tab]"); if (tab) this.setTab(tab.dataset.tab);
-        const copy = event.target.closest("[data-copy]"); if (copy) this.copy(copy.dataset.copy);
+        const copy = event.target.closest("[data-copy]"); if (copy) this.copy(copy.dataset.copy, copy);
         const action = event.target.closest("[data-action]");
         if (action && !action.disabled) this.run(action.dataset.action, action);
       }, opts);
@@ -94,11 +147,116 @@
         if (title) { this.el("selected-title").value = title.text; this.scheduleAdjustment("selected-title"); }
       }, opts);
     }
-    // Only presentation state lives here. A sheet never mounts a new form/browser.
+    // First-level tabs only swap the visible panel. They never mount another
+    // form, browser or polling loop.
     setTab(name) {
-      this.host.querySelectorAll("[data-panel]").forEach(el => el.hidden = el.dataset.panel !== "content" && el.dataset.panel !== name);
-      this.el("tool-heading").textContent = {images:"缩略图与图床",report:"媒体报告",torrent:"种子制作"}[name] || "辅助工具";
-      this.openPanel(name === "content" ? null : "tools");
+      const allowed = ["content", "images", "report", "torrent"];
+      this.activeTab = allowed.includes(name) ? name : "content";
+      this.host.querySelectorAll("[data-panel]").forEach(panel => panel.hidden = panel.dataset.panel !== this.activeTab);
+      this.host.querySelectorAll("[data-tab]").forEach(button => {
+        const selected = button.dataset.tab === this.activeTab;
+        button.setAttribute("aria-selected", String(selected));
+        button.tabIndex = selected ? 0 : -1;
+      });
+    }
+    showOutput(panel) {
+      this.setTab(panel);
+      const output = this.el({images: "images", report: "reports", torrent: "torrents"}[panel]);
+      output.tabIndex = -1;
+      output.focus({preventScroll: true});
+      output.scrollIntoView({block: "nearest"});
+    }
+    syncCollapses() {
+      this.host.querySelectorAll("[data-collapse]").forEach(button => {
+        const panel = this.host.querySelector(`#${CSS.escape(button.getAttribute("aria-controls"))}`);
+        if (!panel) return;
+        const open = button.getAttribute("aria-expanded") !== "false";
+        button.setAttribute("aria-expanded", String(open));
+        panel.classList.toggle("open", open);
+        panel.setAttribute("aria-hidden", String(!open));
+        panel.inert = !open;
+      });
+    }
+    toggleCollapse(button) {
+      const panel = this.host.querySelector(`#${CSS.escape(button.getAttribute("aria-controls"))}`);
+      if (!panel) return;
+      const open = button.getAttribute("aria-expanded") !== "true";
+      button.setAttribute("aria-expanded", String(open));
+      panel.classList.toggle("open", open);
+      panel.setAttribute("aria-hidden", String(!open));
+      panel.inert = !open;
+    }
+    browserItem(row) {
+      if (!row || !this.el("browser")?.contains(row)) return null;
+      const item = this.browser?.data?.items?.find(entry => entry.relative_path === row.dataset.path);
+      return item ? {...item, root_key: this.browser.rootKey} : null;
+    }
+    highlightResource(item, row = null) {
+      this.clearResourceHighlight();
+      if (!item) return;
+      this.resourceHighlight = item; this.highlightedRow = row;
+      row?.classList.add("wb-file-active");
+      row?.setAttribute("aria-current", "true");
+      const open = this.host.querySelector('[data-resource-action="open"]');
+      const select = this.host.querySelector('[data-resource-action="select"]');
+      if (open) open.disabled = !item.is_dir;
+      if (select) select.disabled = !!item.is_dir || !this.browser?.isSelectable(item);
+      const status = this.el("selection-status");
+      if (status && !this.pendingSelection.length) status.textContent = `${item.is_dir ? "当前文件夹" : "当前文件"}：${item.relative_path || item.name}。${item.is_dir ? "双击或使用“打开当前文件夹”进入。" : "双击或使用“选用当前文件”设为工作资源。"}`;
+    }
+    clearResourceHighlight() {
+      this.resourceHighlight = null;
+      this.highlightedRow?.classList.remove("wb-file-active");
+      this.highlightedRow?.removeAttribute("aria-current");
+      this.highlightedRow = null;
+      const open = this.host.querySelector('[data-resource-action="open"]');
+      const select = this.host.querySelector('[data-resource-action="select"]');
+      if (open) open.disabled = true;
+      if (select) select.disabled = true;
+    }
+    pickResourceRow(event) {
+      const row = event.target.closest(".file-row");
+      if (!row || event.target.closest("input,button,a,label,summary") || !this.el("browser")?.contains(row)) return;
+      const item = this.browserItem(row);
+      if (!item || !item.allowed) return;
+      event.preventDefault(); event.stopPropagation();
+      row.focus({preventScroll: true});
+      this.highlightResource(item, row);
+    }
+    openResourceRow(event) {
+      const row = event.target.closest(".file-row");
+      if (!row || event.target.closest("input,button,a,label,summary") || !this.el("browser")?.contains(row)) return;
+      const item = this.browserItem(row);
+      if (!item || !item.allowed) return;
+      event.preventDefault(); event.stopPropagation();
+      this.activateResourceItem(item);
+    }
+    openResourceRowWithKeyboard(event) {
+      if (event.key !== "Enter" || event.target === event.currentTarget) return;
+      const row = event.target.closest(".file-row");
+      if (!row || event.target !== row || !this.el("browser")?.contains(row)) return;
+      const item = this.browserItem(row);
+      if (!item || !item.allowed) return;
+      event.preventDefault(); event.stopPropagation();
+      this.highlightResource(item, row);
+      this.activateResourceItem(item);
+    }
+    activateResourceItem(item) {
+      if (!item) return;
+      if (item.is_dir) {
+        this.browser.navigate(item.root_key || this.browser.rootKey, item.relative_path).catch(error => this.notice(error.message, true));
+        return;
+      }
+      if (!this.browser?.isSelectable(item)) return;
+      this.select([item]).catch(error => this.notice(error.message, true));
+    }
+    openHighlightedResource() {
+      if (!this.resourceHighlight?.is_dir) return;
+      this.activateResourceItem(this.resourceHighlight);
+    }
+    selectHighlightedResource() {
+      if (!this.resourceHighlight || this.resourceHighlight.is_dir) return;
+      this.activateResourceItem(this.resourceHighlight);
     }
     setupLayout() {
       this.host.addEventListener("keydown", event => {
@@ -132,6 +290,10 @@
       if (close) close.hidden = !this.resources.length;
       const up = this.host.querySelector('[data-resource-action="up"]');
       if (up) up.disabled = !this.browser?.rootKey || !this.browser?.path;
+      const open = this.host.querySelector('[data-resource-action="open"]');
+      const select = this.host.querySelector('[data-resource-action="select"]');
+      if (open) open.disabled = !this.resourceHighlight?.is_dir;
+      if (select) select.disabled = !this.resourceHighlight || this.resourceHighlight.is_dir || !this.browser?.isSelectable(this.resourceHighlight);
       const note = this.el("resource-browser-note"), root = this.browser?.root?.();
       if (note) note.textContent = this.browser?.rootKey
         ? `当前目录：${root?.label || this.browser.rootKey} / ${this.browser.path || "根目录"}`
@@ -238,12 +400,17 @@
       this.el("rename-summary").replaceChildren(...(summary ? [...summary.childNodes] : []));
       this.el("change-count").textContent = `查看全部文件名 · ${this.el("rename-list").children.length} 项`;
       this.el("naming-status").hidden = !!first && !this.el("rename").hidden;
-      const resultRows = this.el("artifact-summary"); resultRows.replaceChildren();
-      for (const artifact of this.artifacts) {
-        const item=node('button',null,'wb-artifact'); item.type='button';
-        const name=({report:'媒体报告',torrent:'种子文件',screenshot:'截图',collage:'缩略图',upload:'图床链接'})[artifact.kind] || '工具产物';
-        item.append(node('strong',name),node('span',artifact.resource?.relative_path?.split('/').at(-1) || `#${artifact.id}`));
-        item.onclick=()=>this.setTab(artifact.kind === 'report' ? 'report' : artifact.kind === 'torrent' ? 'torrent' : 'images'); resultRows.append(item);
+      if (this.artifactRenderSource !== this.artifacts) {
+        this.artifactRenderSource = this.artifacts;
+        const resultRows = this.el("artifact-summary");
+        resultRows.replaceChildren();
+        for (const artifact of this.artifacts) {
+          const item=node('button',null,'wb-artifact'); item.type='button';
+          const name=({report:'媒体报告',torrent:'种子文件',screenshot:'截图',collage:'缩略图',upload:'图床链接'})[artifact.kind] || '工具产物';
+          item.append(node('strong',name),node('span',artifact.resource?.relative_path?.split('/').at(-1) || `#${artifact.id}`));
+          item.onclick = () => this.showOutput(artifact.kind === "report" ? "report" : artifact.kind === "torrent" ? "torrent" : "images");
+          resultRows.append(item);
+        }
       }
       for (const [name,count] of [["images",this.images.length],["report",this.artifacts.filter(x=>x.kind==="report").length],["torrent",this.el("torrents").children.length]]) this.el(`${name}-count`).textContent = count ? `${count} 项产物` : "";
     }
@@ -260,31 +427,71 @@
     stamp(channel) { const version = (this.versions[channel] || 0) + 1; this.versions[channel] = version; const epoch = this.epoch; return () => !this.destroyed && epoch === this.epoch && version === this.versions[channel]; }
     busy(action) { return this.pending.has(`${this.epoch}:${action}`); }
     contextChanged(reason = "update") { this.host.dispatchEvent(new CustomEvent("v2:context", {detail: {context: this.context, epoch: this.epoch, reason}})); }
+    setButtonBusy(button, busy) {
+      if (!button) return;
+      // Only replace a label node, never remove icons or structured candidate rows.
+      const label = button.querySelector("[data-button-label]") || (button.childElementCount ? null : button);
+      if (busy) {
+        if (label && !this.buttonLabels.has(button)) this.buttonLabels.set(button, label.textContent);
+        if (label) label.textContent = "处理中…";
+        button.setAttribute("aria-busy", "true");
+        button.disabled = true;
+      } else {
+        if (label && this.buttonLabels.has(button)) label.textContent = this.buttonLabels.get(button);
+        this.buttonLabels.delete(button);
+        button.removeAttribute("aria-busy");
+      }
+    }
+    toolActive(action) {
+      const task = this.tasks.get(this.toolTasks.get(tools[action]?.[0]));
+      return Boolean(task && ((!terminal(task) && task.status !== "auth_required") || task.status === "completed" && !this.applied.has(key(task))));
+    }
     async run(action, button) {
-      if (this.busy(action)) return;
+      if (button?.disabled || this.busy(action) || this.toolActive(action)) return;
       if (["overrides","rules","naming","resolve"].includes(action)) this.cancelTimer(this.adjustmentTimer);
       const epoch = this.epoch, pendingKey = `${epoch}:${action}`;
-      this.pending.add(pendingKey); if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
+      this.pending.add(pendingKey);
+      this.toolErrors.delete(action);
+      this.setButtonBusy(button, true);
+      this.renderToolProgress();
       try {
         const handlers = {resolve: () => this.resolve(), search: () => this.search(), "search-inline": () => this.searchInline(), overrides: () => this.resolve(null, this.overrides()), rules: () => this.applyRules(), naming: () => this.naming(), undo: () => this.showUndoPreview(), apply: () => this.applyRename(), title: () => this.generate("release_title", true), subtitle: () => this.generate("subtitle", true), probe: () => this.probe(), screenshots: () => this.screenshots(), report: () => this.report(), torrent: () => this.torrent(), upload: () => this.upload()};
         if (["rules", "naming"].includes(action) && this.pendingAdjustmentEpoch === this.epoch) await this.resolve(null, this.overrides());
         else await handlers[action]?.();
-      } catch (error) { if (epoch === this.epoch) this.notice(error.message, true); }
-      finally { this.pending.delete(pendingKey); if (!this.busy(action)) button?.removeAttribute("aria-busy"); this.controls(); }
+      } catch (error) {
+        if (epoch === this.epoch) {
+          if (tools[action]) this.toolErrors.set(action, error.message);
+          else this.notice(error.message, true);
+        }
+      } finally {
+        this.pending.delete(pendingKey);
+        if (!this.busy(action) && !this.toolActive(action)) this.setButtonBusy(button, false);
+        if (!this.destroyed) {
+          this.controls();
+          this.renderToolProgress();
+        }
+      }
     }
     controls() {
       if (this.destroyed) return;
       this.renderPresentation();
       const has = this.resources.length > 0, ctx = !!this.context;
-      for (const action of ["resolve", "overrides", "probe", "screenshots"]) this.button(action).disabled = !has || this.busy(action);
+      for (const action of ["resolve", "overrides", "probe"]) this.button(action).disabled = !has || this.busy(action);
       for (const action of ["naming", "title", "subtitle", "rules"]) this.button(action).disabled = !ctx || this.busy(action);
-      for (const action of ["report", "torrent"]) this.button(action).disabled = this.resources.length !== 1 || this.busy(action);
-      this.button("upload").disabled = !this.images.length || this.busy("upload");
+      this.syncToolButtons();
       this.button("search").disabled = this.busy("search");
       this.button("search-inline").disabled = !this.resources.length || this.busy("search-inline");
       this.host.querySelectorAll('[data-action="apply"]').forEach(el => el.disabled = !this.applyable() || this.busy("apply"));
       this.host.querySelectorAll('[data-action="undo"]').forEach(el => el.disabled = !this.renameBatch || this.busy("undo"));
       this.host.querySelectorAll("[data-copy]").forEach(el => el.disabled = !(el.dataset.copy === "content" ? this.content : this.fields[el.dataset.copy]));
+    }
+    syncToolButtons() {
+      const has = this.resources.length > 0;
+      for (const action of Object.keys(tools)) {
+        const button = this.button(action), active = this.busy(action) || this.toolActive(action);
+        if (active !== button.hasAttribute("aria-busy")) this.setButtonBusy(button, active);
+        button.disabled = active || (action === "upload" ? !this.images.length : action === "screenshots" ? !has : this.resources.length !== 1);
+      }
     }
     applyable() {
       const preview = this.preview;
@@ -365,11 +572,15 @@
       }
       if (this.dirty.size && !global.confirm("当前资源有人工编辑的标题、副标题或简介。切换资源将清空这些编辑及当前发布产物。是否确认切换？取消可继续编辑和复制当前内容。")) return false;
       const epoch = ++this.epoch;
+      this.toolTasks.clear(); this.toolErrors.clear(); this.torrentIds.clear(); this.linkSignature = null;
+      this.closeDialog(this.el("image-dialog"), false);
+      this.closeDialog(this.el("task-log-dialog"), false);
+      this.setTab("content");
       this.versions = {}; this.resources = resources; this.selectionSignature = selectedSignature;
       this.closeResourcePicker();
       this.context = null; this.origins = origins; this.dirty.clear(); this.editVersion++;
       this.cancelTimer(this.composeTimer); this.contextChanged("selection");
-      this.images = []; this.artifacts = []; this.links = []; this.episodeOverrides = {}; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
+      this.images = []; this.artifacts = []; this.links = []; this.renderToolProgress(); this.episodeOverrides = {}; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
       for (const field of Object.keys(this.fields)) this.setField(field, "");
       ["images", "reports", "torrents", "upload-links", "issues", "candidates", "media"].forEach(name => this.el(name).replaceChildren());
       ["naming-rule", "subtitle-rule", "title-rule", "selected-title", "season", "episode", "year", "resolution", "video-codec", "audio-codec"].forEach(name => this.el(name).value = "");
@@ -746,7 +957,6 @@
     async report() {
       const epoch=this.epoch, source=this.resources[0];
       const result=await this.api.request('/api/v2/reports',source);
-      if (epoch === this.epoch) this.el('reports').textContent='正在后台生成媒体报告…';
       this.track(result.task,{type:'report',epoch});
     }
     async torrent() {
@@ -757,12 +967,18 @@
     }
     async upload() {
       if (this.images.length > 50) throw new Error("每次最多上传 50 张图片，请减少截取数量");
-      const epoch = this.epoch, result = await this.api.request("/api/uploads/jobs", {items: this.images.map(x => ({root_key: "images", relative_path: x.path}))});
-      this.track(result.task, {type: "upload", epoch});
+      const epoch = this.epoch, images = this.images, result = await this.api.request("/api/uploads/jobs", {items: images.map(x => ({root_key: "images", relative_path: x.path}))});
+      this.track(result.task, {type: "upload", epoch, images});
     }
     track(task, job) {
-      const normalized = task.kind ? task : this.api.legacyTask(task); this.tasks.set(key(normalized), normalized); this.jobs.set(key(normalized), job); this.renderTasks();
-      this.notice("任务已提交，完成后会通知"); this.refreshTasks();
+      const normalized = task.kind ? task : this.api.legacyTask(task), id = key(normalized);
+      if (this.destroyed) return;
+      this.tasks.set(id, normalized); this.jobs.set(id, job);
+      if (job.epoch === this.epoch && (!job.images || job.images === this.images)) {
+        if (Object.values(tools).some(([type]) => type === job.type)) this.toolTasks.set(job.type, id);
+        this.notice("任务已提交，完成后会通知");
+      }
+      this.renderTasks(); this.renderToolProgress(); this.refreshTasks();
     }
     async refreshTasks(initial = false) {
       if (this.refreshing || this.destroyed) return; this.refreshing = true; this.cancelTimer(this.pollTimer);
@@ -777,18 +993,62 @@
           }
         }
         for (const task of tasks) {
+          if (this.destroyed) return;
           const id = key(task), previous = this.tasks.get(id); this.tasks.set(id, task);
           if (terminal(task)) {
             const notification = `${id}:${task.status}:${task.finished_at || ""}`;
-            if (!global.AppTaskCenter && !initial && !this.notified.has(notification) && (this.jobs.has(id) || (previous && !terminal(previous)))) { this.notice(`${task.task_type}：${{completed: "已完成", failed: "失败", cancelled: "已取消"}[task.status]}${task.error ? ` · ${task.error}` : ""}`, task.status === "failed"); }
+            if (!global.AppTaskCenter && (!this.jobs.has(id) || this.jobs.get(id).epoch === this.epoch) && !initial && !this.notified.has(notification) && (!this.toolTasksHas(id) || task.status !== "completed") && (this.jobs.has(id) || (previous && !terminal(previous)))) { this.notice(`${task.task_type}：${{completed: "已完成", failed: "失败", cancelled: "已取消"}[task.status]}${task.error ? ` · ${task.error}` : ""}`, task.status === "failed"); }
             this.notified.add(notification);
-            if (task.status === "completed" && this.jobs.has(id) && !this.applied.has(id)) { try { await this.applyTask(task, this.jobs.get(id)); this.applied.add(id); } catch (error) { this.notice(`产物读取失败：${error.message}`, true); } }
+            if (task.status === "completed" && this.jobs.has(id) && !this.applied.has(id)) {
+              const job = this.jobs.get(id);
+              this.renderToolProgress();
+              try {
+                await this.applyTask(task, job);
+                if (!this.destroyed && job.epoch === this.epoch && this.toolTasksHas(id) && !global.AppTaskCenter) this.notice(`${task.task_type}：已完成`);
+              } catch (error) {
+                if (!this.destroyed && job.epoch === this.epoch) {
+                  this.resultErrors.set(id, error.message);
+                  this.notice(`产物读取失败：${error.message}`, true);
+                }
+              }
+              this.applied.add(id);
+            }
           }
         }
         this.el("task-status").textContent = this.api.tasksMode === "legacy" ? "已连接现有工具队列；统一下载任务视图待接入。刷新仅恢复任务，不恢复发布内容。" : "刷新仅恢复任务进度和实际产物，不恢复发布内容。";
-        this.renderTasks();
+        this.renderTasks(); this.renderToolProgress(); this.syncToolButtons();
       } catch (error) { if (!this.destroyed) this.el("task-status").textContent = `${error.message}；稍后自动重试`; }
       finally { this.refreshing = false; if (!this.destroyed) this.pollTimer = this.later(() => this.refreshTasks(), this.pollInterval); }
+    }
+    toolTasksHas(id) { return [...this.toolTasks.values()].includes(id); }
+    renderToolProgress() {
+      for (const [action, [type, panel]] of Object.entries(tools)) {
+        const target = this.el(`tool-progress-${panel}`);
+        const id = this.toolTasks.get(type), task = this.tasks.get(id), submitting = this.busy(action);
+        const error = this.toolErrors.get(action) || (!submitting && (this.resultErrors.get(id) || task?.error)) || "";
+        const phase = this.toolErrors.has(action) || this.resultErrors.has(id) && !submitting ? "failed" :
+          submitting ? "submitting" : task?.status === "completed" && !this.applied.has(id) ? "reading" : task?.status || "";
+        const status = {submitting: "正在提交…", reading: "正在读取结果…", ...taskLabels}[phase] || phase;
+        const active = ["queued", "running", "submitting", "reading"].includes(phase);
+        const percent = ["queued", "running"].includes(phase) && Number.isFinite(task?.progress) ? Math.max(0, Math.min(100, task.progress)) : null;
+        if (!status) { if (target.firstChild) target.replaceChildren(); continue; }
+        if (!target.firstChild) {
+          const summary = node("p", null, "wb-tool-phase"), track = node("div", null, "wb-progress-track");
+          track.setAttribute("role", "progressbar"); track.setAttribute("aria-label", "任务进度");
+          track.append(node("span")); target.append(summary, track, node("p", null, "wb-tool-error"));
+        }
+        const [summary, track, reason] = target.children;
+        const label = percent === null ? status : `${status} · ${Math.round(percent)}%`;
+        if (summary.textContent !== label) summary.textContent = label;
+        if (reason.textContent !== error) reason.textContent = error;
+        track.hidden = !active;
+        track.classList.toggle("wb-indeterminate", percent === null);
+        if (percent === null) track.removeAttribute("aria-valuenow");
+        else if (track.getAttribute("aria-valuenow") !== String(percent)) {
+          track.setAttribute("aria-valuenow", String(percent));
+          track.style.setProperty("--wb-progress", percent / 100);
+        }
+      }
     }
     async applyTask(task, job) {
       if (job.epoch !== this.epoch) return;
@@ -826,98 +1086,186 @@
       }
       if (job.type === "probe") { await this.resolve(); return; }
       let detail = task;
-      if (!task.result) detail = await this.api.request(task.legacy ? `/api/tasks/${task.id}` : `/api/v2/tasks/${task.kind}/${task.id}`);
-      if (job.epoch !== this.epoch) return;
+      if (!task.result && !task.artifact_refs?.length) detail = await this.api.request(task.legacy ? `/api/tasks/${task.id}` : `/api/v2/tasks/${task.kind}/${task.id}`);
+      if (job.epoch !== this.epoch || this.destroyed) return;
+      const latest = () => !this.destroyed && job.epoch === this.epoch && (!this.toolTasks.has(job.type) || this.toolTasks.get(job.type) === key(task));
+      if (!latest() || job.images && job.images !== this.images) return;
       if (job.type === "screenshot") {
-        const session = await this.api.request(`/api/files/screenshots/${encodeURIComponent(job.session)}`); if (job.epoch !== this.epoch) return;
+        const session = await this.api.request(`/api/files/screenshots/${encodeURIComponent(job.session)}`); if (!latest()) return;
         const outputs = Object.values(session.final_outputs || {});
         const selected = outputs.length ? outputs : (session.videos || []).flatMap(v => v.items || []);
-        this.images = selected.filter(x => x.status === "completed" && x.available !== false).map(x => ({id: String(x.id || x.video_id), path: x.output_relative_path || x.relative_path, kind: session.params?.output_mode === "collage" ? "collage" : "screenshot"})).filter(x => x.path);
-        this.artifacts = this.artifacts.filter(x => !["screenshot", "collage", "upload"].includes(x.kind)); this.links = []; this.el("upload-links").replaceChildren();
-        if (!this.images.length) throw new Error("任务未返回可读取的截图，请检查任务日志");
+        const images = selected.filter(x => x.status === "completed" && x.available !== false).map(x => ({id: String(x.id || x.video_id), path: x.output_relative_path || x.relative_path, kind: session.params?.output_mode === "collage" ? "collage" : "screenshot"})).filter(x => x.path);
+        if (!images.length) throw new Error("任务未返回可读取的截图，请检查任务日志");
+        this.images = images; this.toolTasks.delete("upload"); this.toolErrors.delete("upload");
+        this.artifacts = this.artifacts.filter(x => !["screenshot", "collage", "upload"].includes(x.kind)); this.links = []; this.renderUploadLinks();
         this.renderImages();
       }
       if (job.type === "upload") {
         const uploads = detail.result?.uploads || [];
         const completed = uploads.filter(x => x.status === "completed" && safeURL(x.remote_url));
+        if (!completed.length && !(detail.artifact_refs || []).some(x => x.kind === "upload" && x.url && safeURL(x.url))) {
+          throw new Error(uploads.find(x => x.error)?.error || "任务未返回有效的图床链接");
+        }
         this.links = [...new Set([...this.links, ...completed.map(x => x.remote_url)])];
         this.artifacts = [...this.artifacts.filter(x => x.kind !== "upload"), ...completed.map(x => ({kind: "upload", id: String(x.id), resource: null, url: x.remote_url}))];
         this.renderUploadLinks();
         if (completed.length < uploads.length) this.notice("部分图片上传失败，请检查任务日志后重试", true);
       }
-      if (detail.artifact_refs?.length) {
-        const references = detail.artifact_refs.filter(artifact => artifact && ["screenshot", "collage", "report", "torrent", "upload"].includes(artifact.kind) && typeof artifact.id === "string" && (!artifact.url || safeURL(artifact.url)));
-        this.artifacts = [...this.artifacts, ...references.filter(artifact => !this.artifacts.some(x => x.kind === artifact.kind && x.id === artifact.id))];
-        this.links = [...new Set([...this.links, ...references.filter(artifact => artifact.kind === "upload" && artifact.url).map(artifact => artifact.url)])];
-        this.renderUploadLinks();
-      }
       if (job.type === "report") {
-        this.el('reports').replaceChildren();
+        const cards = document.createDocumentFragment();
         for (const artifact of detail.artifact_refs || []) {
           if (artifact.kind !== 'report' || !artifact.resource) continue;
           const report=await this.api.request('/api/files/text?'+new URLSearchParams({root_key:artifact.resource.root_key,path:artifact.resource.relative_path}));
-          if (job.epoch !== this.epoch) return;
-          const text=report.content || report.text || '', copy=node('button','复制报告'), download=node('a','下载报告');
-          copy.type='button'; copy.onclick=()=>this.copyValue(text);
+          if (!latest()) return;
+          const text=report.content || report.text;
+          if (!text) throw new Error('任务返回了空的媒体报告');
+          const copy=node('button','复制报告'), download=node('a','下载报告');
+          copy.type='button'; copy.onclick=()=>this.copyValue(text, copy);
           download.href=(artifact.url && safeURL(artifact.url)) || `/api/v2/reports/${encodeURIComponent(artifact.id)}/file`;
           download.setAttribute('download','');
           const card=node('div',null,'wb-report-card');
           card.append(copy,download,node('pre',text));
-          this.el('reports').append(card);
+          cards.append(card);
         }
+        if (!cards.childElementCount) throw new Error("任务未返回媒体报告");
+        this.el("reports").replaceChildren(cards);
+        this.artifacts = this.artifacts.filter(x => x.kind !== "report");
+      }
+      if (detail.artifact_refs?.length) {
+        const references = detail.artifact_refs.filter(artifact => artifact && ["screenshot", "collage", "report", "torrent", "upload"].includes(artifact.kind) && typeof artifact.id === "string" && (!artifact.url || safeURL(artifact.url)));
+        const added = references.filter(artifact => !this.artifacts.some(x => x.kind === artifact.kind && x.id === artifact.id));
+        if (added.length) this.artifacts = [...this.artifacts, ...added];
+        this.links = [...new Set([...this.links, ...references.filter(artifact => artifact.kind === "upload" && artifact.url).map(artifact => artifact.url)])];
+        this.renderUploadLinks();
       }
       if (job.type === "torrent") {
         if (detail.result?.record) this.renderTorrent(detail.result.record);
-        else for (const artifact of detail.artifact_refs || []) if (artifact.kind === 'torrent') this.renderTorrent({id:artifact.id});
+        else {
+          const references = (detail.artifact_refs || []).filter(x => x.kind === "torrent");
+          if (!references.length) throw new Error("任务未返回种子文件");
+          for (const artifact of references) this.renderTorrent({id: artifact.id, name: artifact.resource?.relative_path?.split("/").at(-1)});
+        }
       }
       this.editVersion++; this.scheduleCompose(); this.controls();
     }
     renderUploadLinks() {
+      const linkSignature = JSON.stringify(this.links);
+      if (this.linkSignature === linkSignature) return;
+      this.linkSignature = linkSignature;
       this.el("upload-links").replaceChildren();
       this.links.forEach(url => {
         const row = node("div", null, "wb-upload-link"), link = node("a", url);
         link.href = safeURL(url); link.target = "_blank"; link.rel = "noopener noreferrer";
-        const copyUrl = node("button", "复制链接"); copyUrl.type = "button"; copyUrl.onclick = () => this.copyValue(url);
-        const copyBBCode = node("button", "复制 BBCode"); copyBBCode.type = "button"; copyBBCode.onclick = () => this.copyValue(`[img]${url}[/img]`);
+        const copyUrl = node("button", "复制链接"); copyUrl.type = "button"; copyUrl.onclick = () => this.copyValue(url, copyUrl);
+        const copyBBCode = node("button", "复制 BBCode"); copyBBCode.type = "button"; copyBBCode.onclick = () => this.copyValue(`[img]${url}[/img]`, copyBBCode);
         row.append(link, copyUrl, copyBBCode); this.el("upload-links").append(row);
       });
     }
+    openDialog(dialog, opener) {
+      if (!dialog.open) {
+        this.dialogState.set(dialog, {opener, x: scrollX, y: scrollY});
+        dialog.showModal();
+      }
+    }
+    closeDialog(dialog, restore = true) {
+      if (!dialog?.open) return;
+      const state = this.dialogState.get(dialog);
+      this.dialogState.delete(dialog);
+      dialog.close();
+      if (dialog === this.el("image-dialog")) {
+        const image = this.el("image-dialog-img");
+        image.onload = image.onerror = null; image.removeAttribute("src"); image.hidden = true;
+      }
+      if (restore && state) {
+        const opener = state.opener?.isConnected ? state.opener : this.el("tasks").closest("details")?.querySelector("summary");
+        opener?.focus({preventScroll: true});
+        global.scrollTo({left: state.x, top: state.y, behavior: "instant"});
+      }
+    }
+    showImage(url, path, opener) {
+      const dialog = this.el("image-dialog"), image = this.el("image-dialog-img"), status = this.el("image-dialog-status");
+      image.hidden = true; status.hidden = false; status.textContent = "正在加载缩略图…";
+      image.alt = path;
+      image.onload = () => { if (dialog.open) { status.hidden = true; image.hidden = false; } };
+      image.onerror = () => { if (dialog.open) status.textContent = "缩略图无法读取，请检查文件是否可用。"; };
+      this.openDialog(dialog, opener);
+      image.src = url;
+    }
+    async showTaskLog(task, opener) {
+      const dialog = this.el("task-log-dialog"), status = this.el("task-log-status"), output = this.el("task-log-output");
+      this.openDialog(dialog, opener);
+      const state = this.dialogState.get(dialog), request = Symbol();
+      state.request = request;
+      const current = () => !this.destroyed && dialog.open && this.dialogState.get(dialog)?.request === request;
+      this.el("task-log-title").textContent = `任务日志 · ${task.task_type}`;
+      status.textContent = "正在读取日志…"; status.hidden = false; output.textContent = "";
+      output.parentElement.scrollTop = 0;
+      try {
+        const id = encodeURIComponent(task.id);
+        const result = await this.api.request(task.kind === "download" ? `/api/jobs/${id}/log?lines=100` : `/api/tasks/${id}/logs?lines=100`);
+        if (!current()) return;
+        const lines = result.content || result.lines || result.logs || result.log;
+        output.textContent = (Array.isArray(lines) ? lines.map(x => typeof x === "string" ? x : x?.message || JSON.stringify(x)).join("\n") : lines) || "暂无日志";
+        status.hidden = true;
+      } catch (error) { if (current()) status.textContent = `读取日志失败：${error.message}`; }
+    }
     renderImages() {
-      this.el("images").replaceChildren();
-      this.images.forEach(image => {
+      const figures = this.images.map(image => {
         const url = "/api/files/image?" + new URLSearchParams({root_key: "images", path: image.path});
-        const figure = node("figure", null, "wb-image"), img = node("img"), caption = node("figcaption"), download = node("a", "下载缩略图"); img.src = url; img.alt = image.path; img.loading = "lazy"; download.href = `${url}&download=true`; caption.append(download); figure.append(img, caption); this.el("images").append(figure);
+        const figure = node("figure", null, "wb-image"), img = node("img"), caption = node("figcaption"), download = node("a", "下载缩略图");
+        const preview = node("button", null, "wb-image-preview"), placeholder = node("span", "加载图片…", "wb-note");
+        preview.type = "button"; preview.setAttribute("aria-label", `预览 ${image.path}`);
+        preview.onclick = () => this.showImage(url, image.path, preview);
+        img.alt = image.path; img.loading = "lazy";
+        img.onload = () => { placeholder.hidden = true; img.classList.add("wb-image-ready"); };
+        img.onerror = () => { placeholder.textContent = "图片加载失败"; img.hidden = true; };
+        img.src = url; download.href = `${url}&download=true`;
+        preview.append(placeholder, img); caption.append(download); figure.append(preview, caption);
+        return figure;
       });
+      this.el("images").replaceChildren(...figures);
     }
     renderTorrent(record) {
-      const card = node("article", null, "wb-task"), link = node("a", "下载种子");
+      const id = String(record.id || "");
+      if (!id || this.torrentIds.has(id)) return;
+      this.torrentIds.add(id);
+      const card = node("article", null, "wb-torrent-result"), link = node("a", "下载种子");
       link.href = `/api/torrents/${encodeURIComponent(record.id)}/file`;
       card.append(node("strong", record.name || record.filename || ".torrent"), node("p", record.info_hash || ""), link);
       this.el("torrents").append(card);
     }
+    updateTaskProgress(bar, task) {
+      const value = Number.isFinite(task.progress) ? Math.max(0, Math.min(100, task.progress)) : task.status === "completed" ? 100 : null;
+      if (value === null) bar.removeAttribute("value");
+      else if (bar.getAttribute("value") !== String(value)) bar.value = value;
+    }
     renderTasks() {
-      const signature = JSON.stringify([...this.tasks.values()].map(task => [key(task), task.status, task.progress, task.error, task.cancel_allowed, task.retry_allowed]));
-      if (signature === this.taskSignature) return;
+      const tasks = [...this.tasks.values()], visible = tasks.slice(0, 30);
+      const signature = JSON.stringify([tasks.filter(task => !terminal(task)).length,
+        visible.map(task => [key(task), task.task_type, task.status, task.error, task.cancel_allowed, task.retry_allowed])]);
+      if (signature === this.taskSignature) {
+        for (const task of visible) this.updateTaskProgress(this.taskBars.get(key(task)), task);
+        return;
+      }
       this.taskSignature = signature;
-      this.el("task-count").textContent = String([...this.tasks.values()].filter(task => !terminal(task)).length); this.el("tasks").replaceChildren();
-      [...this.tasks.values()].slice(0, 30).forEach(task => {
-        const card = node("article", null, "wb-task"); card.append(node("strong", `${task.task_type} · ${{queued: "排队中", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已取消", auth_required: "需要登录"}[task.status] || task.status}`));
-        const progress = node("progress"); progress.max = 100; if (typeof task.progress === "number" && Number.isFinite(task.progress)) progress.value = Math.max(0, Math.min(100, task.progress)); else if (task.status === "completed") progress.value = 100; progress.setAttribute("aria-label", "任务进度"); card.append(progress);
+      this.taskBars = new Map();
+      this.el("task-count").textContent = String(tasks.filter(task => !terminal(task)).length); this.el("tasks").replaceChildren();
+      visible.forEach(task => {
+        const card = node("article", null, "wb-task"); card.append(node("strong", `${task.task_type} · ${taskLabels[task.status] || task.status}`));
+        const progress = node("progress"); progress.max = 100; progress.setAttribute("aria-label", "任务进度");
+        this.taskBars.set(key(task), progress); this.updateTaskProgress(progress, task); card.append(progress);
         if (task.error) card.append(node("p", task.error, "wb-note"));
         const actions = node("div", null, "wb-task-actions");
         for (const [action, label, allowed] of [["cancel", "取消", task.cancel_allowed], ["retry", "重试", task.retry_allowed && !/rename/.test(task.task_type)]]) if (allowed) {
-          const button = node("button", label); button.type = "button"; button.onclick = () => this.withButton(button, async () => { const result = await this.api.taskAction(task, action); this.tasks.set(key(result), result); if (action === "retry") this.applied.delete(key(result)); this.renderTasks(); await this.refreshTasks(); }); actions.append(button);
+          const button = node("button", label); button.type = "button"; button.onclick = () => this.withButton(button, async () => { const result = await this.api.taskAction(this.tasks.get(key(task)), action); this.tasks.set(key(result), result); if (action === "retry") { this.applied.delete(key(result)); this.resultErrors.delete(key(result)); } this.renderTasks(); this.renderToolProgress(); this.syncToolButtons(); await this.refreshTasks(); }); actions.append(button);
         }
         if (task.status === "completed" && ["screenshot", "screenshot_collage", "image_upload", "torrent_build"].includes(task.task_type)) {
           const show = node("button", "查看产物"); show.type = "button";
           show.onclick = () => this.withButton(show, () => this.showTaskArtifacts(task, card)); actions.append(show);
         }
         const logs = node("button", "日志"); logs.type = "button";
-        logs.onclick = () => this.withButton(logs, async () => {
-          const result = await this.api.request(task.kind === "download" ? `/api/jobs/${task.id}/log?lines=100` : `/api/tasks/${task.id}/logs?lines=100`);
-          let pre = card.querySelector("pre"); if (!pre) { pre = node("pre"); card.append(pre); }
-          const lines = result.content || result.lines || result.logs || result.log || "暂无日志"; pre.textContent = Array.isArray(lines) ? lines.map(x => typeof x === "string" ? x : x.message || JSON.stringify(x)).join("\n") : String(lines);
-        }); actions.append(logs); card.append(actions); this.el("tasks").append(card);
+        logs.onclick = () => this.showTaskLog(task, logs);
+        actions.append(logs); card.append(actions); this.el("tasks").append(card);
       });
     }
     async showTaskArtifacts(task, card) {
@@ -948,13 +1296,39 @@
       if (!output.childNodes.length) output.textContent = "服务尚未提供可读取的产物引用，请查看任务日志。";
       card.append(output);
     }
-    async withButton(button, action) { if (button.disabled) return; button.disabled = true; try { await action(); } catch (error) { this.notice(error.message, true); } finally { if (button.isConnected) button.disabled = false; } }
-    async copy(name) { await this.copyValue(name === "content" ? this.content : this.fields[name]); }
-    async copyValue(text) {
-      if (!text) return; try { await navigator.clipboard.writeText(text); this.notice("已复制"); }
-      catch { const input = node("textarea"); input.value = text; input.style.position = "fixed"; input.style.opacity = "0"; this.host.append(input); input.select(); const ok = document.execCommand("copy"); input.remove(); this.notice(ok ? "已复制" : "无法访问剪贴板，请手动选择文本复制", !ok); }
+    async withButton(button, action) {
+      if (button.disabled) return;
+      this.setButtonBusy(button, true);
+      try { await action(); }
+      catch (error) { this.notice(error.message, true); }
+      finally { this.setButtonBusy(button, false); button.disabled = false; }
     }
-    destroy() { this.destroyed = true; this.epoch++; this.abort.abort(); this.timers.forEach(clearTimeout); this.timers.clear(); this.browser?.destroy(); this.context = null; this.resources = []; this.fields = {release_title: "", subtitle: "", overview: ""}; this.content = ""; this.tasks.clear(); this.jobs.clear(); }
+    async copy(name, button) { await this.copyValue(name === "content" ? this.content : this.fields[name], button); }
+    async copyValue(text, button) {
+      if (!text) return;
+      let failure;
+      try { await navigator.clipboard.writeText(text); }
+      catch (error) {
+        if (this.destroyed) return;
+        const active = document.activeElement, input = node("textarea");
+        input.value = text; input.className = "wb-copy-fallback"; this.host.append(input); input.select();
+        try { if (!document.execCommand("copy")) failure = error; }
+        catch (fallbackError) { failure = fallbackError; }
+        finally { input.remove(); active?.focus({preventScroll: true}); }
+      }
+      if (this.destroyed) return;
+      this.notice(failure ? `复制失败：${failure.message || "无法访问剪贴板"}。请手动复制。` : "已复制", !!failure);
+      if (!button?.isConnected) return;
+      const previous = this.copyFeedback.get(button), label = previous?.label || button.textContent;
+      this.cancelTimer(previous?.timer);
+      button.textContent = failure ? "复制失败" : "已复制";
+      button.dataset.copyFeedback = failure ? "error" : "success";
+      const timer = this.later(() => {
+        button.textContent = label; delete button.dataset.copyFeedback; this.copyFeedback.delete(button);
+      }, 1200);
+      this.copyFeedback.set(button, {label, timer});
+    }
+    destroy() { this.destroyed = true; this.epoch++; this.closeDialog(this.el("image-dialog"), false); this.closeDialog(this.el("task-log-dialog"), false); this.abort.abort(); this.timers.forEach(clearTimeout); this.timers.clear(); this.browser?.destroy(); this.context = null; this.resources = []; this.fields = {release_title: "", subtitle: "", overview: ""}; this.content = ""; this.tasks.clear(); this.jobs.clear(); }
   }
   global.BiliWorkbench = {mount: async (host, options) => { instances.get(host)?.destroy(); const app = new Workbench(host, options); instances.set(host, app); return app.init(); }, Workbench, resourceRef: ref};
 })(window);

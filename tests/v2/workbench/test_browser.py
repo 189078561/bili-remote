@@ -18,16 +18,16 @@ def live_server(settings):
 
 
 def show_panel(page, name=None):
-    """Follow visible sheet controls or return from the first-level picker."""
+    """Follow visible sheet controls or select the requested first-level panel."""
     if name == 'content':
         name = None
-    target = name if name in ('resources', 'naming', 'preview', 'identity', 'changes') else ('tools' if name else None)
+    target = name if name in ('resources', 'naming', 'preview', 'identity', 'changes') else None
     page.wait_for_function('!(window.wb || window.V2Workbench || window.workbench)?.selecting')
     active_name = page.evaluate('document.querySelector(".wb-sheet:not([hidden])")?.dataset.sheet || null')
     active = page.locator(f'[data-sheet="{active_name}"]')
     if active_name:
         current = active_name
-        if current == target and (target != 'tools' or page.locator(f'[data-panel="{name}"]').is_visible()):
+        if current == target:
             return
         if active.is_visible():
             active.locator('.wb-sheet-heading button').click()
@@ -46,9 +46,12 @@ def show_panel(page, name=None):
         back.click()
         expect(studio).to_be_visible()
         expect(picker).to_be_hidden()
-    if name:
-        key = 'data-tab' if target == 'tools' else 'data-layout'
-        page.locator(f'[{key}="{name}"]:visible').first.click()
+    if name in ('images', 'report', 'torrent'):
+        page.locator(f'[data-tab="{name}"]:visible').first.click()
+    elif name is None:
+        page.locator('[data-tab="content"]:visible').first.click()
+    elif name:
+        page.locator(f'[data-layout="{name}"]:visible').first.click()
 
 
 def mount(page):
@@ -142,6 +145,14 @@ def test_contract_edit_copy_formats_responsive_and_no_draft(live_server):
             show_panel(page, 'preview' if field == 'content' else None)
             page.locator(f'[data-copy="{field}"]').click()
             assert page.evaluate('window.copied')
+            expect(page.locator(f'[data-copy="{field}"]')).to_have_text('已复制')
+        page.evaluate("""() => {
+            navigator.clipboard.writeText = async () => { throw Error('剪贴板访问被拒绝'); };
+            document.execCommand = () => false;
+        }""")
+        page.locator('[data-copy="content"]').click()
+        expect(page.locator('[data-copy="content"]')).to_have_text('复制失败')
+        expect(page.locator('[data-wb="notices"]')).to_contain_text('剪贴板访问被拒绝')
         for output in ('bbcode', 'html', 'markdown'):
             show_panel(page, 'preview')
             page.locator('[data-wb="format"]').select_option(output)
@@ -173,7 +184,7 @@ def test_real_browser_unconfigured_metadata_is_honest(live_server):
     try:
         mount(page)
         show_panel(page, 'resources')
-        page.locator('.file-row[data-path="Media"]').click()
+        page.locator('.file-row[data-path="Media"]').dblclick()
         show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
         page.get_by_role('button', name='使用所选资源', exact=True).click()
@@ -203,7 +214,7 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
     try:
         mount(page)
         show_panel(page, 'resources')
-        page.locator('.file-row[data-path="Media"]').click()
+        page.locator('.file-row[data-path="Media"]').dblclick()
         show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
         page.get_by_role('button', name='使用所选资源', exact=True).click()
@@ -231,6 +242,15 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
                 raise
             image = page.locator('[data-wb="images"] img').first
             expect(image).to_have_js_property('complete', True)
+            preview = page.locator('[data-wb="images"] .wb-image-preview').first
+            preview.focus()
+            page.keyboard.press('Enter')
+            dialog = page.locator('[data-wb="image-dialog"]')
+            expect(dialog.locator('img')).to_be_visible()
+            expect(dialog.get_by_role('button', name='关闭')).to_be_visible()
+            page.keyboard.press('Escape')
+            expect(dialog).not_to_be_visible()
+            expect(preview).to_be_focused()
             with page.expect_download() as pending:
                 page.get_by_role('link', name='下载缩略图').first.click()
             assert pending.value.suggested_filename.endswith(('.jpg', '.png'))
@@ -262,7 +282,7 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         assert page.locator('[data-edit="release_title"]').input_value() == ''
         expect(page.locator('[data-wb="resource-browser"]')).to_be_visible()
         show_panel(page, 'resources')
-        page.locator('.file-row[data-path="Media"]').click()
+        page.locator('.file-row[data-path="Media"]').dblclick()
         show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
         page.get_by_role('button', name='使用所选资源', exact=True).click()
@@ -459,7 +479,11 @@ def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server
         assert labels == ['资源下载目录', '种子目录', '图片目录', '发布信息目录']
         assert page.evaluate("getComputedStyle(document.body).overflowY") != 'hidden'
 
-        page.locator('.file-row[data-path="Media"]').click()
+        directory = page.locator('.file-row[data-path="Media"]')
+        directory.click()
+        expect(directory).to_have_class(re.compile('wb-file-active'))
+        assert page.evaluate('wb.browser.path') == ''
+        directory.dblclick()
         expect(page.locator('[data-wb="resource-browser-note"]')).to_contain_text('Media')
         up = page.locator('[data-resource-action="up"]')
         expect(up).to_be_enabled()
@@ -562,7 +586,7 @@ def test_completed_rename_reads_authoritative_paths_and_preserves_edits(live_ser
         page.route('**/api/v2/tasks?*', lambda route: route.fulfill(json={'items': tasks}))
         mount(page)
         show_panel(page, 'resources')
-        page.locator('.file-row[data-path="Media"]').click()
+        page.locator('.file-row[data-path="Media"]').dblclick()
         show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
         page.get_by_role('button', name='使用所选资源', exact=True).click()
@@ -683,7 +707,7 @@ def test_file_checks_stage_without_reset_and_resource_switch_requires_confirmati
         v2_fixture(page, requests)
         mount(page)
         show_panel(page, 'resources')
-        page.locator('.file-row[data-path="Media"]').click()
+        page.locator('.file-row[data-path="Media"]').dblclick()
         show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
         assert page.evaluate('wb.resources.length') == 0
@@ -846,7 +870,7 @@ def test_same_resource_from_other_entry_normalizes_fingerprint_without_reset(liv
         before = page.evaluate(snapshot)
         page.on('dialog', dismiss_switch)
         show_panel(page, 'resources')
-        page.locator('.file-row[data-path="Media"]').click()
+        page.locator('.file-row[data-path="Media"]').dblclick()
         show_panel(page, 'resources')
         page.locator('.file-row[data-path="Media/episode01.mp4"] .file-check').check()
         raw = page.evaluate('wb.browser.selectedItems()[0].fingerprint')
@@ -967,6 +991,99 @@ def test_late_report_submission_tracks_old_task_without_changing_current_resourc
         assert page.evaluate('wb.artifacts') == []
         assert page.evaluate('wb.resources[0].relative_path') == 'B.mp4'
         expect(page.locator('[data-edit="overview"]')).to_have_value('B 的人工简介')
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_workbench_inline_progress_and_logs_preserve_mobile_form(live_server):
+    base_url, _ = live_server
+    playwright, browser, page, errors = browser_session(base_url)
+    requests, submissions, held_logs = [], [], []
+    task = {'kind': 'processing', 'id': 81, 'task_type': 'torrent_build', 'status': 'queued',
+            'progress': None, 'cancel_allowed': False, 'retry_allowed': False}
+    current = []
+    try:
+        page.set_viewport_size({'width': 390, 'height': 720})
+        page.emulate_media(reduced_motion='reduce', color_scheme='dark')
+        v2_fixture(page, requests)
+        page.route('**/api/v2/tasks?*', lambda route: route.fulfill(json={'items': current}))
+        page.route('**/api/torrents/jobs', lambda route: submissions.append(route))
+        page.route('**/api/tasks/81/logs?*', lambda route: held_logs.append(route))
+        mount(page)
+        page.locator('.file-row[data-path="Media"]').click()
+        page.locator('[data-resource-action="open"]').click()
+        video = page.locator('.file-row[data-path="Media/episode01.mp4"]')
+        video.click()
+        page.locator('[data-resource-action="select"]').click()
+        expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
+
+        tab = page.locator('[data-tab="content"]')
+        tab.focus()
+        page.keyboard.press('End')
+        expect(page.locator('[data-tab="torrent"]')).to_be_focused()
+        trackers = page.locator('[data-wb="trackers"]')
+        trackers.fill('https://tracker.example/announce')
+        collapse = page.locator('[data-collapse="torrent-config"]')
+        collapse.click()
+        expect(collapse).to_have_attribute('aria-expanded', 'false')
+        assert trackers.evaluate('el => !!el.closest("[inert]")')
+        collapse.click()
+        expect(trackers).to_have_value('https://tracker.example/announce')
+        assert len([path for path, _ in requests if path == 'resources/resolve']) == 1
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+
+        button = page.locator('[data-action="torrent"]')
+        button.click()
+        expect(button).to_have_text('处理中…')
+        expect(button).to_have_attribute('aria-busy', 'true')
+        progress = page.locator('[data-wb="tool-progress-torrent"]')
+        expect(progress).to_contain_text('正在提交')
+        page.evaluate('wb.run("torrent", wb.button("torrent"))')
+        assert len(submissions) == 1
+        current[:] = [task]
+        submissions[0].fulfill(json={'task': task})
+        bar = progress.get_by_role('progressbar')
+        expect(progress).to_contain_text('排队中')
+        assert bar.get_attribute('aria-valuenow') is None
+        bar.evaluate('el => { window.originalBar = el; }')
+        current[0] = {**task, 'status': 'running', 'progress': 42}
+        expect(bar).to_have_attribute('aria-valuenow', '42')
+        assert bar.evaluate('el => el === window.originalBar')
+        expect(button).to_be_disabled()
+
+        current[0] = {**task, 'status': 'failed', 'error': '合成制种错误：源不可读'}
+        expect(progress).to_contain_text('合成制种错误：源不可读')
+        expect(button).to_have_text('本地制作种子')
+        expect(button).to_be_enabled()
+        expect(page.get_by_role('link', name='下载种子')).to_have_count(0)
+
+        page.locator('.wb-tasks > summary').click()
+        logs = page.get_by_role('button', name='日志', exact=True)
+        logs.scroll_into_view_if_needed()
+        before = page.evaluate('scrollY')
+        logs.click()
+        dialog = page.locator('[data-wb="task-log-dialog"]')
+        expect(dialog).to_be_visible()
+        page.keyboard.press('Escape')
+        expect(dialog).not_to_be_visible()
+        assert page.evaluate('scrollY') == before
+        expect(logs).to_be_focused()
+
+        logs.click()
+        expect(dialog).to_be_visible()
+        held_logs[0].fulfill(json={'lines': ['旧响应不可覆盖']})
+        held_logs[1].fulfill(json={'lines': [f'合成日志 {i}' for i in range(100)]})
+        expect(dialog.locator('pre')).to_contain_text('合成日志 99')
+        expect(dialog.locator('pre')).not_to_contain_text('旧响应不可覆盖')
+        dialog.locator('.wb-task-log-body').evaluate('el => { el.scrollTop = el.scrollHeight; }')
+        assert dialog.locator('.wb-task-log-body').evaluate('el => el.scrollTop > 0')
+        expect(dialog.get_by_role('button', name='关闭')).to_be_in_viewport()
+        page.mouse.click(2, 2)
+        expect(dialog).not_to_be_visible()
+        expect(logs).to_be_focused()
+        assert page.locator('.wb-task pre').count() == 0
         assert not errors, errors
     finally:
         browser.close()

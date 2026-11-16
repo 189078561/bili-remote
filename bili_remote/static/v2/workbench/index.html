@@ -26,8 +26,9 @@
     <section id="wb-resources" class="wb-resource-picker" data-wb="resource-browser" aria-labelledby="wb-resource-picker-title">
       <header class="wb-resource-picker-heading">
         <div><p class="wb-eyebrow">下载、种子、图片与发布资料 · 文件或整季目录</p><h2 id="wb-resource-picker-title">选择工作资源</h2><p class="wb-note" data-wb="resource-browser-note">勾选视频文件或整季目录，确认后进入当前工作区。</p></div>
-        <div class="wb-resource-picker-actions"><button type="button" class="wb-quiet" data-resource-action="up" disabled><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"/></svg>返回上级</button><button type="button" class="wb-quiet" data-resource-action="close" hidden>返回当前资源</button></div>
+        <div class="wb-resource-picker-actions"><button type="button" class="wb-quiet" data-resource-action="open" disabled><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#folder"></use></svg>打开当前文件夹</button><button type="button" class="wb-quiet" data-resource-action="select" disabled>选用当前文件</button><button type="button" class="wb-quiet" data-resource-action="up" disabled><svg class="ws-icon" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"/></svg>返回上级</button><button type="button" class="wb-quiet" data-resource-action="close" hidden>返回当前资源</button></div>
       </header>
+      <div class="wb-browser-loading" data-wb="browser-loading" role="status" hidden>正在读取目录…</div>
       <div class="wb-resource-browser" data-wb="browser"></div>
       <section class="wb-selection-summary" aria-labelledby="wb-selection-heading">
         <div class="wb-selection-heading"><div><h3 id="wb-selection-heading">当前已选项目</h3><p class="wb-note">确认前不会改变当前资源，也不会覆盖人工编辑。</p></div><span data-wb="selection-count" class="wb-selection-count">未选择</span></div>
@@ -48,6 +49,9 @@
           <button type="button" data-action="search-inline">搜索资料</button>
           <div data-wb="candidates-inline" class="wb-candidates"></div>
         </div>
+        <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="naming" aria-controls="wb-collapse-naming" aria-expanded="true"><svg class="ws-icon wb-chevron" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><span>智能重命名参数</span><small>名称、集号、片源与模板</small></button></div>
+        <div id="wb-collapse-naming" class="wb-collapse open" data-wb="collapse-naming">
+        <div class="wb-collapse-inner">
         <div class="wb-name-controls">
           <label class="wb-title-control">选用名称<input data-wb="selected-title" placeholder="输入作品名称"></label>
           <label>年份<input data-wb="year" type="number" min="1888" max="2100" step="1" placeholder="自动识别"></label>
@@ -67,6 +71,8 @@
           <label>集数方向<select data-wb="episode-direction"><option value="increment">递增</option><option value="decrement">递减</option></select></label>
           <label>集数偏移<input data-wb="episode-offset" type="number" min="-100000" max="100000" step="1" placeholder="如 3"></label>
         </div>
+        </div>
+        </div>
         <div class="wb-naming-result">
           <p data-wb="naming-status" class="wb-note">选择资源后显示目标文件名。预览不会修改文件。</p>
           <div data-wb="rename" hidden><div data-wb="rename-summary" class="wb-rename-row"></div><div class="wb-rename-actions"><div data-wb="rename-metrics" class="wb-rename-metrics" role="status"></div><div class="wb-rename-buttons"><button type="button" data-layout="changes" data-wb="change-count">查看全部文件名</button><button type="button" class="wb-primary" data-action="apply" disabled>确认重命名</button></div></div></div>
@@ -74,16 +80,42 @@
         <div class="wb-adjustment-status"><div class="wb-adjustment-copy"><span data-wb="adjustment-status" role="status">未执行改名</span><span data-wb="template-source" class="wb-note"></span></div><div class="wb-actions"><button type="button" class="wb-quiet" data-layout="naming">规则与逐集调整</button></div></div>
 
       </section>
-      <section class="wb-publishing" aria-labelledby="wb-edit-heading"><div class="wb-section-heading"><div><h2 id="wb-edit-heading">发布内容</h2></div><span class="wb-note">即时组合 · 人工编辑优先</span></div>
-<section id="wb-panel-content" aria-labelledby="wb-edit-heading" data-panel="content">
+      <section class="wb-tool-launcher" aria-label="辅助素材"><div><h2>发种辅助工具</h2><p class="wb-note">使用当前资源，进度与产物都在当前页面完成。</p></div><div class="wb-tool-buttons" role="tablist" aria-label="工作台内容"><button type="button" id="wb-tab-content" data-tab="content" role="tab" aria-selected="true" aria-controls="wb-panel-content"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"></use></svg><span>发布内容</span></button><button type="button" id="wb-tab-images" data-tab="images" role="tab" aria-selected="false" aria-controls="wb-panel-images"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#image"></use></svg><span>缩略图</span><span data-wb="images-count" class="wb-tool-count"></span></button><button type="button" id="wb-tab-report" data-tab="report" role="tab" aria-selected="false" aria-controls="wb-panel-report"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"></use></svg><span>媒体报告</span><span data-wb="report-count" class="wb-tool-count"></span></button><button type="button" id="wb-tab-torrent" data-tab="torrent" role="tab" aria-selected="false" aria-controls="wb-panel-torrent"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"></use></svg><span>种子制作</span><span data-wb="torrent-count" class="wb-tool-count"></span></button></div></section>
+      <div class="wb-tool-deck">
+      <section class="wb-publishing" id="wb-panel-content" role="tabpanel" aria-labelledby="wb-tab-content" data-panel="content"><div class="wb-section-heading"><div><h2 id="wb-edit-heading">发布内容</h2></div><span class="wb-note">即时组合 · 人工编辑优先</span></div>
+
         <div class="wb-field"><div class="wb-field-bar"><label for="wb-title">主标题</label><span data-lock="release_title" class="wb-note"></span><div><button type="button" data-action="title" disabled>重新生成</button><button type="button" data-copy="release_title" disabled>复制</button></div></div><textarea id="wb-title" data-edit="release_title" rows="1" placeholder="识别后自动生成，也可以直接编辑"></textarea></div>
         <div class="wb-field"><div class="wb-field-bar"><label for="wb-subtitle">副标题</label><span data-lock="subtitle" class="wb-note"></span><div><button type="button" data-action="subtitle" disabled>重新生成</button><button type="button" data-copy="subtitle" disabled>复制</button></div></div><textarea id="wb-subtitle" data-edit="subtitle" rows="1" placeholder="根据识别资料生成副标题"></textarea></div>
         <div class="wb-field"><div class="wb-field-bar"><label for="wb-overview">简介</label><span data-lock="overview" class="wb-note"></span><button type="button" data-copy="overview" disabled>复制</button></div><div class="wb-format-tools" aria-label="简介格式"><button type="button" data-format="b" aria-label="加粗">B</button><button type="button" data-format="i" aria-label="斜体">I</button><button type="button" data-format="url">链接</button><button type="button" data-format="img">图片</button><span>BBCode</span></div><textarea id="wb-overview" data-edit="overview" rows="5" placeholder="影视简介；支持人工编辑及 [b]粗体[/b]、[img]图片链接[/img] 等 BBCode"></textarea></div>
 
       </section>
-      </section>
-      <section class="wb-tool-launcher" aria-label="辅助素材"><div><h2>发种辅助工具</h2><p class="wb-note">使用当前资源，产物自动关联到本次发布。</p></div><div class="wb-tool-buttons"><button type="button" id="wb-tab-images" data-tab="images"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#image"></use></svg><span>缩略图</span><span data-wb="images-count" class="wb-tool-count"></span></button><button type="button" id="wb-tab-report" data-tab="report"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"></use></svg><span>媒体报告</span><span data-wb="report-count" class="wb-tool-count"></span></button><button type="button" id="wb-tab-torrent" data-tab="torrent"><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#file"></use></svg><span>种子制作</span><span data-wb="torrent-count" class="wb-tool-count"></span></button></div></section>
-      <div data-wb="artifact-summary" class="wb-artifact-summary"></div><details class="wb-tasks"><summary>后台任务 <span data-wb="task-count">0</span></summary><p data-wb="task-status" class="wb-note"></p><div data-wb="tasks"></div></details>
+
+        <section id="wb-panel-images" class="wb-tool-panel" role="tabpanel" aria-labelledby="wb-tab-images" data-panel="images" hidden>
+          <div class="wb-section-head"><div><h2>缩略图</h2><p class="wb-note">截取真实画面，预览、下载或生成图床链接。</p></div><button type="button" data-action="screenshots" disabled><svg class="ws-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#image"></use></svg><span data-button-label>生成缩略图</span></button></div>
+          <div data-wb="tool-progress-images" class="wb-tool-progress" role="status" aria-live="polite"></div>
+          <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="image-config" aria-controls="wb-collapse-image-config" aria-expanded="true"><svg class="ws-icon wb-chevron" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><span>截图参数</span><small>输出方式、范围和画质</small></button></div>
+          <div id="wb-collapse-image-config" class="wb-collapse open" data-wb="collapse-image-config"><div class="wb-collapse-inner"><div class="wb-tool-config">
+            <div class="wb-inline"><label>输出方式<select data-wb="image-mode"><option value="single">单张图片</option><option value="collage">多图拼成单图</option></select></label><label>截取张数<input data-wb="image-count" type="number" min="1" max="120" value="1"></label><label>拼图列数<input data-wb="image-columns" type="number" min="1" max="10" value="3"></label><label>拼图行数<input data-wb="image-rows" type="number" min="1" max="12" placeholder="按张数自动"></label></div>
+            <div class="wb-inline"><label>范围方式<select data-wb="range-mode"><option value="seconds">跳过片头片尾</option><option value="percent">按视频百分比</option></select></label><label>开始百分比<input data-wb="start-percent" type="number" min="0" max="99" value="5"></label><label>结束百分比<input data-wb="end-percent" type="number" min="1" max="100" value="95"></label></div>
+            <div class="wb-inline"><label>跳过片头（秒）<input data-wb="skip-start" type="number" min="0" max="86400" value="0"></label><label>跳过片尾（秒）<input data-wb="skip-end" type="number" min="0" max="86400" value="0"></label></div>
+            <div class="wb-inline"><label>图片格式<select data-wb="image-format"><option value="">使用设置</option><option value="png">PNG</option><option value="jpg">JPEG</option></select></label><label>信息条与边框<select data-wb="image-style"><option value="">使用设置</option><option value="script">脚本样式</option><option value="plain">原始画面</option></select></label></div>
+          </div></div></div>
+          <div class="wb-tool-result"><div data-wb="images" class="wb-images"></div><button type="button" data-action="upload" disabled><span data-button-label>生成图床链接</span></button><div data-wb="tool-progress-upload" class="wb-tool-progress" role="status"></div><div data-wb="upload-links" class="wb-result-block"></div></div>
+        </section>
+        <section id="wb-panel-report" class="wb-tool-panel" role="tabpanel" aria-labelledby="wb-tab-report" data-panel="report" hidden>
+          <div class="wb-section-head"><div><h2>MediaInfo / BDInfo</h2><p class="wb-note">视频读取 MediaInfo，蓝光目录读取 BDInfo；报告会直接加入发布内容。</p></div><button type="button" data-action="report" disabled><span data-button-label>读取媒体报告</span></button></div>
+          <div data-wb="tool-progress-report" class="wb-tool-progress" role="status" aria-live="polite"></div>
+          <div class="wb-tool-result" data-wb="reports"></div>
+        </section>
+        <section id="wb-panel-torrent" class="wb-tool-panel" role="tabpanel" aria-labelledby="wb-tab-torrent" data-panel="torrent" hidden>
+          <div class="wb-section-head"><div><h2>种子制作</h2><p class="wb-note">直接使用所选资源；完成后在当前区域下载 .torrent。</p></div><button type="button" data-action="torrent" disabled><span data-button-label>本地制作种子</span></button></div>
+          <div data-wb="tool-progress-torrent" class="wb-tool-progress" role="status" aria-live="polite"></div>
+          <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="torrent-config" aria-controls="wb-collapse-torrent-config" aria-expanded="true"><svg class="ws-icon wb-chevron" viewBox="0 0 24 24" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><span>种子参数</span><small>Tracker、分块与可见性</small></button></div>
+          <div id="wb-collapse-torrent-config" class="wb-collapse open" data-wb="collapse-torrent-config"><div class="wb-collapse-inner"><div class="wb-tool-config"><label>Tracker（每行一个；留空使用设置）<textarea data-wb="trackers" rows="3" placeholder="https://tracker.example/announce"></textarea></label><label>分块大小<select data-wb="piece-length"><option value="">使用全局设置</option><option value="auto">自动</option><option value="256k">256 KiB</option><option value="1m">1 MiB</option><option value="4m">4 MiB</option><option value="16m">16 MiB</option></select></label><label class="wb-check"><input data-wb="private" type="checkbox" checked> 私有种子</label></div></div></div>
+          <div class="wb-tool-result" data-wb="torrents"></div>
+        </section>
+      </div>
+      <section class="wb-output-summary" aria-label="输出"><h2>输出</h2><div data-wb="artifact-summary" class="wb-artifact-summary"></div></section><details class="wb-tasks"><summary>后台任务 <span data-wb="task-count">0</span></summary><p data-wb="task-status" class="wb-note"></p><div data-wb="tasks"></div></details>
     </div>
     <footer class="wb-page-footer"><span>发布内容不保存为草稿</span><a href="/legacy">旧版兼容界面</a></footer>
   </div>
@@ -95,13 +127,6 @@
       <section class="wb-rule-section"><h3>发布模板</h3><p class="wb-note">文件命名模板已移至主界面。</p><div class="wb-inline"><label>副标题样式<select data-wb="subtitle-rule"><option value="">使用识别规则</option><option value="tv_episode">电视剧单集</option><option value="tv_season">电视剧整季</option><option value="anime">日本动画</option><option value="movie">电影</option></select></label><label>演员数量<select data-wb="cast-limit"><option value="3">3 位</option><option value="5">5 位</option><option value="8">8 位</option><option value="all">全部</option></select></label></div><label>发布主标题模板<textarea data-wb="title-rule" maxlength="500" rows="2" spellcheck="false" placeholder="留空使用服务默认规则，如 {Title} {Year} {Resolution}"></textarea></label><div class="wb-actions"><button type="button" data-action="rules" disabled>应用规则</button><button type="button" data-wb="save-rules">保存为全局规则</button></div></section>
       <section class="wb-rule-section" data-wb="naming-advanced"><h3>逐集映射、字幕关联与撤销</h3><div data-wb="naming-panel"></div></section>
       <section class="wb-rule-section"><div class="wb-section-heading"><h3>逐文件媒体参数</h3><button type="button" data-action="probe" disabled>识别媒体参数</button></div><div data-wb="media"></div></section>
-    </div>
-  </section>
-  <section class="wb-sheet wb-tools-sheet" data-sheet="tools" role="dialog" aria-modal="true" aria-labelledby="wb-tool-heading" hidden>
-    <header class="wb-sheet-heading"><div><p class="wb-eyebrow">产物与当前资源关联</p><h2 id="wb-tool-heading" data-wb="tool-heading">辅助工具</h2></div><button type="button" data-tab="content">返回发布内容</button></header><div class="wb-sheet-body">
-<section id="wb-panel-images" role="tabpanel" aria-labelledby="wb-tab-images" data-panel="images" hidden><div class="wb-section-head"><h2>缩略图</h2><button type="button" data-action="screenshots" disabled>生成缩略图</button></div><p class="wb-note">后台截取真实画面，可下载或另行上传图床。</p><div class="wb-inline"><label>输出方式<select data-wb="image-mode"><option value="single">单张图片</option><option value="collage">多图拼成单图</option></select></label><label>截取张数<input data-wb="image-count" type="number" min="1" max="120" value="1"></label><label>拼图列数<input data-wb="image-columns" type="number" min="1" max="10" value="3"></label><label>拼图行数<input data-wb="image-rows" type="number" min="1" max="12" placeholder="按张数自动"></label></div><details><summary>截取范围与画质</summary><div class="wb-inline"><label>范围方式<select data-wb="range-mode"><option value="seconds">跳过片头片尾</option><option value="percent">按视频百分比</option></select></label><label>开始百分比<input data-wb="start-percent" type="number" min="0" max="99" value="5"></label><label>结束百分比<input data-wb="end-percent" type="number" min="1" max="100" value="95"></label></div><div class="wb-inline"><label>跳过片头（秒）<input data-wb="skip-start" type="number" min="0" max="86400" value="0"></label><label>跳过片尾（秒）<input data-wb="skip-end" type="number" min="0" max="86400" value="0"></label></div><div class="wb-inline"><label>图片格式<select data-wb="image-format"><option value="">使用设置</option><option value="png">PNG</option><option value="jpg">JPEG</option></select></label><label>信息条与边框<select data-wb="image-style"><option value="">使用设置</option><option value="script">脚本样式</option><option value="plain">原始画面</option></select></label></div></details><div data-wb="images" class="wb-images"></div><button type="button" data-action="upload" disabled>生成图床链接</button><div data-wb="upload-links"></div></section>
-<section id="wb-panel-report" role="tabpanel" aria-labelledby="wb-tab-report" data-panel="report" hidden><div class="wb-section-head"><h2>MediaInfo / BDInfo</h2><button type="button" data-action="report" disabled>读取媒体报告</button></div><p class="wb-note">视频读取 MediaInfo，蓝光目录读取 BDInfo。工具不可用时会显示实际原因。</p><p class="wb-note">报告由后台任务生成，可复制并即时加入完整发布内容。</p><div data-wb="reports"></div></section>
-<section id="wb-panel-torrent" role="tabpanel" aria-labelledby="wb-tab-torrent" data-panel="torrent" hidden><div class="wb-section-head"><h2>种子制作</h2><button type="button" data-action="torrent" disabled>本地制作种子</button></div><p class="wb-note">直接使用所选资源；后台完成后下载 .torrent。</p><details><summary>Tracker 与种子选项</summary><label>Tracker（每行一个；留空使用设置）<textarea data-wb="trackers" rows="3" placeholder="https://tracker.example/announce"></textarea></label><label>分块大小<select data-wb="piece-length"><option value="">使用全局设置</option><option value="auto">自动</option><option value="256k">256 KiB</option><option value="1m">1 MiB</option><option value="4m">4 MiB</option><option value="16m">16 MiB</option></select></label><label><input data-wb="private" type="checkbox" checked> 私有种子</label></details><div data-wb="torrents"></div></section>
     </div>
   </section>
   <section class="wb-sheet wb-preview-sheet" data-sheet="preview" role="dialog" aria-modal="true" aria-labelledby="wb-preview-heading" hidden>
@@ -122,6 +147,14 @@
     <div class="wb-sheet-body"><div data-wb="rename-metrics-sheet" class="wb-rename-metrics" role="status"></div><div data-wb="rename-list"></div><p data-wb="rename-warning" class="wb-note"></p></div>
     <footer class="wb-sheet-footer"><button type="button" data-layout="naming">逐集调整与撤销</button><button type="button" data-action="undo" disabled>预览撤销</button><button type="button" class="wb-primary" data-action="apply" disabled>确认重命名</button></footer>
   </section>
+  <dialog class="wb-image-dialog" data-wb="image-dialog" aria-labelledby="wb-image-dialog-title">
+    <header><h2 id="wb-image-dialog-title">缩略图预览</h2><button type="button" data-image-close>关闭</button></header>
+    <div class="wb-image-dialog-body" data-wb="image-dialog-body"><p class="wb-image-dialog-status" data-wb="image-dialog-status" role="status">正在加载缩略图…</p><img data-wb="image-dialog-img" alt="" hidden></div>
+  </dialog>
+  <dialog class="wb-task-log-dialog" data-wb="task-log-dialog" aria-labelledby="wb-task-log-title">
+    <header><h2 id="wb-task-log-title" data-wb="task-log-title">任务日志</h2><button type="button" data-log-close>关闭</button></header>
+    <div class="wb-task-log-body"><p class="wb-task-log-status" data-wb="task-log-status" role="status">正在读取日志…</p><pre data-wb="task-log-output" tabindex="0" aria-label="任务日志内容"></pre></div>
+  </dialog>
   <div class="wb-notices" data-wb="notices" aria-live="polite" aria-atomic="false"></div>
 </section>
 
