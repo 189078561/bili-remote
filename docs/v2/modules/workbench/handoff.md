@@ -109,3 +109,11 @@ V2 TaskRef 仅有 artifact_refs，没有旧任务 result/input。前端接受真
 - 在本分支用隔离测试应用运行 `python3 scripts/dev_test.py integration --filter 'main_page_real_resource_naming_publish or final_ui_download_to_publish_and_undo or final_ui_empty_and_long_content_matrix'`：文件管理 → 主工作台、移动端长内容与复制 2 项通过。
 - 原版下载 → 工作台 → 改名/撤销用例在 `[data-action=apply]` 处被 Playwright 严格模式拦截：主页面和审阅面板均有确认按钮，基线 `d59cd96` 已如此。仅在临时测试适配器中把选择器限定为 `[data-sheet=changes] [data-action=apply]` 后，整个隔离链路通过（离线上游样本、临时文件、真实服务）。未修改归整合会话所有的测试。整合建议同步该一行选择器修正，保留两个既有入口。
 - `v2-integration` 工作树有重叠的未提交文件；不要直接拷贝覆盖。由整合会话核对其当前版本后合入工作台提交 `8d71e13`；本次没有合并、部署或接触生产数据。
+
+## 模块 03 返工：一级媒体工作台
+
+- 源码参考：minfo 的 `App.vue`、`PathBrowser.vue`、`usePathBrowser.js`、`ActionButtons.vue`、`OutputPanel.vue`、`ImageLinksPanel.vue`。参考路径/选中态分离、列表过滤、动作和输出分离；未复制组件。
+- 工作台专用列表直接消费已认证的 `GET /api/files/roots?scope=browse` 和 `GET /api/files/browse?root_key=downloads&path=Media&search=episode`；路径、指纹、权限、分页仍由既有 API 裁决。管理页面继续使用各自的 FileBrowser。
+- 页面顺序为媒体、智能重命名、配置、操作、输出、PT 编辑、最终预览。保留已有接入契约（包括 `select` 与工具定位），不再以标签页或抽屉作为工作台主流程。常规命名仍提交现有预检令牌、版本及幂等键。截图外挂字幕开关不在现有截图接口中；字幕关联继续由现有命名规则处理。
+- 修改工作台模板、控制器、样式和独立入口，未改共享前端、路由、引擎或数据库。没有增加草稿系统、单独任务轮询或跨刷新资源产物归属机制。
+- 验证：9 个工作台定向浏览器测试通过，包括登录后主页面、390px、折叠、文件/目录选择、异步隔离和真实临时合成媒体的截图、报告、制种；2 个主页面文件管理和下载交接测试通过。未运行项目全量测试；未使用生产媒体或真实图床验收。

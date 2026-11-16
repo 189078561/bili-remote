@@ -26,7 +26,6 @@ def document():
 <title>发种工作台 · Bili Remote</title>
 <link rel="stylesheet" href="/static/v2/workbench/workbench.css">
 <script defer src="/static/v2/workbench/api.js"></script>
-<script defer src="/static/file-browser.js"></script>
 <script defer src="/static/v2/workbench/preview.js"></script>
 <script defer src="/static/v2/workbench/workbench.js"></script>
 <script defer src="/static/v2/workbench/standalone.js"></script>
@@ -34,10 +33,6 @@ def document():
 <body class="wb-entry-body">
 <p class="wb-entry-status" data-entry-status role="status">正在检查登录状态…</p>
 ''' + fragment.replace('data-workbench aria-label', 'data-workbench hidden aria-label', 1) + '''
-<dialog class="br-workbench wb-entry-dialog" data-entry-dialog>
-<button type="button" aria-label="关闭预览">关闭</button>
-<div data-entry-dialog-content></div>
-</dialog>
 </body>
 </html>
 '''

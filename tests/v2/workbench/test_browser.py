@@ -18,40 +18,33 @@ def live_server(settings):
 
 
 def show_panel(page, name=None):
-    """Follow visible sheet controls or select the requested first-level panel."""
-    if name == 'content':
-        name = None
-    target = name if name in ('resources', 'naming', 'preview', 'identity', 'changes') else None
+    """Navigate inline sections without opening any sheet."""
     page.wait_for_function('!(window.wb || window.V2Workbench || window.workbench)?.selecting')
-    active_name = page.evaluate('document.querySelector(".wb-sheet:not([hidden])")?.dataset.sheet || null')
-    active = page.locator(f'[data-sheet="{active_name}"]')
-    if active_name:
-        current = active_name
-        if current == target:
-            return
-        if active.is_visible():
-            active.locator('.wb-sheet-heading button').click()
-    picker = page.locator('[data-wb="resource-browser"]')
-    studio = page.locator('[data-wb="studio"]')
-    if target == 'resources':
-        if picker.is_visible():
-            return
-        page.locator('[data-layout="resources"]:visible').first.click()
+    if name == 'resources':
+        picker = page.locator('[data-wb="resource-browser"]')
+        if not picker.is_visible():
+            page.locator('[data-layout="resources"]:visible').click()
         expect(picker).to_be_visible()
-        expect(studio).to_be_hidden()
         return
-    if picker.is_visible():
-        back = page.locator('[data-resource-action="close"]:visible')
-        assert back.count(), '工作台尚未选择资源，无法进入业务面板'
-        back.click()
-        expect(studio).to_be_visible()
-        expect(picker).to_be_hidden()
-    if name in ('images', 'report', 'torrent'):
-        page.locator(f'[data-tab="{name}"]:visible').first.click()
-    elif name is None:
-        page.locator('[data-tab="content"]:visible').first.click()
-    elif name:
-        page.locator(f'[data-layout="{name}"]:visible').first.click()
+    if name in ('naming', 'identity'):
+        toggle = page.locator('[data-collapse="naming"]')
+        if toggle.get_attribute('aria-expanded') == 'false':
+            toggle.click()
+        if name == 'naming':
+            details = page.locator('#wb-naming-rules')
+            if details.get_attribute('open') is None:
+                details.locator(':scope > summary').click()
+    elif name == 'changes':
+        details = page.locator('#wb-naming-files')
+        if details.get_attribute('open') is None:
+            details.locator(':scope > summary').click()
+    target = {
+        'images': '[data-action="screenshots"]', 'report': '[data-action="report"]',
+        'torrent': '[data-action="torrent"]', 'preview': '#wb-publish-preview',
+        'content': '#wb-panel-content', None: '#wb-panel-content',
+    }.get(name)
+    if target and page.locator(target).is_visible():
+        page.locator(target).scroll_into_view_if_needed()
 
 
 def mount(page):
@@ -62,13 +55,6 @@ def mount(page):
     page.goto(page.url.rstrip('/') + '/__wb')
     page.add_style_tag(url="/static/v2/workbench/workbench.css")
     page.add_script_tag(path=str(ROOT / "bili_remote/static/v2/workbench/api.js"))
-    # Existing FileBrowser expects these host utilities, supplied by app.js in the real shell.
-    page.evaluate('''() => {
-      window.element = (tag, cls, text) => { const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n; };
-      window.formatBytes = value => value + ' B';
-      window.api = (path, options={}) => {const body=options.body ? JSON.parse(options.body) : undefined; return new BiliWorkbenchAPI().request(path, body, options.method || 'GET');};
-    }''')
-    page.add_script_tag(path=str(ROOT / "bili_remote/static/file-browser.js"))
     page.add_script_tag(path=str(ROOT / "bili_remote/static/v2/workbench/preview.js"))
     page.add_script_tag(path=str(ROOT / "bili_remote/static/v2/workbench/workbench.js"))
     page.evaluate("async () => {window.wb = await BiliWorkbench.mount(document.querySelector('[data-workbench]'), {pollInterval: 200});}")
@@ -158,14 +144,16 @@ def test_contract_edit_copy_formats_responsive_and_no_draft(live_server):
             page.locator('[data-wb="format"]').select_option(output)
             expect(page.locator('[data-wb="validation"]')).to_contain_text('内容尚有缺项')
             if output == 'html':
+                page.locator('[data-preview-mode="effect"]').click()
                 expect(page.locator('[data-wb="html-preview"]')).to_be_visible()
                 assert page.evaluate('window.bad') is None
         for width in (390, 768, 1440):
             page.set_viewport_size({"width": width, "height": 1000})
             for tab in ('content', 'images', 'report', 'torrent'):
                 show_panel(page, tab)
-                expect(page.locator(f'[data-panel="{tab}"]')).to_be_visible()
-                expect(page.locator('.wb-identification')).to_be_visible()
+                expect(page.locator('#wb-operations')).to_be_visible()
+                expect(page.locator('#wb-tool-output')).to_be_visible()
+                expect(page.locator('#wb-naming')).to_be_visible()
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (width, tab)
             if width in (390, 1440):
                 show_panel(page, 'content')
@@ -228,6 +216,9 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         show_panel(page, None)
         page.locator('[data-edit="overview"]').fill('Synthetic overview for complete publishing flow')
         show_panel(page, 'images')
+        page.locator('[data-collapse="config"]').click()
+        page.locator('[data-wb="skip-start"]').fill('0')
+        page.locator('[data-wb="skip-end"]').fill('0')
         for mode, total in [('single', '1'), ('collage', '4')]:
             page.locator('[data-wb="image-mode"]').select_option(mode)
             page.locator('[data-wb="image-count"]').fill(total)
@@ -274,6 +265,8 @@ def test_real_tools_screenshot_collage_download_report_and_torrent(live_server):
         assert pending.value.suggested_filename.endswith('.torrent')
         assert page.get_by_role('button', name='添加到 qBittorrent', exact=True).count() == 0
         show_panel(page, 'content')
+        assert page.locator('.wb-sheet, [data-sheet=tools]').count() == 0
+        expect(page.locator('[data-wb="torrents"]')).to_contain_text(' B')
         expect(page.locator('[data-wb="output"]')).to_contain_text('Synthetic overview')
         expect(page.locator('[data-wb="output"]')).to_contain_text('https://images.example/')
         expect(page.locator('[data-wb="output"]')).to_contain_text('MediaInfo')
@@ -361,7 +354,7 @@ def test_slow_responses_and_rename_confirmation(live_server):
         page.route('**/api/v2/naming/apply', apply)
         show_panel(page, None)
         show_panel(page, 'changes')
-        page.locator('[data-sheet="changes"] [data-action="apply"]').click()
+        page.locator('[data-action="apply"]').click()
         page.wait_for_timeout(100)
         payload = [payload for path, payload in requests if path == 'naming/apply'][0]
         assert set(payload) == {'preview_token', 'expected_revision', 'confirm', 'idempotency_key'}
@@ -459,6 +452,42 @@ def test_real_standalone_entry_authentication_search_and_no_storage(live_server)
         playwright.stop()
 
 
+def test_module03_signed_in_main_page_inline_media_and_layout(live_server):
+    base_url, _ = live_server
+    playwright, browser, page, errors = browser_session(base_url, legacy=False)
+    try:
+        page.locator('.app-tabs [data-view=publish]').click()
+        page.wait_for_function('window.V2Workbench')
+        host = page.locator('#publish-view [data-workbench]')
+        assert host.locator('.unified-file-browser,.wb-sheet').count() == 0
+        order = host.evaluate("""el => [...el.querySelectorAll(
+            '[data-wb=resource-browser], #wb-naming, .wb-config, #wb-operations, #wb-tool-output, #wb-panel-content, #wb-publish-preview'
+        )].map(section => section.id || section.className)""")
+        assert order[0] == 'wb-resources'
+        assert order[1:] == ['wb-naming', 'wb-config', 'wb-operations', 'wb-tool-output', 'wb-panel-content', 'wb-publish-preview']
+        expect(host.locator('[data-action=report]')).to_be_disabled()
+        picker = host.locator('[data-wb=browser]')
+        picker.locator('.file-row[data-path="Media"]').dblclick()
+        picker.locator('.file-row[data-path="Media/episode01.mp4"]').dblclick()
+        expect(host.locator('[data-wb=resource-browser]')).to_be_hidden()
+        expect(host.locator('[data-wb=context-summary]')).to_contain_text('Media/episode01.mp4')
+        expect(host.locator('[data-action=report]')).to_be_enabled()
+        title = host.locator('[data-wb=title-zh]')
+        title.fill('合成片名')
+        collapse = host.locator('[data-collapse=naming]')
+        collapse.click()
+        expect(collapse).to_have_attribute('aria-expanded', 'false')
+        assert title.evaluate('el => !!el.closest("[inert]")')
+        collapse.click()
+        expect(title).to_have_value('合成片名')
+        page.set_viewport_size({'width':390,'height':844})
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
 def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server):
     base_url, app = live_server
     media = app.state.services.settings.download_root / 'Media'
@@ -474,8 +503,8 @@ def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server
         picker = page.locator('[data-wb="resource-browser"]')
         studio = page.locator('[data-wb="studio"]')
         expect(picker).to_be_visible()
-        expect(studio).to_be_hidden()
-        labels = page.locator('[data-wb="browser"] .root-shortcut strong').all_inner_texts()
+        expect(studio).to_be_visible()
+        labels = page.locator('[data-wb="browser"] .root-shortcut').all_inner_texts()
         assert labels == ['资源下载目录', '种子目录', '图片目录', '发布信息目录']
         assert page.evaluate("getComputedStyle(document.body).overflowY") != 'hidden'
 
@@ -484,11 +513,15 @@ def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server
         expect(directory).to_have_class(re.compile('wb-file-active'))
         assert page.evaluate('wb.browser.path') == ''
         directory.dblclick()
-        expect(page.locator('[data-wb="resource-browser-note"]')).to_contain_text('Media')
+        expect(page.get_by_role('navigation', name='当前位置')).to_contain_text('Media')
         up = page.locator('[data-resource-action="up"]')
         expect(up).to_be_enabled()
         search = page.locator('[data-wb="browser"]').get_by_role('searchbox', name='搜索当前目录')
-        search.fill('episode02')
+        refresh = page.get_by_role('button', name='刷新', exact=True)
+        with page.expect_request(lambda request: '/api/files/browse?' in request.url and 'path=Media' in request.url):
+            refresh.click()
+        expect(page.locator('[data-wb="browser"] .file-row')).to_have_count(2)
+        search.fill('ISODE02')
         expect(page.locator('[data-wb="browser"] .file-row')).to_have_count(1)
         expect(page.locator('.file-row[data-path="Media/episode02.mp4"]')).to_be_visible()
         search.fill('')
@@ -502,12 +535,10 @@ def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server
         assert page.evaluate('wb.pendingSelection.length') == 2
 
         up.click()
-        expect(page.locator('[data-wb="resource-browser-note"]')).to_contain_text('根目录')
+        expect(page.get_by_role('navigation', name='当前位置')).to_have_text('资源下载目录')
         expect(page.locator('[data-wb="selection-count"]')).to_have_text('未选择')
-        page.locator('.file-row[data-path="Media"] .file-check').check()
-        expect(page.locator('[data-wb="selection-list"]')).to_contain_text('目录')
-        expect(page.locator('[data-wb="selection-count"]')).to_have_text('1 项')
-        page.get_by_role('button', name='使用所选资源', exact=True).click()
+        page.locator('.file-row[data-path="Media"]').dblclick()
+        page.get_by_role('button', name='使用当前目录', exact=True).click()
         expect(studio).to_be_visible()
         expect(picker).to_be_hidden()
         assert page.evaluate("wb.resources[0].relative_path === 'Media' && wb.resources[0].kind === 'directory'")
@@ -516,7 +547,7 @@ def test_first_level_resource_picker_browse_stage_confirm_and_reopen(live_server
 
         page.locator('[data-layout="resources"]').click()
         expect(picker).to_be_visible()
-        expect(studio).to_be_hidden()
+        expect(studio).to_be_visible()
         expect(page.locator('[data-resource-action="close"]')).to_be_visible()
         assert page.evaluate("getComputedStyle(document.body).overflowY") != 'hidden'
         page.locator('[data-resource-action="close"]').click()
@@ -625,7 +656,7 @@ def test_completed_rename_reads_authoritative_paths_and_preserves_edits(live_ser
         page.route('**/api/v2/naming/apply', execute)
         show_panel(page, None)
         show_panel(page, 'changes')
-        page.locator('[data-sheet="changes"] [data-action="apply"]').click()
+        page.locator('[data-action="apply"]').click()
         expect(page.locator('[data-wb="rename"]')).to_be_hidden()
         tasks[0] = {**tasks[0], 'status': 'completed', 'finished_at': '2026-11-04T00:00:00Z'}
         expect(page.locator('[data-wb="context-summary"]')).to_contain_text('Renamed.mp4')
@@ -1019,13 +1050,10 @@ def test_workbench_inline_progress_and_logs_preserve_mobile_form(live_server):
         page.locator('[data-resource-action="select"]').click()
         expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
 
-        tab = page.locator('[data-tab="content"]')
-        tab.focus()
-        page.keyboard.press('End')
-        expect(page.locator('[data-tab="torrent"]')).to_be_focused()
         trackers = page.locator('[data-wb="trackers"]')
+        collapse = page.locator('[data-collapse="config"]')
+        collapse.click()
         trackers.fill('https://tracker.example/announce')
-        collapse = page.locator('[data-collapse="torrent-config"]')
         collapse.click()
         expect(collapse).to_have_attribute('aria-expanded', 'false')
         assert trackers.evaluate('el => !!el.closest("[inert]")')
@@ -1055,7 +1083,7 @@ def test_workbench_inline_progress_and_logs_preserve_mobile_form(live_server):
 
         current[0] = {**task, 'status': 'failed', 'error': '合成制种错误：源不可读'}
         expect(progress).to_contain_text('合成制种错误：源不可读')
-        expect(button).to_have_text('本地制作种子')
+        expect(button).to_have_text('制作种子')
         expect(button).to_be_enabled()
         expect(page.get_by_role('link', name='下载种子')).to_have_count(0)
 
