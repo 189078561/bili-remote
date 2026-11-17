@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 from ..contracts import ResourceContext
+from .douban_references import USER_SUPPLIED_DOUBAN
 from .providers import ProviderError, identifier
 
 _FIELDS = (
@@ -408,18 +409,7 @@ class IntroductionService:
             poster = tmdb_poster(row.get("poster_path"))
             label = f"TMDB · 第 {request.season} 季 · {text(fields['title'])}"
         elif source == "ptgen":
-            ref = canonical_reference(request.reference, source)
-            data = await self.ptgen_call("get", {"url": "https://movie.douban.com/subject/" + ref + "/", "format": "bbcode"})
-            row = data.get("data") if isinstance(data.get("data"), dict) else data
-            if row.get("site") == "douban" and row.get("id") and str(row["id"]) != ref:
-                raise ProviderError("invalid_schema", "PT-Gen 返回的豆瓣条目与所填 ID 不一致。")
-            formatted = clean_ptgen_format((row.get("formats") or {}).get("bbcode") or row.get("format") or data.get("format"))
-            fields = ptgen_fields(row, ref)
-            label = "PT-Gen · 豆瓣 " + ref
-            if formatted:
-                return {"text": complete_ptgen_format(formatted, fields), "label": label, "poster": None, "warnings": []}
-            if not any(value for key, value in fields.items() if key not in {"douban_url", "translated_aliases"}):
-                raise ProviderError("empty_introduction", "PT-Gen 未返回可用资料，可尝试其他条目或直接粘贴")
+            return await self.douban(canonical_reference(request.reference, source))
         else:
             ref = canonical_reference(request.reference, source)
             fields, warnings = await self.bangumi(ref)
@@ -427,6 +417,47 @@ class IntroductionService:
         formatted = render_introduction(fields)
         return {"text": formatted, "label": label, "poster": poster, "warnings": warnings,
                 "message": "" if formatted else "此条目暂无可用简介资料，可改选来源或直接粘贴。"}
+
+    async def douban(self, reference):
+        supplied = USER_SUPPLIED_DOUBAN.get(reference, {})
+        url = "https://movie.douban.com/subject/" + reference + "/"
+        label = "PT-Gen · 豆瓣 " + reference
+        try:
+            data = await self.ptgen_call("get", {"url": url, "format": "bbcode"})
+        except ProviderError as exc:
+            if not supplied:
+                raise
+            return {
+                "text": render_introduction(supplied), "poster": None,
+                "label": "用户提供的资料 · 豆瓣 " + reference,
+                "warnings": [str(exc) + " 本次采用该条目的用户提供资料。"],
+            }
+        row = data.get("data") if isinstance(data.get("data"), dict) else data
+        remote_id = row.get("id") or row.get("sid")
+        if row.get("site") == "douban" and remote_id and str(remote_id) != reference:
+            raise ProviderError("invalid_schema", "PT-Gen 返回的豆瓣条目与所填 ID 不一致。")
+        formatted = clean_ptgen_format((row.get("formats") or {}).get("bbcode") or row.get("format") or data.get("format"))
+        fields = ptgen_fields(row, reference)
+        content = complete_ptgen_format(formatted, fields)
+        if content == "◎豆瓣链接　" + url and not supplied:
+            raise ProviderError("empty_introduction", "PT-Gen 未返回可用资料，可尝试其他条目或直接粘贴")
+
+        labels = {**{key: name for name, key in _FIELDS}, "overview": "简　　介"}
+        def missing(key):
+            return not re.search(r"(?m)^◎" + _heading_pattern(labels[key]) + r"(?:$|[^\S\r\n])", content)
+
+        supplement = {key: value for key, value in supplied.items() if missing(key)}
+        warnings = []
+        if supplement:
+            content = complete_ptgen_format(formatted, {**fields, **supplement})
+            warnings.append("已用该条目的用户提供资料补充：" +
+                            "、".join(labels[key].replace("　", "") for key in supplement) + "。")
+        elif not supplied:
+            missing_labels = [labels[key].replace("　", "") for key in
+                              ("aliases", "languages", "directors", "writers", "cast") if missing(key)]
+            if len(missing_labels) >= 3:
+                warnings.append("PT-Gen 本次未返回：" + "、".join(missing_labels) + "。可在简介中补充。")
+        return {"text": content, "poster": None, "label": label, "warnings": warnings}
 
     async def bangumi(self, ref):
         provider = self.provider("bangumi")

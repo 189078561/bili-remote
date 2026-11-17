@@ -85,6 +85,46 @@ def test_ptgen_universal_formats_douban_chapter_with_all_cast(with_format):
     assert result["text"].splitlines() == expected
 
 
+@pytest.mark.parametrize("status", [200, 401])
+def test_exact_douban_subject_completes_legacy_mobile_response(status):
+    mobile = {
+        "site": "douban", "sid": "37457082", "success": True,
+        "format": (
+            "◎片　　名　凡人修仙传 年番4\n◎年　　代　2026\n◎产　　地　中国大陆\n"
+            "◎类　　别　动作 / 动画 / 奇幻\n◎上映日期　2026-06-13(中国大陆)\n"
+            "◎豆瓣评分　/10 from 0 users\n◎片　　长　20分钟\n\n"
+            "◎简　　介\n\n　　韩立返回天南境内途中，从慕兰法士手中救下了旧识。"
+        ),
+    }
+
+    def response(request):
+        assert request.url.params["url"] == "https://movie.douban.com/subject/37457082/"
+        return httpx.Response(status, json=mobile if status == 200 else {})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+            service = IntroductionService({"ptgen": PTGenProvider("https://test.example/info", client=client)})
+            return await service.build(IntroductionRequest(source="ptgen", reference="37457082"))
+
+    result = asyncio.run(run())
+    intro = result["text"]
+    alias_line = intro.splitlines()[0]
+    assert alias_line.startswith("◎译　　名　凡人修仙传 第177-228集")
+    assert alias_line.count(" / ") == 6 and alias_line.endswith("A Mortal's Journey: Fighting in Mulan Grassland")
+    assert "◎语　　言　汉语普通话" in intro and "◎集　　数　52" in intro
+    assert "◎导　　演　王裕仁 Yuren Wang / 林宇昂 Yuang Lin" in intro
+    assert "◎编　　剧　王裕仁 Yuren Wang / 李圆 Yuan Li" in intro
+    cast = intro.split("◎主　　演　", 1)[1].split("\n\n", 1)[0].splitlines()
+    assert len(cast) == 21 and cast[0] == "钱文青 Wenqing Qian" and cast[-1] == "　　　　　刘三木 Sanmu Liu"
+    assert "豆瓣评分" not in intro
+    if status == 200:
+        assert "已用该条目的用户提供资料补充" in result["warnings"][0]
+        assert intro.endswith("救下了旧识。")
+    else:
+        assert "用户提供的资料" in result["label"]
+        assert intro.endswith("一战成名！")
+
+
 @pytest.mark.parametrize("status, payload, expected", [
     (401, {}, "API Key"),
     (403, {}, "豆瓣访问状态"),
@@ -101,10 +141,10 @@ def test_douban_failure_does_not_return_other_metadata(status, payload, expected
         async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
             service = IntroductionService({"ptgen": PTGenProvider("https://test.example/info", client=client)})
             with pytest.raises(ProviderError, match=expected):
-                await service.build(IntroductionRequest(source="ptgen", reference="37457082"))
+                await service.build(IntroductionRequest(source="ptgen", reference="12346"))
 
     asyncio.run(run())
-    assert seen == ["https://movie.douban.com/subject/37457082/"]
+    assert seen == ["https://movie.douban.com/subject/12346/"]
 
 
 def test_tmdb_season_uses_only_selected_season_fields_and_cover():
