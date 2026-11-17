@@ -22,7 +22,8 @@ _FIELDS = (
     ("主　　演", "cast"), ("配音演员", "voice"),
     ("制作公司", "production"), ("原　　作", "original_work"), ("音　　乐", "music"),
 )
-_PEOPLE = {"directors", "writers", "cast", "voice"}
+_MULTILINE = {"cast", "voice"}
+_LIST_FIELDS = {"aliases", "region", "genres", "languages", "production", "original_work", "music", "directors", "writers", *_MULTILINE}
 _EMPTY = {"", "-", "—", "暂无", "暂无评分", "未知", "未评分", "n/a", "none", "null"}
 _LEADING_COVER = re.compile(r"^\s*(?:\[center\]\s*)?\[img\][^\r\n\[]+\[/img\](?:\s*\[/center\])?\s*", re.I)
 Source = Literal["current", "tmdb_season", "ptgen", "bangumi"]
@@ -63,7 +64,7 @@ def count(value):
 
 def runtimes(value):
     entries = value if isinstance(value, list) else [value]
-    return " / ".join(dict.fromkeys(f"{item} 分钟" if item.isdigit() else item
+    return " / ".join(dict.fromkeys(f"{item}分钟" if item.isdigit() else item
                                     for value in entries if (item := text(value)) and item != "0"))
 
 
@@ -118,13 +119,15 @@ def render_introduction(fields):
     for label, key in _FIELDS:
         if key == "aliases":
             entries = [item for item in names(fields.get(key)) if item != original]
-        elif key in _PEOPLE or key in {"region", "genres", "languages", "production", "original_work", "music"}:
+        elif key in _LIST_FIELDS:
             entries = names(fields.get(key))
         else:
             entry = text(fields.get(key))
+            if key == "runtime":
+                entry = re.sub(r"(?<=\d)\s+分钟", "分钟", entry)
             entries = [entry] if entry else []
         if entries:
-            separator = "\n　　　\u3000\u3000" if key in _PEOPLE else " / "
+            separator = "\n　　　　　" if key in _MULTILINE else " / "
             lines.append("◎" + label + "　" + separator.join(entries))
     overview = text(fields.get("overview"))
     if overview:
@@ -158,47 +161,53 @@ def clean_ptgen_format(formatted):
 
 
 def complete_ptgen_format(formatted, fields):
-    if not formatted:
-        return render_introduction(fields)
-    headings = re.findall(r"(?m)^\s*◎([^\r\n]+)", formatted)
-    if not headings:
+    """Render one PT-Gen entry, retaining unrecognized fields and full lists."""
+    headers = list(re.finditer(r"(?m)^[^\S\r\n]*◎[^\S\r\n]*([^\r\n]*)", formatted))
+    if not headers:
         return render_introduction({**fields, "overview": fields.get("overview") or formatted})
-    missing = {}
-    list_labels = {"aliases", *_PEOPLE}
-    lines = formatted.splitlines()
-    sections = [index for index, line in enumerate(lines) if re.match(r"^\s*◎", line)]
-    for label, key in _FIELDS:
-        prefix = re.sub(r"\s+", "", label).casefold()
-        located = next((index for index, heading in enumerate(headings)
-                        if re.sub(r"\s+", "", heading).casefold().startswith(prefix)), None)
-        if located is None:
-            missing[key] = fields.get(key)
+
+    matched = {key: re.compile(_heading_pattern(label) + r"(?=$|[\s:：])", re.I) for label, key in _FIELDS}
+    combined = dict(fields)
+    extra = []
+    after_overview = []
+    seen_overview = False
+    prefix = formatted[:headers[0].start()].strip()
+    if prefix:
+        extra.append(prefix)
+    for index, heading in enumerate(headers):
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(formatted)
+        block = formatted[heading.start():end].strip()
+        label = heading[1]
+        if summary_heading := re.match(r"简\s*介(?=$|[\s:：])", label):
+            overview = (label[summary_heading.end():].lstrip(" :：　") + formatted[heading.end():end]).strip()
+            if overview:
+                combined["overview"] = overview
+            seen_overview = True
             continue
-        if key not in list_labels:
-            continue
-        start = sections[located]
-        end = sections[located + 1] if located + 1 < len(sections) else len(lines)
-        head_pattern = _heading_pattern(label)
-        head = re.sub(r"^\s*◎\s*" + head_pattern + r"[\s:：]*", "", lines[start], flags=re.I)
-        known = set(names(head))
-        tail = start
-        for index in range(start + 1, end):
-            if not lines[index].strip() or not lines[index][0].isspace():
-                break
-            known.update(names(lines[index]))
-            tail = index
-        additions = [entry for entry in names(fields.get(key)) if entry not in known
-                     and (key != "aliases" or entry != text(fields.get("title")))]
-        if additions:
-            separator = "\n　　　　　" if key in _PEOPLE else " / "
-            lines[tail] += separator + separator.join(additions)
-    formatted = "\n".join(lines)
-    supplement = render_introduction(missing)
-    intro = re.search(r"(?m)^\s*◎简\s*介", formatted)
-    if intro and supplement:
-        return "\n\n".join(block for block in (formatted[:intro.start()].rstrip(), supplement, formatted[intro.start():].lstrip()) if block)
-    body = render_introduction({"overview": fields.get("overview")}) if not intro else ""
-    return "\n\n".join(block for block in (formatted, supplement, body) if block)
+        for key, pattern in matched.items():
+            found = pattern.match(label)
+            if not found:
+                continue
+            raw = (label[found.end():].lstrip(" :：　") + formatted[heading.end():end]).strip()
+            if key in _LIST_FIELDS:
+                structured = names(fields.get(key))
+                # Universal renders the same alias array with bare slashes.
+                if key == "aliases" and raw.replace(" / ", "/") in {
+                    "/".join(structured), "/".join(names(fields.get("translated_aliases")))
+                }:
+                    combined[key] = structured
+                else:
+                    combined[key] = names([*names(raw), *structured])
+            elif raw:
+                combined[key] = raw
+            break
+        else:
+            (after_overview if seen_overview else extra).append(block)
+
+    overview = render_introduction({"overview": combined.pop("overview", None)})
+    working = render_introduction(combined)
+    meta = "\n".join(block for block in [working, *extra] if block)
+    return "\n\n".join(block for block in (meta, overview, *after_overview) if block)
 
 
 def context_fields(context, ref=None):
@@ -273,17 +282,37 @@ def tmdb_fields(row, *, season=False):
     }
 
 
+def ptgen_rating(row, site):
+    structured = (row.get("ratings") or {}).get(site)
+    if isinstance(structured, dict):
+        if structured.get("votes") is not None and not count(structured["votes"]):
+            return ""
+        valid = rating(structured.get("formatted")) or rating({**structured, "score": structured.get("average")})
+        if valid:
+            return valid
+    raw = rating(row.get(site + "_rating") or row.get(site + "_score"))
+    if raw:
+        return raw
+    average, votes = row.get(site + "_rating_average"), row.get(site + "_votes")
+    return rating(f"{average}/10 from {votes} users") if count(votes) else ""
+
+
 def ptgen_fields(row, reference):
-    aliases = [alias for key in ("chinese_title", "translated_title", "trans_title", "translation", "aliases", "aka", "alt_title") for alias in names(row.get(key))]
+    translated = names(row.get("trans_title"))
+    aliases = list(translated)
+    for key in ("translated_title", "translation", "aliases", "aka", "alt_title", "chinese_title"):
+        aliases.extend(names(row.get(key)))
+    original = row.get("this_title") or row.get("original_title") or row.get("foreign_title") or row.get("title") or row.get("chinese_title")
+    imdb = (row.get("ratings") or {}).get("imdb") or {}
     return {
-        "aliases": aliases, "title": row.get("foreign_title") or row.get("original_title") or row.get("title") or row.get("chinese_title"),
+        "aliases": aliases, "translated_aliases": translated, "title": " / ".join(names(original)),
         "year": row.get("year"), "region": row.get("region") or row.get("countries"),
         "genres": row.get("genre") or row.get("genres"), "languages": row.get("language") or row.get("languages"),
-        "date": " / ".join(names(row.get("release_date") or row.get("releaseDate"))),
+        "date": " / ".join(names(row.get("playdate") or row.get("release_date") or row.get("releaseDate"))),
         "douban_url": "https://movie.douban.com/subject/" + reference + "/",
-        "douban_rating": rating(row.get("douban_rating") or row.get("douban_score")),
-        "imdb_url": _link(row.get("imdb_url") or row.get("imdb_link"), "imdb"),
-        "imdb_rating": rating(row.get("imdb_rating") or row.get("imdb_score")),
+        "douban_rating": ptgen_rating(row, "douban"),
+        "imdb_url": _link(imdb.get("link") or row.get("imdb_url") or row.get("imdb_link"), "imdb"),
+        "imdb_rating": ptgen_rating(row, "imdb"),
         "season_count": count(row.get("seasons")), "episode_count": count(row.get("episodes") or row.get("episode_count")),
         "runtime": runtimes(row.get("runtime") or row.get("duration") or row.get("length")),
         "directors": row.get("director") or row.get("directors"), "writers": row.get("writer") or row.get("writers") or row.get("screenwriter"),
@@ -362,14 +391,14 @@ class IntroductionService:
             label = f"TMDB · 第 {request.season} 季 · {text(fields['title'])}"
         elif source == "ptgen":
             ref = canonical_reference(request.reference, source)
-            data = await self.provider("ptgen").get({"url": "https://movie.douban.com/subject/" + ref + "/"})
+            data = await self.provider("ptgen").get({"url": "https://movie.douban.com/subject/" + ref + "/", "format": "bbcode"})
             row = data.get("data") if isinstance(data.get("data"), dict) else data
-            formatted = clean_ptgen_format(row.get("format") or data.get("format"))
+            formatted = clean_ptgen_format((row.get("formats") or {}).get("bbcode") or row.get("format") or data.get("format"))
             fields = ptgen_fields(row, ref)
             label = "PT-Gen · 豆瓣 " + ref
             if formatted:
                 return {"text": complete_ptgen_format(formatted, fields), "label": label, "poster": None, "warnings": []}
-            if not any(value for key, value in fields.items() if key != "douban_url"):
+            if not any(value for key, value in fields.items() if key not in {"douban_url", "translated_aliases"}):
                 raise ProviderError("empty_introduction", "PT-Gen 未返回可用资料，可尝试其他条目或直接粘贴")
         else:
             ref = canonical_reference(request.reference, source)

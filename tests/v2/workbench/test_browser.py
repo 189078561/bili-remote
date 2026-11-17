@@ -75,7 +75,7 @@ def context(revision=1):
                                 "sources": {"naming_rule.template_id": {"scope": "default", "reason": "filename_episode", "source_ref": "Media/episode01.mp4"}}}}
 
 
-def v2_fixture(page, requests):
+def v2_fixture(page, requests, identity=None):
     """Explicit test-only service boundary; production UI contains no sample responses."""
     def respond(route):
         request = route.request
@@ -85,6 +85,8 @@ def v2_fixture(page, requests):
         rev = (payload.get("context") or {}).get("revision", 1)
         if path == "resources/resolve":
             resolved = context(rev + 1)
+            if identity:
+                resolved['identity'] = identity
             resolved['resources'] = payload['resources']
             resolved['files'][0]['ref'] = payload['resources'][0]
             result = {"context": resolved, "changes": [], "capabilities": []}
@@ -1234,6 +1236,37 @@ def test_independent_introduction_late_result_requires_review_and_copies_full_te
         page.evaluate("navigator.clipboard.writeText = async value => {window.copiedIntro=value;}")
         page.get_by_role('button', name='复制完整简介').click()
         assert page.evaluate('window.copiedIntro') == intro
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_matched_series_prompts_for_douban_chapter(live_server):
+    base_url, _ = live_server
+    playwright, browser, page, errors = browser_session(base_url)
+    requests = []
+    try:
+        v2_fixture(page, requests, {"media_type": "anime", "tmdb_id": "8"})
+        intro = "◎片　　名　凡人修仙传 年番4\n◎年　　代　2026"
+
+        def introduction(route):
+            requests.append(("publishing/introduction", route.request.post_data_json))
+            route.fulfill(json={"text": intro, "label": "PT-Gen · 豆瓣 37457082", "warnings": []})
+
+        page.route("**/api/v2/publishing/introduction", introduction)
+        mount(page)
+        page.evaluate("wb.select([{root_key:'downloads',relative_path:'Media/episode01.mp4',kind:'video',fingerprint:'fixture'}])")
+        show_panel(page)
+        expect(page.locator("[data-wb=intro-source]")).to_have_value("ptgen")
+        expect(page.locator("[data-wb=intro-status]")).to_contain_text("篇章的豆瓣 ID")
+        assert not [payload for name, payload in requests if name == "publishing/introduction"]
+        page.locator("[data-wb=intro-query]").fill("37457082")
+        page.locator("[data-wb=intro-fetch]").click()
+        expect(page.locator("[data-edit=overview]")).to_have_value(intro)
+        assert [payload for name, payload in requests if name == "publishing/introduction"] == [
+            {"source": "ptgen", "reference": "37457082"}
+        ]
         assert not errors, errors
     finally:
         browser.close()

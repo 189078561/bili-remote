@@ -909,6 +909,13 @@
         this.editVersion++;
         this.scheduleCompose();
       }
+      if (["series", "anime"].includes(identity.media_type) && (identity.tmdb_id || identity.bangumi_id)) {
+        this.resetIntroductionLookup();
+        this.el("intro-source").value = "ptgen";
+        this.updateIntroductionControls();
+        this.el("intro-status").textContent = "输入该篇章的豆瓣 ID 或链接，即可生成对应简介。整部作品和 TMDB 分季可在资料来源中另选。";
+        return;
+      }
       void this.loadIntroduction({source: "current", context, automatic: true});
     }
     async lookupIntroduction() {

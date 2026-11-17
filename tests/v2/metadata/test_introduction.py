@@ -22,6 +22,7 @@ def test_ptgen_preserves_extended_fields_cast_and_aliases_without_placeholder_sc
     calls = []
 
     def response(request):
+        assert request.url.params["format"] == "bbcode"
         calls.append(request.url.params["url"])
         return httpx.Response(200, json={"success": True, "data": {
             "format": formatted, "language": ["汉语普通话"], "director": ["导演甲", "导演乙"],
@@ -42,6 +43,46 @@ def test_ptgen_preserves_extended_fields_cast_and_aliases_without_placeholder_sc
     assert "◎豆瓣链接　https://movie.douban.com/subject/12345/" in intro
     assert "[img]" not in intro and "0 users" not in intro.replace("390 users", "")
     assert all(field not in intro for field in ("◎豆瓣评分", "◎产　　地", "◎类　　别"))
+
+
+@pytest.mark.parametrize("with_format", [True, False])
+def test_ptgen_universal_formats_douban_chapter_with_all_cast(with_format):
+    aliases = ["凡人修仙传 第177-228集", "凡人修仙传 第五季", "A Mortal's Journey 5", "Fate/stay night"]
+    cast = ["钱文青 Wenqing Qian", *(f"演员 {n}" for n in range(2, 21)), "刘三木 Sanmu Liu"]
+    overview = "韩立返回天南境内途中，从慕兰法士手中救下了旧识。"
+    row = {
+        "trans_title": aliases, "this_title": ["凡人修仙传 年番4"], "chinese_title": "凡人修仙传 年番4",
+        "foreign_title": "A Mortal's Journey", "year": 2026, "region": ["中国大陆"], "genre": ["动作", "动画", "奇幻"],
+        "language": ["汉语普通话"], "playdate": ["2026-06-13(中国大陆)"], "episodes": 52, "duration": "20 分钟",
+        "ratings": {"douban": {"formatted": "/10 from 0 users", "votes": 0}},
+        "director": [{"name": "王裕仁 Yuren Wang"}, {"name": "林宇昂 Yuang Lin"}],
+        "writer": [{"name": "王裕仁 Yuren Wang"}, {"name": "李圆 Yuan Li"}],
+        "cast": [{"name": name} for name in cast], "introduction": overview,
+    }
+    if with_format:
+        row["formats"] = {"bbcode": (
+            f"◎译　　名　{'/'.join(aliases)}\n◎片　　名　凡人修仙传 年番4\n"
+            "◎片　　长　20 分钟\n◎豆瓣评分　/10 from 0 users\n◎主　　演　"
+            + "\n　　　　　".join(cast[:15]) + f"\n\n◎简　　介\n\n　　{overview}\n\n◎标　　签　动画"
+        )}
+
+    class Provider:
+        async def get(self, query):
+            return row
+
+    service = IntroductionService({"ptgen": Provider()})
+    result = asyncio.run(service.build(IntroductionRequest(source="ptgen", reference="37457082")))
+    expected = [
+        "◎译　　名　" + " / ".join(aliases), "◎片　　名　凡人修仙传 年番4", "◎年　　代　2026",
+        "◎产　　地　中国大陆", "◎类　　别　动作 / 动画 / 奇幻", "◎语　　言　汉语普通话",
+        "◎上映日期　2026-06-13(中国大陆)", "◎豆瓣链接　https://movie.douban.com/subject/37457082/",
+        "◎集　　数　52", "◎片　　长　20分钟", "◎导　　演　王裕仁 Yuren Wang / 林宇昂 Yuang Lin",
+        "◎编　　剧　王裕仁 Yuren Wang / 李圆 Yuan Li", "◎主　　演　" + cast[0],
+        *("　　　　　" + name for name in cast[1:]), "", "◎简　　介", "", "　　" + overview,
+    ]
+    if with_format:
+        expected.extend(["", "◎标　　签　动画"])
+    assert result["text"].splitlines() == expected
 
 
 def test_tmdb_season_uses_only_selected_season_fields_and_cover():
@@ -74,7 +115,7 @@ def test_tmdb_season_uses_only_selected_season_fields_and_cover():
     assert seasons["items"][0]["season"] == 4
     assert paths == ["/3/tv/8", "/3/tv/8/season/4"]
     intro = result["text"]
-    assert all(label in intro for label in ("2026 篇章剧情", "译名 12", "演员 16", "当季导演", "当季编剧", "22 分钟 / 24 分钟"))
+    assert all(label in intro for label in ("2026 篇章剧情", "译名 12", "演员 16", "当季导演", "当季编剧", "22分钟 / 24分钟"))
     assert all(label not in intro for label in ("2020", "整部剧集", "豆瓣评分", "IMDb评分", "9.5", "◎产　　地"))
     assert result["poster"] == "https://image.tmdb.org/t/p/original/season4.jpg"
     combined = PublishingService().compose(
@@ -121,7 +162,7 @@ def test_intro_api_and_preview_preserve_chosen_block_without_naming_data(setting
 
     class Provider:
         async def get(self, query):
-            assert query == {"url": "https://movie.douban.com/subject/18282/"}
+            assert query == {"url": "https://movie.douban.com/subject/18282/", "format": "bbcode"}
             return {"data": {"format": "◎片　　名　独立篇章\n◎年　　代　2026\n\n◎简　　介\n\n　　篇章剧情。"}}
 
     with TestClient(app) as client:
