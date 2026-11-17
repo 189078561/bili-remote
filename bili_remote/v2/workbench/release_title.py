@@ -1,8 +1,7 @@
 """Independent PT main-title builder, from structured values, never a filename."""
-import re
 from string import Formatter
 from ..naming.errors import NamingError
-from ..naming.templates import FIELD_MAP, normalize_codec_value, value, season_common_probe
+from ..naming.templates import FIELD_MAP, effective_season, normalize_codec_value, normalize_naming_text, value, season_common_probe
 
 class ReleaseTitleBuilder:
     def build(self, context, rule=None):
@@ -23,7 +22,7 @@ class ReleaseTitleBuilder:
             raise NamingError('invalid_title','主标题名称候选不存在')
         values={'Title':candidate or value(context.get('selected_title')),
             'Year':value(context.get('metadata',{}).get('year')),
-            'Season':value(episode.get('season')), 'Episode':None if season else value(episode.get('episode')),
+            'Season':effective_season(episode, naming), 'Episode':None if season else value(episode.get('episode')),
             'Source':value(naming.get('source')), 'Group':value(naming.get('group'))}
         values.update({field:value(probe.get(key)) for field,key in FIELD_MAP.items()})
         overrides=rule.get('overrides') or {}
@@ -36,9 +35,15 @@ class ReleaseTitleBuilder:
                 values[key]=value(item)
             elif isinstance(item,(str,int)) and not isinstance(item,bool): values[key]=item
             else: raise NamingError('invalid_release_title_rule','覆盖值无效')
+        if naming.get('episode_numbering') == 'continuous':
+            values['Season'] = None
+        for key, minimum in (('Season', 0), ('Episode', 1)):
+            number = values[key]
+            if number is not None and (type(number) is not int or number < minimum):
+                raise NamingError('invalid_episode', '季号须为非负整数，集号须为正整数')
         values['VideoCodec']=normalize_codec_value('VideoCodec',values.get('VideoCodec'))
         values['AudioCodec']=normalize_codec_value('AudioCodec',values.get('AudioCodec'))
-        series=(context.get('identity') or {}).get('media_type') in {'series','anime'}
+        series=(context.get('identity') or {}).get('media_type') in {'series','anime'} or naming.get('template_id') in {'series','anime','season'}
         default='{Title} {Year}'+(' S{Season:00}'+('' if season else 'E{Episode:00}') if series else '')+' {Resolution} {Source} {VideoCodec} {AudioCodec}-{Group}'
         template=rule.get('template',default)
         if not isinstance(template,str) or not 1<=len(template)<=500:
@@ -78,9 +83,8 @@ class ReleaseTitleBuilder:
                         try: item=f"{item['numerator']/item['denominator']:.3f}".rstrip('0').rstrip('.')
                         except (KeyError,TypeError,ZeroDivisionError): item=''
                     rendered.extend([' ',str(item)])
-        text=re.sub(r'\s+',' ',''.join(rendered)).strip(' .-_')
-        separator=rule.get('separator',' ')
+        separator=rule.get('separator','.')
         if separator not in {' ','.','_','-'}:
             raise NamingError('invalid_release_title_rule','主标题分隔符无效')
-        if separator!=' ': text=text.replace(' ',separator)
+        text=normalize_naming_text(''.join(rendered), separator)
         return {'text':text,'warnings':warnings,'context_revision':context['revision']}

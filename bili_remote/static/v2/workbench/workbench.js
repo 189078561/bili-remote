@@ -216,7 +216,7 @@
       if (!host) throw new Error("工作台缺少挂载节点");
       this.host = host; this.api = api; this.pollInterval = pollInterval;
       this.context = null; this.resources = []; this.pendingSelection = []; this.selectionSignature = null; this.selectionVersion = 0; this.origins = []; this.epoch = 0; this.versions = {}; this.dirty = new Set(); this.editVersion = 0;
-      this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.previewKey = null; this.previewUndo = false; this.renameBatch = null; this.episodeOverrides = {}; this.content = ""; this.images = []; this.artifacts = []; this.links = [];
+      this.fields = {release_title: "", subtitle: "", overview: ""}; this.preview = null; this.previewKey = null; this.previewUndo = false; this.renameBatch = null; this.episodeOverrides = {}; this.episodeEdits = new Set(); this.content = ""; this.images = []; this.artifacts = []; this.links = [];
       this.fieldVersions = {}; this.tasks = new Map(); this.jobs = new Map(); this.notified = new Set(); this.applied = new Set(); this.pending = new Set(); this.timers = new Set(); this.abort = new AbortController(); this.destroyed = false;
       this.cancelPending = new Set(); this.stopAcks = new Set(); this.actionErrors = new Map();
       this.toolTasks = new Map(); this.toolErrors = new Map(); this.resultErrors = new Map();
@@ -293,7 +293,8 @@
       this.host.addEventListener("input", event => {
         const name = event.target.dataset.edit;
         if (name) { this.fieldVersions[name] = (this.fieldVersions[name] || 0) + 1; this.dirty.add(name); this.setField(name, event.target.value); this.editVersion++; this.scheduleCompose(); }
-        if (["naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode", "scope", "naming-type", "source-rule", "group-rule", "episode-mode", "start-episode", "episode-step", "episode-direction", "episode-offset"].includes(event.target.dataset.wb)) this.scheduleAdjustment(event.target.dataset.wb);
+        if (["season", "episode"].includes(event.target.dataset.wb)) this.episodeEdits.add(event.target.dataset.wb);
+        if (["episode-numbering", "naming-rule", "subtitle-rule", "title-rule", "cast-limit", "selected-title", "season", "episode", "scope", "naming-type", "source-rule", "group-rule", "episode-mode", "start-episode", "episode-step", "episode-direction", "episode-offset"].includes(event.target.dataset.wb)) this.scheduleAdjustment(event.target.dataset.wb);
         if (["title-zh", "title-en", "title-combination"].includes(event.target.dataset.wb)) {
           this.nameEdits?.add(event.target.dataset.wb);
           this.el("selected-title").value = this.combinedTitle();
@@ -304,6 +305,11 @@
         }
       }, opts);
       this.el("query").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); this.run("search", this.button("search")); } }, opts);
+      this.host.addEventListener("v2:naming-edited", () => {
+        this.cancelTimer(this.adjustmentTimer);
+        this.cancelTimer(this.overrideTimer);
+        this.invalidateRename();
+      }, opts);
       this.el("format").addEventListener("change", () => { this.editVersion++; this.scheduleCompose(); }, opts);
       this.el("title-choice").addEventListener("change", () => {
         const title = this.context?.titles?.find(item => item.id === this.el("title-choice").value);
@@ -365,14 +371,15 @@
     }
     scheduleAdjustment(field) {
       this.cancelTimer(this.adjustmentTimer);
+      this.cancelTimer(this.overrideTimer);
+      this.invalidateRename();
+      this.versions.context = (this.versions.context || 0) + 1;
       if (field === "selected-title") this.manualNaming = true;
       if (field === "naming-type") {
         this.namingType = this.el("naming-type").value;
         this.el("naming-rule").value = this.context?.effective_rules?.naming_rule?.templates?.[this.namingType] || "";
       }
       if (["selected-title","season","episode","scope"].includes(field)) this.pendingAdjustmentEpoch = this.epoch;
-      if (["naming-rule","subtitle-rule","title-rule","cast-limit","naming-type","source-rule","group-rule","episode-mode","start-episode","episode-step","episode-direction","episode-offset"].includes(field)) this.rememberRules();
-      this.invalidateRename(); this.versions.context = (this.versions.context || 0) + 1;
       const ticket = this.adjustmentVersion = (this.adjustmentVersion || 0) + 1, epoch = this.epoch;
       this.contextChanged(); // Also invalidates in-flight advanced naming requests.
       this.el("adjustment-status").textContent = "正在更新命名预览…";
@@ -536,6 +543,7 @@
     invalidateRename() {
       this.advancedPreview = false;
       this.versions.naming = (this.versions.naming || 0) + 1;
+      this.versions.undo = (this.versions.undo || 0) + 1;
       // Any in-flight naming/preview request now describes a stale context and
       // must not render after a parameter or selection change.
       this.previewKey = null;
@@ -594,10 +602,11 @@
       this.setCollapse("overview", false);
       this.context = null; this.origins = origins; this.dirty.clear(); this.renameBatch = null; this.el("rename-list").replaceChildren(); this.editVersion++;
       this.cancelTimer(this.composeTimer); this.contextChanged("selection");
-      this.imageTask = null; this.images = []; this.artifacts = []; this.links = []; this.renderToolProgress(); this.episodeOverrides = {}; this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
+      this.imageTask = null; this.images = []; this.artifacts = []; this.links = []; this.renderToolProgress(); this.episodeOverrides = {}; this.episodeEdits.clear(); this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
       for (const field of Object.keys(this.fields)) this.setField(field, "");
       ["images", "reports", "torrents", "upload-links", "issues", "candidates", "media"].forEach(name => this.el(name).replaceChildren());
       ["naming-rule", "subtitle-rule", "title-rule", "selected-title", "season", "episode", "year", "resolution", "video-codec", "audio-codec"].forEach(name => this.el(name).value = "");
+      this.el("episode-numbering").value = "auto";
       this.el("episode-mode").value = "detected";
       this.el("start-episode").value = "";
       this.el("episode-step").value = "1";
@@ -625,15 +634,19 @@
     }
     overrides() {
       const result = {episode: {scope: this.el("scope").value}};
-      for (const name of ["season", "episode"]) {
-        const input = this.el(name).value;
-        if (input !== "") { const number = Number(input); if (!Number.isInteger(number) || number < (name === "season" ? 0 : 1)) throw new Error("季号和集号必须是有效整数"); result.episode[name] = number; }
+      for (const name of this.episodeEdits) {
+        const input = this.el(name);
+        if (!input.validity.valid) throw new Error("季号须为非负整数，集号须为正整数");
+        result.episode[name] = input.value === "" ? null : Number(input.value);
       }
       if (this.el("selected-title").value.trim()) result.selected_title = this.el("selected-title").value.trim();
       return result;
     }
     namingOverrides() {
       const result = {};
+      if ([...this.el("rename-list").querySelectorAll('input[type="number"]')].some(input => !input.validity.valid)) {
+        throw new Error("逐集季号须为非负整数，集号须为正整数");
+      }
       if (Object.keys(this.episodeOverrides).length) result.episode_overrides = {...this.episodeOverrides};
       const fileValues = {};
       const year = this.el("year").value.trim();
@@ -656,7 +669,14 @@
       if (this.destroyed) return;
       this.cancelTimer(this.overrideTimer);
       this.invalidateRename();
-      this.overrideTimer = this.later(() => { if (this.context && !this.destroyed) this.naming().catch(error => this.notice(error.message, true)); }, 320);
+      this.contextChanged();
+      this.overrideTimer = this.later(async () => {
+        if (!this.context || this.destroyed || this.timers.has(this.adjustmentTimer)) return;
+        try {
+          if (this.pendingAdjustmentEpoch === this.epoch) await this.resolve(null, this.overrides());
+          else { await this.naming(); await this.generate("release_title"); }
+        } catch(error) { this.notice(error.message, true); }
+      }, 320);
     }
     async resolve(selection = null, manual_overrides = {}, candidateButton = null) {
       if (!this.resources.length) throw new Error("请先选择资源");
@@ -741,6 +761,7 @@
       this.el("naming-rule").value = ctx.effective_rules?.naming_rule?.templates?.[this.namingType] || "";
       for(const key of ['source','group']){const rule=ctx.effective_rules?.naming_rule?.[key];this.el(`${key}-rule`).value=(typeof rule==='object'?rule?.value:rule)||(key==='source'?'WEB-DL':'HDVWEB');}
       const batch = ctx.effective_rules?.naming_rule || {};
+      this.el("episode-numbering").value = batch.episode_numbering || "auto";
       this.el("episode-mode").value = batch.episode_mode || "detected";
       this.el("start-episode").value = batch.start_episode ?? 1;
       this.el("episode-step").value = batch.episode_step ?? 1;
@@ -784,7 +805,7 @@
           if (!Number.isInteger(offset) || Math.abs(offset) > 100000) throw new Error("集数偏移必须是整数，且绝对值不超过 100000");
           episodeRules.offset = offset;
         }
-        return {...rule, ...values, ...(this.el("selected-title").value.trim() ? {custom_title: this.el("selected-title").value.trim(), selected_title_id: undefined} : {}), template_id:kind, templates, episode_mode: episodeMode,
+        return {...rule, ...values, ...(this.el("selected-title").value.trim() ? {custom_title: this.el("selected-title").value.trim(), selected_title_id: undefined} : {}), template_id:kind, templates, episode_numbering: this.el("episode-numbering").value, episode_mode: episodeMode,
           start_episode: startEpisode === "" ? (rule.start_episode ?? 1) : Number(startEpisode),
           episode_step: episodeStep === "" ? (rule.episode_step ?? 1) : Number(episodeStep),
           episode_direction: episodeDirection,
@@ -845,7 +866,11 @@
         this.pendingReplacement = null;
       }
       const current = this.stamp(name), revision = this.context.revision, edit = this.fields[name], fieldVersion = this.fieldVersions[name] || 0, wasDirty = this.dirty.has(name);
-      const result = name === "release_title" ? await this.api.title(this.context, this.readRule("title-rule")) : await this.api.subtitle(this.context, this.readRule("subtitle-rule", this.context.effective_rules?.subtitle_rule || {}));
+      const titleRule = this.readRule("title-rule");
+      const titleOverrides = Object.fromEntries([["year", "Year"], ["resolution", "Resolution"], ["video-codec", "VideoCodec"], ["audio-codec", "AudioCodec"]]
+        .filter(([control]) => this.nameEdits?.has(control) && this.el(control).value.trim())
+        .map(([control, field]) => [field, this.el(control).value.trim()]));
+      const result = name === "release_title" ? await this.api.title(this.context, {...titleRule, ...(Object.keys(titleOverrides).length ? {overrides: titleOverrides} : {})}) : await this.api.subtitle(this.context, this.readRule("subtitle-rule", this.context.effective_rules?.subtitle_rule || {}));
       if (!current() || this.context?.revision !== revision || result.context_revision !== revision || this.fields[name] !== edit || fieldVersion !== (this.fieldVersions[name] || 0) || (!wasDirty && this.dirty.has(name))) return;
       this.dirty.delete(name); this.setField(name, result.text); this.editVersion++; this.scheduleCompose();
       const warning = this.host.querySelector(`[data-lock="${name}"]`);
@@ -905,20 +930,24 @@
         if (editable && !op.sidecar_of) {
           const path = op.source.relative_path;
           const file = files.get(path);
-          const label = node("label", null, "wb-rename-episode"); label.append(node("span", "集号"));
-          const input = node("input"); input.type = "number"; input.min = "1"; input.step = "1";
-          input.value = Object.prototype.hasOwnProperty.call(this.episodeOverrides, path) ? this.episodeOverrides[path] : val(file?.episode?.episode);
-          input.addEventListener("input", () => {
-            const raw = input.value.trim();
-            if (raw === "") delete this.episodeOverrides[path];
-            else {
-              const number = Number(raw);
-              if (!Number.isInteger(number) || number < 1) { this.notice("集号必须是正整数", true); return; }
-              this.episodeOverrides[path] = number;
-            }
-            this.scheduleNamingOverride();
-          });
-          label.append(input); row.append(label);
+          if (file) for (const [key, caption, minimum] of [["season", "季号", 0], ["episode", "集号", 1]]) {
+            if (key === "season" && this.el("episode-numbering").value === "continuous") continue;
+            const label = node("label", null, "wb-rename-episode"); label.append(node("span", caption));
+            const input = node("input"); input.type = "number"; input.min = String(minimum); input.step = "1";
+            const proposed = preview.file_episodes?.[path];
+            input.value = this.episodeOverrides[path]?.[key] ?? (proposed ? proposed[key] ?? "" : val(file.episode?.[key]));
+            input.addEventListener("input", () => {
+              const values = {...this.episodeOverrides[path]};
+              if (input.validity.valid) {
+                if (input.value === "") delete values[key];
+                else values[key] = Number(input.value);
+              }
+              if (Object.keys(values).length) this.episodeOverrides[path] = values;
+              else delete this.episodeOverrides[path];
+              this.scheduleNamingOverride();
+            });
+            label.append(input); row.append(label);
+          }
         }
         this.el("rename-list").append(row);
       }
@@ -930,9 +959,13 @@
     async naming() {
       if (!this.context) return;
       const current = this.stamp("naming"), revision = this.context.revision;
-      const preview = await this.api.naming(this.context, this.namingOverrides(), this.readRule("naming-rule", this.context.effective_rules?.naming_rule || {}));
+      const rule = this.readRule("naming-rule", this.context.effective_rules?.naming_rule || {});
+      const preview = await this.api.naming(this.context, this.namingOverrides(), rule);
       if (!current() || this.context?.revision !== revision || preview.context_revision < revision) return;
-      this.context = {...this.context, revision: preview.context_revision}; this.contextChanged();
+      this.context = {...this.context, revision: preview.context_revision,
+        episode: preview.episode || this.context.episode,
+        effective_rules: {...this.context.effective_rules, naming_rule: rule}};
+      this.contextChanged();
       this.invalidateContent(); this.scheduleCompose();
       this.preview = {...preview, undo: false}; this.previewKey = this.newKey(); this.previewUndo = false;
       this.renderPreview(this.preview);
@@ -951,9 +984,9 @@
     }
     async applyRename() {
       if (!this.applyable()) throw new Error(this.preview?.undo ? "撤销预览已失效，请重新预览" : "命名预览已失效，请重新预览");
-      const preview = this.preview, epoch = this.epoch, resources = this.resources;
-      const response = this.previewUndo ? await this.api.undoApply(preview, this.previewKey) : await this.api.apply(preview, this.previewKey);
-      this.track(response.task, {type: "rename", epoch, resources, operations: preview.operations, undo: this.previewUndo});
+      const preview = this.preview, epoch = this.epoch, resources = this.resources, undo = preview.undo;
+      const response = undo ? await this.api.undoApply(preview, this.previewKey) : await this.api.apply(preview, this.previewKey);
+      this.track(response.task, {type: "rename", epoch, resources, operations: preview.operations, undo});
       if (epoch === this.epoch && response.batch_id) {
         this.renameBatch = response.batch_id;
         this.host.dispatchEvent(new CustomEvent("v2:naming-accepted", {detail: {batchId: response.batch_id}}));

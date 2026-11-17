@@ -16,7 +16,10 @@ export function mount(container, { request, selectResources, onContextChange = (
   container.replaceChildren(root);
   // Synchronize untouched controls from the shared context without overwriting
   // unsubmitted advanced edits when the main workbench refreshes its preview.
-  for (const event of ["input", "change"]) root.addEventListener(event, e => editedControls.add(e.target));
+  for (const event of ["input", "change"]) root.addEventListener(event, e => {
+    editedControls.add(e.target);
+    root.dispatchEvent(new CustomEvent("v2:naming-edited", {bubbles: true}));
+  });
   const el = (tag, text, parent = root) => {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
@@ -82,7 +85,7 @@ export function mount(container, { request, selectResources, onContextChange = (
     if (ticket !== generation || disposed) return;
     candidates.replaceChildren();
     for (const item of result.items || []) {
-      button(`${item.title || item.original_title || item.id} ${item.year || ""}`, () => analyze({ provider: item.provider, id: item.id, media_type: item.media_type, ...(item.media_type === "movie" ? {} : { season: number(season.value, 1) }) }), candidates);
+      button(`${item.title || item.original_title || item.id} ${item.year || ""}`, () => analyze({ provider: item.provider, id: item.id, media_type: item.media_type, ...(item.media_type === "movie" ? {} : { season: Number(season.value) }) }), candidates);
     }
     status.textContent = (result.warnings || []).map(x => x.message).join("；") || `找到 ${result.items.length} 个候选，请选择。`;
   }, metadata);
@@ -90,7 +93,7 @@ export function mount(container, { request, selectResources, onContextChange = (
     const identity = current?.identity;
     if (!identity) throw new Error("请先搜索并选择影视资料。");
     const selectedProvider = identity.tmdb_id ? "tmdb" : "bangumi";
-    await analyze({ provider: selectedProvider, id: identity.tmdb_id || identity.bangumi_id, media_type: identity.media_type, ...(identity.media_type === "movie" ? {} : { season: number(season.value, 1) }) });
+    await analyze({ provider: selectedProvider, id: identity.tmdb_id || identity.bangumi_id, media_type: identity.media_type, ...(identity.media_type === "movie" || season.value === "" ? {} : {season: Number(season.value)}) });
   }, metadata);
   const titleChoice = select("名称候选", [["", "自定义名称 / 当前选择"]], metadata);
   const customTitle = input("自定义名称", "", "text", metadata);
@@ -98,7 +101,8 @@ export function mount(container, { request, selectResources, onContextChange = (
   const rulesPanel = el("fieldset"); el("legend", "命名规则（默认值不是探测结果）", rulesPanel);
   const source = input("片源", "WEB-DL", "text", rulesPanel);
   const group = input("制作组", "HDVWEB", "text", rulesPanel);
-  const season = input("默认季号", "1", "number", rulesPanel); season.min = "0";
+  const season = input("明确季号", "", "number", rulesPanel); season.min = "0";
+  const numbering = select("季集编号", [["auto", "仅采用可靠季号"], ["continuous", "连续集号"], ["seasonal", "季度集号"]], rulesPanel);
   const episodeMode = select("集数规则", [["detected", "采用识别结果 / 逐项修正"], ["start", "从指定集号排序"], ["offset", "使用已保存的季集偏移规则"]], rulesPanel);
   const start = input("起始集号", "1", "number", rulesPanel);
   const step = input("集数步长", "1", "number", rulesPanel); step.min = "1";
@@ -117,6 +121,7 @@ export function mount(container, { request, selectResources, onContextChange = (
   button("读取规则", async () => {
     const ticket = generation;
     const key = identityKey();
+    if (scope.value === "season" && season.value === "") throw new Error("请先填写季号");
     const params = scope.value === "global" ? "" : `?identity_key=${encodeURIComponent(key)}&season_key=${season.value}`;
     const result = await api("/api/v2/naming/memory" + params);
     if (ticket !== generation || disposed) return;
@@ -131,7 +136,8 @@ export function mount(container, { request, selectResources, onContextChange = (
   scope.addEventListener("change", () => { memoryRevision = 0; });
   button("保存规则", async () => {
     const ticket = generation;
-    const result = await api("/api/v2/naming/memory", "PUT", { scope: scope.value, identity_key: scope.value === "global" ? "global" : identityKey(), season_key: scope.value === "season" ? number(season.value, 1) : -1,
+    if (scope.value === "season" && season.value === "") throw new Error("请先填写季号");
+    const result = await api("/api/v2/naming/memory", "PUT", { scope: scope.value, identity_key: scope.value === "global" ? "global" : identityKey(), season_key: scope.value === "season" ? Number(season.value) : -1,
       expected_revision: memoryRevision, ...(customTitle.value ? { selected_title: customTitle.value } : {}), naming_rule: collectRules(), episode_rules: { offset: number(offset.value, 0) } });
     if (ticket !== generation || disposed) return;
     memoryRevision = result.revision;
@@ -164,6 +170,7 @@ export function mount(container, { request, selectResources, onContextChange = (
     if (ticket !== generation || disposed) return;
     preview = result;
     current.revision = result.context_revision;
+    if (result.episode) current.episode = result.episode;
     if (year.value) (current.metadata ||= {}).year = {value: year.value, source: "manual", source_ref: null, manual: true, confirmed: true, confidence: null, updated_at: new Date().toISOString()};
     const selected = (current.titles || []).find(item => item.id === titleChoice.value);
     const chosen = selected?.text || customTitle.value;
@@ -205,7 +212,7 @@ export function mount(container, { request, selectResources, onContextChange = (
     const kind = templateMode.value === "season" ? "season" : type.value;
     return { template_id: kind, ...(template.value ? { templates: { [kind]: template.value } } : {}),
       ...(titleChoice.value ? { selected_title_id: titleChoice.value } : customTitle.value ? { custom_title: customTitle.value } : {}),
-      source: source.value, group: group.value, season_default: number(season.value, 1), episode_mode: episodeMode.value,
+      source: source.value, group: group.value, explicit_season: number(season.value, null), episode_numbering: numbering.value, episode_mode: episodeMode.value,
       start_episode: number(start.value, 1), episode_step: number(step.value, 1), episode_direction: direction.value,
       ...Object.fromEntries(Object.entries(optional).map(([key, control]) => [key, control.checked])) };
   }
@@ -236,12 +243,13 @@ export function mount(container, { request, selectResources, onContextChange = (
     sync(template, rules.templates?.[kind] || "");
     sync(source, rules.source?.value ?? rules.source ?? "WEB-DL");
     sync(group, rules.group?.value ?? rules.group ?? "HDVWEB");
-    sync(season, current.episode?.season?.value ?? rules.season_default ?? 1);
+    sync(numbering, rules.episode_numbering || "auto");
+    sync(season, current.episode?.season?.value ?? (rules.episode_numbering === "seasonal" ? rules.explicit_season ?? "" : ""));
     sync(customTitle, current.selected_title?.value || "");
     sync(year, current.metadata?.year?.value || "");
     const previousTitle = titleChoice.value;
     candidates.replaceChildren();
-    for (const item of current.identity_candidates || []) button(`${item.title || item.original_title || item.id} (${item.provider} · ${item.media_type})`, () => analyze({provider: item.provider, id: item.id, media_type: item.media_type, ...(item.media_type === "movie" ? {} : {season: number(season.value, 1)})}), candidates);
+    for (const item of current.identity_candidates || []) button(`${item.title || item.original_title || item.id} (${item.provider} · ${item.media_type})`, () => analyze({provider: item.provider, id: item.id, media_type: item.media_type, ...(item.media_type === "movie" || season.value === "" ? {} : {season: Number(season.value)})}), candidates);
     titleChoice.replaceChildren();
     const blank = el("option", "自定义名称 / 当前选择", titleChoice); blank.value = "";
     for (const candidate of current.titles || []) { const option = el("option", `${candidate.text} (${candidate.language} · ${candidate.kind})`, titleChoice); option.value = candidate.id; option.selected = !!candidate.selected; }
@@ -305,7 +313,7 @@ export function mount(container, { request, selectResources, onContextChange = (
         candidates.replaceChildren(); files.replaceChildren(); titleChoice.replaceChildren();
         source.value = current?.effective_rules?.naming_rule?.source?.value || "WEB-DL";
         group.value = current?.effective_rules?.naming_rule?.group?.value || "HDVWEB";
-        season.value = String(current?.episode?.season?.value ?? 1);
+        season.value = String(current?.episode?.season?.value ?? "");
       }
       if (current) {
         renderContext();

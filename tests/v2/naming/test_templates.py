@@ -52,3 +52,42 @@ def test_mixed_season_omits_unshared_values():
     result = render_filename(context, first, template_id="season")
     assert "H265" not in result["filename"]
     assert warnings
+
+
+@pytest.mark.parametrize("apostrophe,video,audio,expected_video,expected_audio", [
+    ("'", "AVC", "AC-3", "H264", "AC3"),
+    ("’", "H.264", "E-AC-3", "H264", "EAC3"),
+    ("'", "HEVC", "AAC", "H265", "AAC"),
+    ("’", "H.265", "AAC", "H265", "AAC"),
+    ("’", "AV1", "AAC", "AV1", "AAC"),
+])
+def test_filename_and_release_title_normalize_output_only(apostrophe, video, audio, expected_video, expected_audio):
+    from bili_remote.v2.workbench.release_title import ReleaseTitleBuilder
+
+    context, media = fixture()
+    title = f"凡人修仙传 A Record of a Mortal{apostrophe}s Journey to Immortality"
+    context["selected_title"] = {"value": title}
+    context["metadata"]["year"] = {"value": 2020}
+    media["ref"]["relative_path"] = "original.mp4"
+    media["episode"]["episode"]["value"] = 178
+    media["probe"]["resolution"]["value"] = "2160p"
+    context["revision"] = 1
+    context["files"] = [media]
+    context["episode"] = media["episode"]
+    rules = {"source": "WEB-DL", "group": "HDVWEB"}
+    context["effective_rules"] = {"naming_rule": rules}
+    media["probe"]["video_codec"]["value"] = video
+    media["probe"]["audio_codec"]["value"] = audio
+    expected = f"凡人修仙传.A.Record.of.a.Mortals.Journey.to.Immortality.2020.S01E178.2160p.WEB-DL.{expected_video}.{expected_audio}-HDVWEB"
+    assert render_filename(context, media, rules)["filename"] == expected + ".mp4"
+    assert ReleaseTitleBuilder().build(context)["text"] == expected
+    assert context["selected_title"]["value"] == title
+
+
+def test_naming_cleans_path_punctuation_and_optional_separators():
+    context, media = fixture()
+    context["selected_title"] = {"value": "A..B / C: D?"}
+    media["episode"]["season"] = {"value": 1, "source": "default"}
+    media["episode"]["episode"]["value"] = 200
+    result = render_filename(context, media)
+    assert result["filename"] == "A.B.C.D.2023.E200.1080p.WEB-DL.H265.AAC-HDVWEB.mkv"

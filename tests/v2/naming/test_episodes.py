@@ -19,7 +19,8 @@ def test_mapping_priority_cross_season_and_series_identity():
     assert result["episode"]["mapping_key"] == mapping_key(origin, identity)
     wrong = resolve_episode("S01E01.mkv", origin, {**identity, "tmdb_id": "101"}, [mapping])
     assert wrong["episode"]["episode"]["value"] == 8
-    assert not wrong["mapping"]["confirmed"]
+    assert wrong["mapping"] is None
+    assert wrong["episode"]["season"]["value"] is None
 
 
 def test_tmdb_selected_season_real_episode_count_not_total_or_order():
@@ -46,3 +47,26 @@ def test_start_descending_offset_override_and_manual_lock():
 def test_ambiguous_and_unknown_never_guess():
     assert parse_episode("S01E01 S01E02.mkv")[2]
     assert resolve_episode("Some film 2023.mkv")["episode"]["episode"]["value"] is None
+
+@pytest.mark.parametrize("filename", ["凡人修仙传 第200集.mp4", "凡人.S200E200.mp4", "S200 - 200 凡人.mp4"])
+def test_continuous_episode_never_promotes_ordinal_to_season(filename):
+    result = resolve_episode(filename, rules={"episode_numbering": "seasonal", "season_default": 1})
+    assert result["episode"]["season"]["value"] is None
+    assert result["episode"]["episode"]["value"] == 200
+
+
+def test_bili_episode_index_and_parts_are_separate_from_tmdb_season():
+    identity = {"tmdb_id": "100"}
+    evidence = [{"season_number": 2, "episode_number": 8, "id": "123"}]
+    result = resolve_episode("Show 第200集.mp4", {"ep_id": "9", "episode_index": 8}, identity, tmdb_episodes=evidence)
+    assert result["episode"]["episode"]["value"] == 200
+    assert result["episode"]["season"]["value"] is None
+    part = resolve_episode("Show.P08.mp4", {"bvid": "BV1", "episode_index": 8}, identity, tmdb_episodes=evidence)
+    assert part["episode"]["episode"]["value"] is None
+    assert "bili_part_not_episode" in {item["code"] for item in part["warnings"]}
+    seasonal = resolve_episode("Show.E08.mp4", tmdb_episodes=evidence)
+    assert seasonal["episode"]["season"]["value"] == 2
+    assert seasonal["episode"]["season"]["source"] == "tmdb"
+    continuous = resolve_episode("Show.S02E08.mp4", tmdb_episodes=evidence, rules={"episode_numbering": "continuous"})
+    assert continuous["episode"]["season"]["value"] is None
+    assert continuous["episode"]["episode"]["value"] == 8

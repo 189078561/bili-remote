@@ -25,6 +25,19 @@ def manual_field(value):
             "confirmed": True, "confidence": None, "updated_at": datetime.now(timezone.utc).isoformat()}
 
 
+def episode_summary(files, scope, rules):
+    from .episodes import field
+    from .templates import effective_season
+
+    result = deepcopy(files[0]["episode"])
+    result["scope"] = scope
+    numbers = {effective_season(item["episode"], rules) for item in files}
+    if len(numbers) != 1 or None in numbers:
+        result["season"] = field(None, "default")
+        result["season_episode_count"] = field(None, "tmdb")
+    return result
+
+
 def manual_technical(key, item):
     item = _value(item)
     if item in (None, ""):
@@ -70,13 +83,16 @@ class NamingService:
         self.ttl, self.max_entries = ttl_seconds, max_entries
         self.contexts, self.previews, self.requests = {}, {}, {}
         self.plan_signatures, self.episode_evidence = {}, {}
-        self.manual_rules = {}
+        self.manual_rules, self.analyzed_episodes, self.latest_previews = {}, {}, {}
         self.lock = threading.RLock()
 
     def _remember_context(self, context):
         self.contexts[context["context_id"]] = deepcopy(context)
         while len(self.contexts) > self.max_entries:
-            self.contexts.pop(next(iter(self.contexts)))
+            key = next(iter(self.contexts))
+            self.contexts.pop(key)
+            self.analyzed_episodes.pop(key, None)
+            self.latest_previews.pop(key, None)
 
     async def analyze(self, resources, origins=None, context=None, rules=None, *, selection=None, manual_overrides=None):
         from .episodes import resolve_episode
@@ -156,7 +172,7 @@ class NamingService:
             for key in ("season", "episode"):
                 if key in episode_override:
                     number = episode_override[key]
-                    if type(number) is not int or number < (0 if key == "season" else 1):
+                    if number is not None and (type(number) is not int or number < (0 if key == "season" else 1)):
                         raise NamingError("invalid_episode", "人工季集号无效")
             if episode_override.get("scope", "single") not in {"single", "season"}:
                 raise NamingError("invalid_episode", "范围无效")
@@ -210,6 +226,7 @@ class NamingService:
             "sources": remembered_sources,
         }
         old_files = {(x["ref"]["root_key"], x["ref"]["relative_path"]): x for x in result.get("files", [])}
+        previous_episodes = self.analyzed_episodes.get(result["context_id"], {})
         result["files"] = []
         semaphore = asyncio.Semaphore(4)
         async def probe_one(ref):
@@ -222,13 +239,14 @@ class NamingService:
                 return measured
         probes = await asyncio.gather(*(probe_one(ref) for ref in expanded))
         for index, ref in enumerate(expanded):
-            old = old_files.get((ref["root_key"], ref["relative_path"]))
             probe = probes[index]
             origin = next((x for x in verified_origins if x.get("original_resource", {}).get("root_key") == ref["root_key"] and x.get("original_resource", {}).get("relative_path") == ref["relative_path"]), None)
             episode = resolve_episode(ref["relative_path"], origin=origin, identity=result.get("identity"),
                 mappings=result.get("episode_mappings", []), tmdb_episodes=self.episode_evidence.get(result["context_id"], []),
-                previous=old.get("episode") if old else None, rules=effective, index=index)
+                previous=previous_episodes.get((ref["root_key"], ref["relative_path"])), rules=effective, index=index)
             if episode_override:
+                if "season" in episode_override and episode_override["season"] != _value(episode["episode"]["season"]):
+                    episode["episode"]["season_episode_count"]["value"] = None
                 for key in ("season", "episode"):
                     if key in episode_override:
                         episode["episode"][key] = manual_field(episode_override[key])
@@ -241,18 +259,21 @@ class NamingService:
             raise NamingError("no_video", "所选资源中没有支持的视频")
         if prior and self.contexts.get(prior["context_id"], {}).get("revision") != prior["revision"]:
             raise NamingError("stale_context", "识别期间上下文已改变，请重试", status=409)
-        result["episode"] = {**result.get("episode", {}), **deepcopy(result["files"][0]["episode"])}
-        if episode_override:
-            result["episode"]["scope"] = episode_override.get("scope", "single")
-        elif any(ref.get("kind") == "directory" for ref in resources) or len(result["files"]) > 1:
-            result["episode"]["scope"] = "season"
+        scope = (episode_override or {}).get("scope")
+        if not scope:
+            scope = "season" if len(result["files"]) > 1 or any(ref.get("kind") == "directory" for ref in resources) else "single"
+        result["episode"] = episode_summary(result["files"], scope, effective)
+        self.analyzed_episodes[result["context_id"]] = {
+            (item["ref"]["root_key"], item["ref"]["relative_path"]): deepcopy(item["episode"])
+            for item in result["files"]
+        }
         naming_rule = result["effective_rules"]["naming_rule"]
         template_id = naming_rule.get("template_id")
         if not template_id:
             identity = result.get("identity") or {}
             media_type = identity.get("media_type")
             filename_file = next((item for item in result["files"] if (
-                item.get("episode", {}).get("episode", {}).get("source") == "filename"
+                item.get("episode", {}).get("episode", {}).get("source") in {"filename", "bili", "tmdb"}
                 or item.get("episode", {}).get("season", {}).get("source") == "filename"
             )), None)
             if identity.get("confirmed") and media_type in {"movie", "series", "anime"}:
@@ -303,7 +324,7 @@ class NamingService:
         return deepcopy(trusted)
 
     def preview(self, context, overrides=None, *, rules=None):
-        from .templates import render_filename
+        from .templates import effective_season, normalize_naming_text, render_filename
         from .episodes import resolve_episode
         with self.lock:
             current = self._context(context)
@@ -344,12 +365,13 @@ class NamingService:
                 manual_confirmations.append({"code": "identity_confirmation_required", "message": "自动匹配的影视身份尚未确认，请人工选择或确认"})
             episodes = set()
             updated_files = []
+            baseline = self.analyzed_episodes.get(current["context_id"], {})
             for index, original in enumerate(current["files"]):
                 item = deepcopy(original)
                 path = item["ref"]["relative_path"]
                 origin = next((x for x in current.get("origins", []) if x.get("original_resource", {}).get("relative_path") == path and x.get("original_resource", {}).get("root_key") == item["ref"]["root_key"]), None)
                 item["episode"] = resolve_episode(path, origin=origin, identity=current.get("identity"), mappings=current.get("episode_mappings", []),
-                    tmdb_episodes=self.episode_evidence.get(current["context_id"], []), previous=item.get("episode"), rules=chosen_rules, index=index)["episode"]
+                    tmdb_episodes=self.episode_evidence.get(current["context_id"], []), previous=baseline.get((item["ref"]["root_key"], path)), rules=chosen_rules, index=index)["episode"]
                 fields = (overrides.get("file_values") or {}).get(path, {})
                 if not isinstance(fields, dict):
                     raise NamingError("invalid_overrides", "逐文件覆盖必须为对象")
@@ -362,13 +384,22 @@ class NamingService:
                         raise NamingError("invalid_manual_value", "人工命名字段无效", fields=[key])
                 for key in set(fields) & set(item.get("probe", {})):
                     item["probe"][key] = manual_technical(key, fields[key])
+                original_season = _value(item["episode"]["season"])
                 for key in ("season", "episode"):
                     if key in fields:
                         item.setdefault("episode", {})[key] = manual_field(_value(fields[key]))
                 episode_overrides = overrides.get("episode_overrides") or {}
                 mapping_key = item.get("episode", {}).get("mapping_key")
                 if path in episode_overrides or mapping_key in episode_overrides:
-                    item.setdefault("episode", {})["episode"] = manual_field(episode_overrides.get(path, episode_overrides.get(mapping_key)))
+                    values = episode_overrides.get(path, episode_overrides.get(mapping_key))
+                    if not isinstance(values, dict):
+                        values = {"episode": values}
+                    if set(values) - {"season", "episode"}:
+                        raise NamingError("invalid_episode", "逐集季集字段无效")
+                    for key, number in values.items():
+                        item["episode"][key] = manual_field(number)
+                if _value(item["episode"]["season"]) != original_season:
+                    item["episode"]["season_episode_count"]["value"] = None
                 manual_name = (overrides.get("manual_names") or {}).get(path)
                 local_rules = deepcopy(chosen_rules)
                 if manual_name is not None:
@@ -377,6 +408,8 @@ class NamingService:
                         raise NamingError("invalid_manual_value", "人工名称不能包含路径")
                     try:
                         from ...file_service import validate_filename
+                        validate_filename(target_name)
+                        target_name = normalize_naming_text(target_name, " ")
                         validate_filename(target_name)
                     except Exception as exc:
                         raise NamingError("invalid_manual_value", "人工名称无效") from exc
@@ -397,11 +430,14 @@ class NamingService:
                 for required in ("Title", "Episode"):
                     if required in rendered.get("missing_fields", []):
                         conflicts.append({"code": "missing_identity", "field": required, "ref": item["ref"], "message": "缺少名称或集数，请人工确认"})
-                if origin and (current.get("identity") or {}).get("tmdb_id") and not item.get("episode", {}).get("episode", {}).get("confirmed"):
+                season = effective_season(item["episode"], local_rules)
+                if origin and season is not None and (current.get("identity") or {}).get("tmdb_id") and not item["episode"]["episode"]["confirmed"]:
                     manual_confirmations.append({"code": "mapping_confirmation_required", "ref": item["ref"], "message": "B站与 TMDB 季集映射需人工确认"})
                 media_type = (current.get("identity") or {}).get("media_type", local_rules.get("template_id", "movie"))
-                if media_type in {"series", "anime", "anime_single"}:
-                    pair = (_value(item["episode"].get("season")), _value(item["episode"].get("episode")))
+                if media_type in {"series", "anime", "anime_single"} or local_rules.get("template_id") in {"series", "anime"}:
+                    if chosen_rules.get("episode_numbering") == "seasonal" and season is None:
+                        conflicts.append({"code": "missing_season", "ref": item["ref"], "message": "季度集号模式需要可靠季号，请填写季号或改用连续集号"})
+                    pair = (season, _value(item["episode"].get("episode")))
                     if pair in episodes:
                         conflicts.append({"code": "duplicate_episode", "ref": item["ref"], "message": "季集重复，请修正映射"})
                     episodes.add(pair)
@@ -420,6 +456,7 @@ class NamingService:
             changed_operations = [x for x in operations if x["source"]["relative_path"] != x["target_relative_path"]]
             conflicts.extend(self.files.validate_operations(changed_operations))
             current["files"] = updated_files
+            current["episode"] = episode_summary(updated_files, current["episode"]["scope"], chosen_rules)
             self._accept_plan(current, chosen_rules, signature, plan_changed)
             self.manual_rules.setdefault(current["context_id"], {}).update(deepcopy(rules or {}))
             return self._store_preview(operations, current, conflicts, manual_confirmations=manual_confirmations,
@@ -442,7 +479,7 @@ class NamingService:
         self._remember_context(current)
 
     def _season_preview(self, current, overrides, rules, signature, changed):
-        from .templates import render_filename, season_common_probe
+        from .templates import effective_season, render_filename, season_common_probe
         operations, conflicts, manual_confirmations = [], [], []
         if current.get("identity") and not current["identity"].get("confirmed"):
             manual_confirmations.append({
@@ -456,14 +493,25 @@ class NamingService:
             ref = self.files.reference(original["root_key"], original["relative_path"])
             members = [item for item in current["files"] if item["ref"]["root_key"] == ref["root_key"] and PurePosixPath(item["ref"]["relative_path"]).is_relative_to(ref["relative_path"])]
             common, warnings = season_common_probe(members)
-            item = {"ref": ref, "probe": common, "episode": current.get("episode") or (members[0]["episode"] if members else {})}
+            baseline = self.analyzed_episodes.get(current["context_id"], {})
+            episodes = [{"episode": deepcopy(baseline.get((member["ref"]["root_key"], member["ref"]["relative_path"]), member["episode"]))}
+                        for member in members]
+            if rules.get("episode_numbering") == "seasonal" and rules.get("explicit_season") is not None:
+                for member in episodes:
+                    if not member["episode"]["season"].get("manual"):
+                        member["episode"]["season"] = manual_field(rules["explicit_season"])
+            item = {"ref": ref, "probe": common, "episode": episode_summary(episodes, "season", rules) if episodes else {}}
             rendered = render_filename(current, item, rules, template_id="season")
+            if rules.get("episode_numbering") == "seasonal" and effective_season(item["episode"], rules) is None:
+                conflicts.append({"code": "missing_season", "ref": ref, "message": "季度集号模式需要可靠季号"})
             if "Title" in rendered["missing_fields"]:
                 conflicts.append({"code": "missing_identity", "field": "Title", "message": "缺少整季名称"})
             operations.append({"source": ref, "target_relative_path": str(PurePosixPath(ref["relative_path"]).with_name(rendered["filename"])),
                                "temporary_required": True, "sidecar_of": None, "source_fingerprint": ref["fingerprint"], "warnings": warnings + rendered["warnings"]})
         changed_operations = [x for x in operations if x["source"]["relative_path"] != x["target_relative_path"]]
         conflicts.extend(self.files.validate_operations(changed_operations))
+        if len(directories) == 1 and item["episode"]:
+            current["episode"] = item["episode"]
         self._accept_plan(current, rules, signature, changed)
         return self._store_preview(operations, current, conflicts, manual_confirmations=manual_confirmations,
                                    rules=rules, overrides=overrides)
@@ -520,6 +568,13 @@ class NamingService:
             "manual_confirmation_count": len(manual_confirmations),
             "can_apply": bool(changed_operations) and not conflicts and not manual_confirmations,
         }
+        if "episode" in context:
+            public["episode"] = deepcopy(context["episode"])
+            public["file_episodes"] = {
+                item["ref"]["relative_path"]: {key: _value(item["episode"].get(key)) for key in ("season", "episode")}
+                for item in context.get("files", [])
+            }
+        self.latest_previews[context["context_id"]] = token
         self.previews[token] = {
             "public": public,
             "operations": deepcopy(changed_operations),
@@ -548,6 +603,8 @@ class NamingService:
             context = self.contexts.get(stored["context_id"])
             if expected_revision != preview["context_revision"] or not context or context["revision"] != expected_revision:
                 raise NamingError("stale_context", "上下文已变化，请重新预览", status=409)
+            if not stored.get("result") and self.latest_previews.get(stored["context_id"]) != token:
+                raise NamingError("stale_preview", "已有更新的预览，请核对最新结果", status=409)
             if bool(stored.get("undo_of")) != undo:
                 raise NamingError("invalid_preview", "预览类型不匹配", status=409)
             if not preview["can_apply"]:

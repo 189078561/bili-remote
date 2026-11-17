@@ -65,12 +65,23 @@ def validate_template(template):
     return parts
 
 
-def _component(text, separator="."):
-    text = unicodedata.normalize("NFKC", str(text))
-    # Reject path-like titles; replace filename punctuation transparently via
-    # a warning emitted by the caller, never use a title as a path.
+def normalize_naming_text(text, separator="."):
+    """Normalize generated PT output without altering its source metadata."""
+    text = unicodedata.normalize("NFKC", str(text)).translate(str.maketrans("", "", "'’"))
     text = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "_", text)
-    return re.sub(r"\s+", separator, text).strip(" .")
+    text = re.sub(r"\s+", separator, text)
+    text = re.sub(r"\.+(?=-)", "", text)
+    text = re.sub(r"(?:[ _-]*\.[ _-]*){2,}|[ _-]*\.[ _-]+|[ _-]+\.", ".", text)
+    return re.sub(r"_{2,}", "_", text).strip(" ._-")
+
+
+def effective_season(episode, rules):
+    evidence = episode.get("season")
+    if rules.get("episode_numbering") == "continuous":
+        return None
+    if isinstance(evidence, dict) and evidence.get("source") == "default":
+        return None
+    return value(evidence)
 
 
 def render_filename(context, media_file, rules=None, overrides=None, template_id=None):
@@ -91,9 +102,7 @@ def render_filename(context, media_file, rules=None, overrides=None, template_id
     title = rules.get("custom_title") or candidate or value(context.get("selected_title"))
     year = value((context.get("metadata") or {}).get("year"))
     episode = media_file.get("episode") or context.get("episode") or {}
-    season = value(episode.get("season"))
-    if season is None:
-        season = rules.get("season_default", 1)
+    season = effective_season(episode, rules)
     number = value(episode.get("episode"))
     for field, number_value in (("Season", season), ("Episode", number)):
         if number_value is not None and (type(number_value) is not int or number_value < (0 if field == "Season" else 1)):
@@ -137,27 +146,24 @@ def render_filename(context, media_file, rules=None, overrides=None, template_id
         elif spec:
             rendered.append(str(item).zfill(max(2, int(rules.get("episode_width", 2)) if field == "Episode" else 2)))
         else:
-            cleaned = _component(item, separator if field == "Title" else ".")
+            cleaned = normalize_naming_text(item, separator if field == "Title" else ".")
             if cleaned != re.sub(r"\s+", separator if field == "Title" else ".", str(item)).strip(" ."):
                 warnings.append({"code": "sanitized_field", "field": field, "message": "文件名非法字符已替换，请检查预览"})
             rendered.append(cleaned)
-    name = "".join(rendered)
-    name = re.sub(r"[.]{2,}", ".", name)
-    name = re.sub(r"\.+(?=-)", "", name)
-    name = re.sub(r"[_-]+(?=\.)", "", name).strip(" ._-")
+    name = normalize_naming_text("".join(rendered), separator)
     # Optional tags are never silently inferred; they are added only when an
     # explicit switch is on and evidence exists for this file.
     tags = []
     for switch, field in (("include_hdr", "HDR"), ("include_channels", "AudioChannels"), ("include_frame_rate", "FrameRate"), ("include_bit_depth", "BitDepth")):
         if rules.get(switch) and field not in {part[1] for part in parts}:
             if values[field] not in (None, "", []):
-                tags.append(_component(values[field]))
+                tags.append(normalize_naming_text(values[field]))
             else:
                 missing.append(field)
     for tag in rules.get("extra_tags", []):
         if not isinstance(tag, str) or len(tag) > 100:
             raise NamingError("invalid_rule", "附加标签无效")
-        tags.append(_component(tag))
+        tags.append(normalize_naming_text(tag))
     if tags:
         if kind == "season":
             name += "." + ".".join(tags)
@@ -165,6 +171,7 @@ def render_filename(context, media_file, rules=None, overrides=None, template_id
             suffix = "." + path.suffix.lstrip(".")
             if name.endswith(suffix):
                 name = name[:-len(suffix)] + "." + ".".join(tags) + suffix
+    name = normalize_naming_text(name, separator)
     validate_filename(name)
     if kind != "season" and not name.casefold().endswith(path.suffix.casefold()):
         raise NamingError("invalid_extension", "模板必须保留真实文件扩展名")

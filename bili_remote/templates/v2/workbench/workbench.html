@@ -64,7 +64,8 @@
         <div class="wb-inline wb-name-alternatives"><label>使用已有译名<select data-wb="title-choice" disabled><option value="">暂无名称候选</option></select></label><button type="button" data-action="resolve" disabled>重新识别</button></div>
         <div class="wb-name-controls wb-rename-fields">
           <label class="wb-title-control">当前命名用名（可自定义）<input data-wb="selected-title" placeholder="输入作品名称"></label>
-          <label>季号<input data-wb="season" type="number" min="0" step="1"></label>
+          <label>季集编号<select data-wb="episode-numbering"><option value="auto">自动（仅采用可靠季号）</option><option value="continuous">连续集号（E200）</option><option value="seasonal">季度集号（S01E01）</option></select></label>
+          <label>季号<input data-wb="season" type="number" min="0" step="1" placeholder="未知时留空"></label>
           <label>集号<input data-wb="episode" type="number" min="1" step="1" placeholder="自动识别"></label>
           <label>处理范围<select data-wb="scope"><option value="single">单集 / 单视频</option><option value="season">整季</option></select></label>
           <label>命名模板类型<select data-wb="naming-type"><option value="movie">电影</option><option value="series">剧集</option><option value="anime">动画</option><option value="season">整季</option></select></label>

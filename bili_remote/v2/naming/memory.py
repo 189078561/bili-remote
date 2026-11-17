@@ -8,13 +8,13 @@ import re
 from .errors import NamingError
 from .templates import validate_template
 
-RULE_FIELDS = {"template_id", "templates", "selected_title_id", "custom_title", "title_separator", "source", "group", "season_default", "episode_width", "include_hdr", "include_channels", "include_frame_rate", "include_bit_depth", "extra_tags", "episode_mode", "start_episode", "episode_step", "episode_direction", "episode_overrides", "auto_rename_high_confidence"}
+RULE_FIELDS = {"template_id", "templates", "selected_title_id", "custom_title", "title_separator", "source", "group", "season_default", "explicit_season", "episode_numbering", "episode_width", "include_hdr", "include_channels", "include_frame_rate", "include_bit_depth", "extra_tags", "episode_mode", "start_episode", "episode_step", "episode_direction", "episode_overrides", "auto_rename_high_confidence"}
 SUBTITLE_FIELDS = {"template_id", "field_order", "visible_fields", "cast_limit", "cast_order", "name_order", "labels", "label_separator", "section_separator", "list_separator", "show_director", "custom_template"}
 EPISODE_FIELDS = {"offset", "start", "step", "direction", "overrides", "mappings"}
 FIELD_VALUE_FIELDS = {"value", "source", "source_ref", "manual", "confirmed", "confidence", "updated_at"}
 DEFAULT_RULES = {"source": {"value": "WEB-DL", "source": "default", "manual": False, "confirmed": False},
                  "group": {"value": "HDVWEB", "source": "default", "manual": False, "confirmed": False},
-                 "season_default": 1, "episode_width": 2, "auto_rename_high_confidence": False}
+                 "episode_width": 2, "auto_rename_high_confidence": False}
 
 
 def _strict(value, allowed, field):
@@ -71,8 +71,10 @@ def validate_naming_rule(rule):
                         raise NamingError("invalid_memory_rule", "规则更新时间须含时区") from exc
             else:
                 _text(item, key, 100)
-        elif key in {"season_default", "episode_width", "start_episode", "episode_step"}:
-            minimum = 0 if key == "season_default" else 1
+        elif key in {"season_default", "explicit_season"} and item is None:
+            continue
+        elif key in {"season_default", "explicit_season", "episode_width", "start_episode", "episode_step"}:
+            minimum = 0 if key in {"season_default", "explicit_season"} else 1
             if type(item) is not int or not minimum <= item <= (8 if key == "episode_width" else 100000):
                 raise NamingError("invalid_memory_rule", "规则数字无效", fields=[key])
         elif key.startswith("include_") or key == "auto_rename_high_confidence":
@@ -93,6 +95,8 @@ def validate_naming_rule(rule):
             _text(item, key)
     if rule.get("episode_mode", "detected") not in {"detected", "start", "offset"} or rule.get("episode_direction", "increment") not in {"increment", "decrement"}:
         raise NamingError("invalid_memory_rule", "集数模式或方向无效")
+    if rule.get("episode_numbering", "auto") not in {"auto", "continuous", "seasonal"}:
+        raise NamingError("invalid_memory_rule", "季集编号方式无效")
     if rule.get("template_id", "movie") not in {"movie", "series", "anime", "anime_single", "season"}:
         raise NamingError("invalid_memory_rule", "模板类型无效")
     return deepcopy(rule)

@@ -1172,3 +1172,35 @@ def test_workbench_inline_progress_and_logs_preserve_mobile_form(live_server):
     finally:
         browser.close()
         playwright.stop()
+
+def test_numbering_and_invalid_episode_invalidate_current_preview(live_server):
+    base_url, app = live_server
+    source = app.state.services.settings.download_root / '凡人.S200E200.mp4'
+    source.write_bytes(b'isolated episode fixture')
+    playwright, browser, page, errors = browser_session(base_url, legacy=False)
+    try:
+        page.locator('.app-tabs [data-view=publish]').click()
+        host = page.locator('#publish-view [data-workbench]')
+        host.locator('.file-row[data-path="凡人.S200E200.mp4"]').dblclick()
+        host.locator('[data-collapse=naming]').click()
+        expect(host.locator('[data-wb=rename-summary]')).to_contain_text('→ E200.')
+        host.locator('[data-wb=selected-title]').fill('凡人')
+        expect(host.locator('[data-wb=rename-summary]')).to_contain_text('→ 凡人.E200.')
+        expect(host.locator('[data-wb=season]')).to_have_value('')
+        expect(host.locator('[data-wb=episode]')).to_have_value('200')
+        host.locator('[data-wb=episode-numbering]').select_option('seasonal')
+        expect(host.locator('[data-action=apply]')).to_be_disabled()
+        expect(host.locator('[data-wb=rename-list]')).to_contain_text('.E200.')
+        expect(host.locator('[data-wb=rename-warning]')).to_contain_text('季度集号模式需要可靠季号')
+        host.locator('[data-wb=season]').fill('1')
+        host.locator('[data-wb=episode]').fill('178')
+        expect(host.locator('[data-wb=rename-summary]')).to_contain_text('.S01E178.')
+        expect(host.locator('[data-action=apply]')).to_be_enabled()
+        host.locator('[data-wb=episode]').fill('0')
+        expect(host.locator('[data-action=apply]')).to_be_disabled()
+        expect(host.locator('[data-wb=naming-status]')).to_contain_text('待更新')
+        assert source.exists()
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()

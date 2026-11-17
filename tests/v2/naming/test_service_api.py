@@ -439,11 +439,17 @@ def test_only_verified_download_origin_is_used_and_mapping_requires_confirmation
     service.origins = Origins()
     context = analyze(service, [ref], origins=[origin], selection={"provider": "tmdb", "id": "100", "media_type": "series"}, manual_overrides={"selected_title": "Series"})
     assert context["files"][0]["episode"]["episode"]["value"] == 8
-    unresolved = service.preview(context)
+    continuous = service.preview(context)
+    assert continuous["can_apply"]
+    assert ".E08." in continuous["operations"][0]["target_relative_path"]
+    context["revision"] = continuous["context_revision"]
+    seasonal = {"episode_numbering": "seasonal", "explicit_season": 2}
+    unresolved = service.preview(context, rules=seasonal)
     assert not unresolved["can_apply"]
     assert unresolved["conflicts"] == []
     assert unresolved["manual_confirmations"][0]["code"] == "mapping_confirmation_required"
-    manual = service.preview(context, {"file_values": {"S01E01.mkv": {"season": 2, "episode": 3}}})
+    context["revision"] = unresolved["context_revision"]
+    manual = service.preview(context, {"file_values": {"S01E01.mkv": {"season": 2, "episode": 3}}}, rules=seasonal)
     assert manual["can_apply"] and "S02E03" in manual["operations"][0]["target_relative_path"]
 
 
@@ -515,3 +521,54 @@ def test_memory_routes_revision_conflict_and_generated_content_rejection(setup):
     assert read.headers["cache-control"] == "no-store"
     body["subtitle_text"] = "must not persist"
     assert client.put("/api/v2/naming/memory", json=body, headers=headers).status_code == 422
+
+
+def test_continuous_and_seasonal_batch_preview_apply_collision_and_undo(setup):
+    service, root, _ = setup
+    folder = root / "season"
+    folder.mkdir()
+    sources = ("S200 - 200.mkv", "第201集.mkv", "S200 - 200.chs.srt")
+    for name in sources:
+        (folder / name).write_bytes(name.encode())
+    context = analyze(service, [service.files.reference("downloads", folder.name)],
+                      manual_overrides={"selected_title": "Mortal’s Journey", "year": 2020})
+    rules = {"template_id": "series"}
+    automatic = service.preview(context, rules=rules)
+    assert automatic["can_apply"]
+    assert any(".E200." in item["target_relative_path"] for item in automatic["operations"])
+    assert all(".S200" not in item["target_relative_path"] and ".S01" not in item["target_relative_path"]
+               for item in automatic["operations"])
+    context["revision"] = automatic["context_revision"]
+    seasonal_rules = {**rules, "episode_numbering": "seasonal"}
+    missing = service.preview(context, rules=seasonal_rules)
+    assert not missing["can_apply"]
+    assert {item["code"] for item in missing["conflicts"]} == {"missing_season"}
+    context["revision"] = missing["context_revision"]
+    overrides = {"episode_overrides": {
+        "season/S200 - 200.mkv": {"season": 1, "episode": 178},
+        "season/第201集.mkv": {"season": 1, "episode": 179},
+    }}
+    old = service.preview(context, overrides, rules=seasonal_rules)
+    context["revision"] = old["context_revision"]
+    plan = service.preview(context, overrides, rules=seasonal_rules)
+    assert plan["can_apply"] and plan["episode"]["season"]["value"] == 1
+    targets = {item["target_relative_path"] for item in plan["operations"]}
+    assert len(targets) == 3
+    assert all("/Mortals.Journey.2020.S01E" in path for path in targets)
+    with pytest.raises(NamingError, match="最新结果"):
+        asyncio.run(service.apply(old["preview_token"], old["context_revision"], "obsolete"))
+    collision = root / next(path for path in targets if path.endswith(".mkv"))
+    collision.write_bytes(b"existing")
+    blocked = service.preview(context, overrides, rules=seasonal_rules)
+    assert not blocked["can_apply"] and blocked["conflicts"]
+    assert collision.read_bytes() == b"existing"
+    collision.unlink()
+    final = service.preview(context, overrides, rules=seasonal_rules)
+    assert targets == {item["target_relative_path"] for item in final["operations"]}
+    queued = asyncio.run(service.apply(final["preview_token"], final["context_revision"], "confirmed"))
+    service.executor.execute(queued["batch_id"])
+    assert {str(path.relative_to(root)) for path in folder.iterdir()} == targets
+    undo = asyncio.run(service.undo_preview(queued["batch_id"]))
+    restored = asyncio.run(service.apply(undo["preview_token"], undo["context_revision"], "undo", undo=True))
+    service.executor.execute(restored["batch_id"])
+    assert {file.name: file.read_bytes() for file in folder.iterdir()} == {name: name.encode() for name in sources}
