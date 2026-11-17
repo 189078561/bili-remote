@@ -90,6 +90,8 @@ def v2_fixture(page, requests):
             result = {"context": resolved, "changes": [], "capabilities": []}
         elif path in ("release-title/render", "subtitles/render"):
             result = {"text": "Generated title" if path.startswith("release-title") else "合成副标题", "context_revision": rev, "warnings": []}
+        elif path == "publishing/introduction":
+            result = {"text": payload["context"]["metadata"]["overview"]["value"], "label": "合成介绍", "poster": None, "warnings": []}
         elif path == "publishing/preview":
             import html
             text = '\n'.join(payload[x] for x in ("release_title", "subtitle", "overview"))
@@ -1200,6 +1202,38 @@ def test_numbering_and_invalid_episode_invalidate_current_preview(live_server):
         expect(host.locator('[data-action=apply]')).to_be_disabled()
         expect(host.locator('[data-wb=naming-status]')).to_contain_text('待更新')
         assert source.exists()
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_independent_introduction_late_result_requires_review_and_copies_full_text(live_server):
+    base_url, _ = live_server
+    playwright, browser, page, errors = browser_session(base_url)
+    try:
+        mount(page)
+        show_panel(page, None)
+        pending = []
+        page.route('**/api/v2/publishing/introduction', lambda route: pending.append(route))
+        page.route('**/api/v2/publishing/introduction/options', lambda route: route.fulfill(json={
+            'items': [{'reference': '8', 'season': 4, 'title': '年番4／慕兰之战', 'date': '2026-07-01'}]
+        }))
+        page.locator('[data-wb=intro-source]').select_option('tmdb_season')
+        page.locator('[data-wb=intro-query]').fill('8')
+        page.locator('[data-wb=intro-fetch]').click()
+        page.get_by_role('button', name=re.compile('年番4／慕兰之战')).click()
+        editor = page.locator('[data-edit=overview]')
+        editor.fill('用户粘贴的旧资料')
+        intro = '◎片　　名　年番4／慕兰之战\n◎年　　代　2026\n◎主　　演　演员甲\n　　　　　演员乙\n\n◎简　　介\n\n　　当季剧情。'
+        pending[0].fulfill(json={'text': intro, 'label': 'TMDB 第 4 季', 'poster': None, 'warnings': []})
+        expect(editor).to_have_value('用户粘贴的旧资料')
+        expect(page.locator('[data-wb=intro-proposal]')).to_have_text(intro, use_inner_text=False)
+        page.locator('[data-wb=intro-accept]').click()
+        expect(editor).to_have_value(intro)
+        page.evaluate("navigator.clipboard.writeText = async value => {window.copiedIntro=value;}")
+        page.get_by_role('button', name='复制完整简介').click()
+        assert page.evaluate('window.copiedIntro') == intro
         assert not errors, errors
     finally:
         browser.close()

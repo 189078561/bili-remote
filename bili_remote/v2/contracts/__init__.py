@@ -183,6 +183,8 @@ class PublishPreviewRequest(Model):
     release_title: str = Field(default='', max_length=10000)
     subtitle: str = Field(default='', max_length=10000)
     overview: str = Field(default='', max_length=1000000)
+    overview_is_introduction: bool = False
+    introduction_poster: str | None = Field(default=None, max_length=2048)
     poster: ArtifactRef | None = None
     reports: list[ArtifactRef] = Field(default_factory=list, max_length=1000)
     screenshots: list[ArtifactRef] = Field(default_factory=list, max_length=1000)

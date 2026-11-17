@@ -220,6 +220,8 @@
       this.fieldVersions = {}; this.tasks = new Map(); this.jobs = new Map(); this.notified = new Set(); this.applied = new Set(); this.pending = new Set(); this.timers = new Set(); this.abort = new AbortController(); this.destroyed = false;
       this.cancelPending = new Set(); this.stopAcks = new Set(); this.actionErrors = new Map();
       this.toolTasks = new Map(); this.toolErrors = new Map(); this.resultErrors = new Map();
+      this.introVersion = 0; this.introIdentityKey = null;
+      this.introApplied = null; this.introPending = null;
       this.buttonLabels = new WeakMap(); this.copyFeedback = new WeakMap(); this.dialogState = new WeakMap(); this.torrentIds = new Set();
       this.listen();
     }
@@ -303,6 +305,24 @@
         if (["year", "resolution", "video-codec", "audio-codec"].includes(event.target.dataset.wb)) {
           this.nameEdits?.add(event.target.dataset.wb); this.scheduleNamingOverride();
         }
+      }, opts);
+      const introSource = this.el("intro-source"), introQuery = this.el("intro-query"), introFetch = this.el("intro-fetch");
+      introSource.addEventListener("change", () => {
+        introQuery.value = "";
+        this.resetIntroductionLookup();
+        this.updateIntroductionControls();
+      }, opts);
+      introQuery.addEventListener("input", () => this.resetIntroductionLookup(), opts);
+      introQuery.addEventListener("keydown", event => {
+        if (event.key === "Enter") { event.preventDefault(); introFetch.click(); }
+      }, opts);
+      introFetch.addEventListener("click", () => this.withButton(introFetch, () => this.lookupIntroduction()), opts);
+      this.el("intro-accept").addEventListener("click", () => {
+        if (this.introPending) this.applyIntroduction(this.introPending);
+      }, opts);
+      this.el("intro-dismiss").addEventListener("click", () => {
+        this.clearIntroductionProposal();
+        this.el("intro-status").textContent = "已保留当前简介。";
       }, opts);
       this.el("query").addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); this.run("search", this.button("search")); } }, opts);
       this.host.addEventListener("v2:naming-edited", () => {
@@ -600,7 +620,12 @@
       this.versions = {}; this.resources = resources; this.selectionSignature = selectedSignature;
       this.setCollapse("naming", false);
       this.setCollapse("overview", false);
-      this.context = null; this.origins = origins; this.dirty.clear(); this.renameBatch = null; this.el("rename-list").replaceChildren(); this.editVersion++;
+      this.context = null; this.origins = origins; this.dirty.clear();
+      this.introIdentityKey = null; this.introApplied = null;
+      this.el("intro-applied").hidden = true;
+      this.el("intro-source").value = "current";
+      this.el("intro-query").value = "";
+      this.resetIntroductionLookup(); this.updateIntroductionControls(); this.renameBatch = null; this.el("rename-list").replaceChildren(); this.editVersion++;
       this.cancelTimer(this.composeTimer); this.contextChanged("selection");
       this.imageTask = null; this.images = []; this.artifacts = []; this.links = []; this.renderToolProgress(); this.episodeOverrides = {}; this.episodeEdits.clear(); this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
       for (const field of Object.keys(this.fields)) this.setField(field, "");
@@ -769,7 +794,7 @@
       this.el("episode-offset").value = ctx.effective_rules?.episode_rules?.offset ?? "";
       this.el("subtitle-rule").value = ctx.effective_rules?.subtitle_rule?.template_id || "";
       this.el("cast-limit").value = String(ctx.effective_rules?.subtitle_rule?.cast_limit || 3);
-      if (!this.dirty.has("overview")) this.setField("overview", val(ctx.metadata?.overview));
+      this.syncIntroduction(ctx);
       const choices = this.el("title-choice"); choices.replaceChildren(node("option", "选择中文、英文或其他译名")); choices.firstChild.value = "";
       for (const title of ctx.titles || []) { const option = node("option", `${title.text} · ${title.language} / ${title.kind}`); option.value = title.id; option.selected = title.text === val(ctx.selected_title); choices.append(option); }
       choices.disabled = !(ctx.titles || []).length;
@@ -847,6 +872,122 @@
         button.type = "button"; button.disabled = !this.resources.length;
         button.onclick = () => this.withButton(button, () => this.resolve({provider: candidate.provider, id: String(candidate.id), media_type: candidate.media_type}, {}, button)); container.append(button);
       });
+    }
+    clearIntroductionProposal() {
+      this.introPending = null;
+      this.el("intro-proposal").textContent = "";
+      this.el("intro-review").hidden = true;
+    }
+    resetIntroductionLookup() {
+      this.introVersion++;
+      this.clearIntroductionProposal();
+      this.el("intro-options").replaceChildren();
+      this.el("intro-status").textContent = "";
+    }
+    updateIntroductionControls() {
+      const source = this.el("intro-source").value;
+      this.el("intro-query-label").hidden = source === "current";
+      this.el("intro-query").placeholder = {
+        tmdb_season: "留空使用当前 TMDB 剧集，也可填写剧集 ID",
+        ptgen: "豆瓣 ID、条目链接或作品名",
+        bangumi: "Bangumi ID、条目链接或作品名"
+      }[source] || "";
+      this.el("intro-fetch").textContent = {
+        current: "读取当前匹配作品", tmdb_season: "列出分季", ptgen: "获取或搜索资料", bangumi: "获取或搜索资料"
+      }[source];
+    }
+    syncIntroduction(context) {
+      if (this.dirty.has("overview") || this.introApplied?.explicit || this.el("intro-source").value !== "current") return;
+      const identity = context.identity || {};
+      const key = identity.tmdb_id ? `tmdb:${identity.tmdb_id}` : identity.bangumi_id ? `bgm:${identity.bangumi_id}` : `${context.context_id}:${val(context.metadata?.overview)}`;
+      if (key === this.introIdentityKey) return;
+      this.introIdentityKey = key;
+      if (this.introApplied) {
+        this.introApplied = null;
+        this.el("intro-applied").hidden = true;
+        this.setField("overview", "");
+        this.editVersion++;
+        this.scheduleCompose();
+      }
+      void this.loadIntroduction({source: "current", context, automatic: true});
+    }
+    async lookupIntroduction() {
+      const source = this.el("intro-source").value, query = this.el("intro-query").value.trim();
+      this.resetIntroductionLookup();
+      if (source === "current") {
+        if (!this.context) { this.el("intro-status").textContent = "请先选择媒体并匹配作品。"; return; }
+        await this.loadIntroduction({source, context: this.context});
+        return;
+      }
+      const reference = query || (source === "tmdb_season" ? this.context?.identity?.tmdb_id : "");
+      if (!reference) { this.el("intro-status").textContent = "请填写条目编号或作品名。"; return; }
+      if (source !== "tmdb_season" && (/^\d+$/.test(reference) || /^https?:/i.test(reference))) {
+        await this.loadIntroduction({source, reference});
+        return;
+      }
+      const ticket = this.introVersion, epoch = this.epoch;
+      const current = () => ticket === this.introVersion && epoch === this.epoch && !this.destroyed;
+      const status = this.el("intro-status"), options = this.el("intro-options");
+      status.textContent = "正在查找资料条目…";
+      try {
+        const response = await this.api.introductionOptions({source, query: reference});
+        if (!current()) return;
+        status.textContent = response.items.length ? "请选择用于发布简介的条目。" :
+          (response.warnings || []).map(item => item.message || item).join("；") || "没有找到条目，可尝试其他来源。";
+        for (const item of response.items) {
+          const label = [item.title || item.reference, item.date, item.series_title].filter(Boolean).join(" · ");
+          const button = node("button", label, "wb-candidate");
+          button.type = "button";
+          button.onclick = () => this.withButton(button, () => this.loadIntroduction({source, reference: item.reference,
+            ...(item.season == null ? {} : {season: item.season})}));
+          options.append(button);
+        }
+      } catch (error) {
+        if (current()) status.textContent = error.message;
+      }
+    }
+    async loadIntroduction(request) {
+      const ticket = ++this.introVersion, epoch = this.epoch, version = this.fieldVersions.overview || 0;
+      const current = () => ticket === this.introVersion && epoch === this.epoch && !this.destroyed;
+      const status = this.el("intro-status");
+      this.clearIntroductionProposal();
+      status.textContent = "正在读取简介资料…";
+      try {
+        const data = await this.api.introduction(request);
+        if (!current()) return;
+        const edited = this.dirty.has("overview") || version !== (this.fieldVersions.overview || 0);
+        if (request.automatic && edited) {
+          status.textContent = "已保留人工编辑。";
+          return;
+        }
+        if (!data.text) {
+          status.textContent = [data.message, ...(data.warnings || [])].filter(Boolean).join("；") || "此条目没有可用简介。";
+          return;
+        }
+        const result = {...data, explicit: !request.automatic};
+        if (edited || (result.explicit && this.fields.overview && this.introApplied?.label !== result.label)) {
+          this.introPending = result;
+          this.el("intro-proposal").textContent = data.text;
+          this.el("intro-review").hidden = false;
+          status.textContent = data.label || "已找到资料";
+        } else this.applyIntroduction(result);
+      } catch (error) {
+        if (current()) status.textContent = error.message;
+      }
+    }
+    applyIntroduction(result) {
+      this.clearIntroductionProposal();
+      this.introApplied = result;
+      const marker = this.el("intro-applied");
+      marker.textContent = `已使用：${result.label || "所选资料"}`;
+      marker.hidden = false;
+      this.el("intro-options").replaceChildren();
+      this.el("intro-status").textContent = (result.warnings || []).join("；");
+      this.dirty.delete("overview");
+      this.fieldVersions.overview = (this.fieldVersions.overview || 0) + 1;
+      this.setField("overview", result.text);
+      this.editVersion++;
+      this.scheduleCompose();
     }
     setField(name, value) {
       this.fields[name] = String(value ?? ""); this.host.querySelector(`[data-edit="${name}"]`).value = this.fields[name]; this.host.querySelector(`[data-lock="${name}"]`).textContent = this.dirty.has(name) ? "人工编辑 · 自动识别会保留此内容" : ""; this.controls();

@@ -142,6 +142,17 @@ class PublishingService:
                 blocks.append("### ◎简　　介\n\n" + indent_overview(body))
         return "\n\n".join(blocks), poster
 
+    def _edited_introduction(self, overview, poster, output):
+        # The editor supplies the entire block. Leave it intact and avoid
+        # injecting the naming identity's fields or a second cover.
+        blocks = []
+        if (poster and re.fullmatch(r"https://image\.tmdb\.org/t/p/(?:original|w\d+)/[\w.-]+", poster)
+                and not re.match(r"^\s*(?:\[center\]\s*)?\[img\]", overview, re.I)):
+            blocks.append(image_block(poster, output, "主封面"))
+        if overview.strip():
+            blocks.append(format_description(overview, output, safe_url))
+        return "\n\n".join(blocks)
+
     def compose(
         self,
         context,
@@ -153,6 +164,8 @@ class PublishingService:
         *,
         links=None,
         report_texts=None,
+        overview_is_introduction=False,
+        introduction_poster=None,
     ):
         if format not in {"bbcode", "html", "markdown"}:
             raise NamingError("invalid_format", "发布格式无效")
@@ -174,7 +187,10 @@ class PublishingService:
             )
 
         blocks = []
-        introduction, _ = self._introduction(context, overview, format, warnings)
+        if overview_is_introduction:
+            introduction = self._edited_introduction(overview, introduction_poster, format)
+        else:
+            introduction, _ = self._introduction(context, overview, format, warnings)
         if introduction:
             blocks.append(introduction)
         elif not overview.strip():

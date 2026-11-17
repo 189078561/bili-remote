@@ -38,6 +38,8 @@
     undoApply(preview, key) { return this.request("/api/v2/naming/undo/apply", {preview_token: preview.preview_token, expected_revision: preview.context_revision, confirm: true, idempotency_key: key}); }
     title(context, rule) { return this.request("/api/v2/release-title/render", {context, rule}); }
     subtitle(context, rule) { return this.request("/api/v2/subtitles/render", {context, rule}); }
+    introduction(body) { return this.request("/api/v2/publishing/introduction", body); }
+    introductionOptions(body) { return this.request("/api/v2/publishing/introduction/options", body); }
     compose(body) { return this.request("/api/v2/publishing/preview", body); }
     async tasks() {
       if (this.tasksMode === "legacy") return (await this.request("/api/tasks?limit=100")).map(task => this.legacyTask(task));

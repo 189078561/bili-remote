@@ -9,6 +9,8 @@ from .subtitle.router import create_router as subtitle_router
 from .naming.errors import NamingError
 from .workbench.release_title import ReleaseTitleBuilder
 from .workbench.publishing import PublishingService
+from .metadata.introduction import IntroductionOptions, IntroductionRequest, IntroductionService
+from .metadata.providers import ProviderError
 
 
 def register(app,services):
@@ -38,6 +40,22 @@ def register(app,services):
     def render_title(body:RenderRequest):
         return title.build(body.context.model_dump(exclude_none=True),body.rule)
 
+    async def introduction_call(operation, body):
+        service = IntroductionService(runtime.resolver.providers)
+        try:
+            return await getattr(service, operation)(body)
+        except ProviderError as exc:
+            status = 422 if exc.code.startswith("invalid_") and exc.code != "invalid_schema" else 503 if exc.code == "unconfigured" else 502
+            raise NamingError(exc.code, str(exc), status=status) from exc
+
+    @router.post('/publishing/introduction', dependencies=[Depends(csrf)])
+    async def introduction(body: IntroductionRequest):
+        return await introduction_call("build", body)
+
+    @router.post('/publishing/introduction/options', dependencies=[Depends(csrf)])
+    async def introduction_options(body: IntroductionOptions):
+        return await introduction_call("options", body)
+
     @router.post('/publishing/preview',dependencies=[Depends(csrf)])
     def compose(body:PublishPreviewRequest):
         report_texts=[]
@@ -52,7 +70,8 @@ def register(app,services):
             report_texts.append(path.read_text(encoding='utf-8'))
         images=[x.model_dump() for x in body.screenshots]
         return publishing.compose(body.context.model_dump(exclude_none=True),body.release_title,body.subtitle,
-            body.overview,images,body.format,links=body.links,report_texts=report_texts)
+            body.overview,images,body.format,links=body.links,report_texts=report_texts,
+            overview_is_introduction=body.overview_is_introduction,introduction_poster=body.introduction_poster)
 
     @router.get('/tasks')
     def tasks(kind:str|None=None,status:str|None=None,limit:int=Query(100,ge=1,le=500),offset:int=Query(0,ge=0)):
