@@ -444,6 +444,13 @@ MIGRATIONS: tuple[tuple[int, str, str], ...] = (
         CREATE UNIQUE INDEX IF NOT EXISTS idx_v2_task_idempotency
             ON processing_tasks(task_type,idempotency_key) WHERE task_type LIKE 'v2_%';
     """),
+    (6, "download_naming", """
+        CREATE TABLE IF NOT EXISTS download_naming (
+            job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+            plan_json TEXT NOT NULL,
+            outputs_json TEXT NOT NULL DEFAULT '[]'
+        );
+    """),
 )
 
 
@@ -715,6 +722,7 @@ class Database:
         title: str | None = None,
         uploader: str | None = None,
         log_path: str | None = None,
+        naming_plan: dict[str, Any] | None = None,
     ) -> int:
         return self.create_jobs(
             [
@@ -729,6 +737,7 @@ class Database:
                     "title": title,
                     "uploader": uploader,
                     "log_path": log_path,
+                    "naming_plan": naming_plan,
                 }
             ]
         )[0]
@@ -762,8 +771,24 @@ class Database:
                         now,
                     ),
                 )
-                ids.append(int(cursor.lastrowid or 0))
+                job_id = int(cursor.lastrowid or 0)
+                if job.get("naming_plan") is not None:
+                    connection.execute("INSERT INTO download_naming(job_id,plan_json) VALUES (?,?)",
+                                       (job_id, json.dumps(job["naming_plan"], ensure_ascii=False)))
+                ids.append(job_id)
         return ids
+
+    def get_download_naming(self, job_id: int) -> dict[str, Any] | None:
+        row = self.fetch_one("SELECT plan_json,outputs_json FROM download_naming WHERE job_id=?", (job_id,))
+        return {"plan": json.loads(row["plan_json"]), "outputs": json.loads(row["outputs_json"])} if row else None
+
+    def complete_named_download(self, job_id: int, result_path: str | None, outputs: list[dict[str, Any]]) -> None:
+        with self.connect() as connection:
+            connection.execute("UPDATE download_naming SET outputs_json=? WHERE job_id=?",
+                               (json.dumps(outputs, ensure_ascii=False), job_id))
+            warning = next((item["warning"] for item in outputs if item.get("warning")), None)
+            connection.execute("UPDATE jobs SET status='completed', progress=100, result_path=?, error=?, finished_at=? WHERE id=?",
+                               (result_path, warning, utc_now(), job_id))
 
     def get_job(self, job_id: int) -> dict[str, Any] | None:
         return self.fetch_one("SELECT * FROM jobs WHERE id=?", (job_id,))

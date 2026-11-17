@@ -325,3 +325,35 @@ def test_download_workbench_stability_and_log_controls():
         browser.close()
     finally:
         playwright.stop()
+
+
+def test_number_and_title_preview_stay_inline_with_episode_selection(live_server):
+    base, _ = live_server
+    playwright, browser, page, errors = browser_session(base, legacy=False)
+    try:
+        url = "https://www.bilibili.com/bangumi/play/ep3854802"
+        page.route("**/api/resolve", lambda route: route.fulfill(json={
+            "title": "凡人修仙传", "source_url": url, "formats": [], "api_mode": "web",
+            "episodes": [{"id": "3854802", "group": "正片", "title": "200 暮兰之战24"}],
+            "default_episode_id": "3854802",
+            "naming_items": {"3854802": {"identifier": "ep3854802", "number_kind": "episode", "number": 200, "chapter": "暮兰之战24"}},
+        }))
+        page.route("**/api/episodes/formats", lambda route: route.fulfill(json={"formats": []}))
+        page.route("**/api/jobs/batch", lambda route: route.fulfill(json={"ids": [101], "count": 1}))
+        page.locator("[data-view=download]").click()
+        page.locator("#dv2-url").fill(url)
+        page.locator("[data-parse]").click()
+        expect(page.locator("[data-naming-preview]")).to_have_text("凡人修仙传.E200.mp4")
+        expect(page.locator("[data-naming-facts]")).to_contain_text("连续第 200 集 · 暮兰之战24")
+        page.locator("[data-naming-name]").fill("凡人 修仙传")
+        page.locator("[data-naming-number]").fill("178")
+        expect(page.locator("[data-naming-preview]")).to_have_text("凡人.修仙传.E178.mp4")
+        with page.expect_request("**/api/jobs/batch") as submitted:
+            page.locator("[data-download-form] button[type=submit]").click()
+        options = submitted.value.post_data_json["naming"]
+        assert options["mode"] == "smart" and options["title"] == "凡人 修仙传"
+        assert options["episode_numbers"] == {"3854802": 178}
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()

@@ -122,20 +122,27 @@ class V2Runtime:
         facts=getattr(self.services.runner,'completion_origins',{}).pop(job['id'],{})
         item_origins=getattr(self.services.runner,'completion_item_origins',{}).pop(job['id'],{})
         paths=getattr(self.services.runner,'completion_paths',{}).pop(job['id'],[]) or [job.get('result_path') or '']
+        naming=self.services.database.get_download_naming(job['id'])
+        smart_outputs={item['path']: item for item in (naming or {}).get('outputs',[])}
         origins=[]
-        for value in dict.fromkeys(paths):
+        for value in smart_outputs or dict.fromkeys(paths):
+            if not value:
+                continue
             path=Path(value)
             try: relative=path.resolve().relative_to(root).as_posix()
             except ValueError: continue
             if not path.is_file(): continue
             ref=self.naming('download-completion').files.reference('downloads',relative)
-            # A playlist's shared metadata cannot establish each episode's identity.
-            item_facts={**item_origins.get(value,{}), **({k:v for k,v in facts.items() if v is not None} if len(paths)==1 else {})}
+            # For new jobs, the committed output receipt carries each file's provenance.
+            item_facts=smart_outputs[value]['origin'] if value in smart_outputs else {
+                **item_origins.get(value,{}), **({k:v for k,v in facts.items() if v is not None} if len(paths)==1 else {})}
+            if value in smart_outputs and ref['fingerprint']!=smart_outputs[value]['fingerprint']:
+                continue
             origin={k:item_facts.get(k) for k in ('bvid','season_id','ep_id','cid','original_title','episode_index')}
             origin.update(job_id=job['id'],original_resource=ref,api_mode=job.get('api_mode','web'))
             self.origins.put(origin)
             origins.append(origin)
-        if not origins: return
+        if not origins or smart_outputs: return
         # Probe/recognition is best effort and never renames or changes download status.
         adapter=self.adapters.setdefault('download-completion',DownloadCompletionAdapter(self.naming('download-completion')))
         await adapter.on_completed(job['id'],origins)

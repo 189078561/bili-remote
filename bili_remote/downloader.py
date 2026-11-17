@@ -28,6 +28,8 @@ from .config import Settings
 from .database import Database, utc_now
 from .security import redact_sensitive
 from .validation import ValidationError, canonicalize_bilibili_url
+from .v2.download.finalize import cleanup_staging, finalize_download, staging_directory
+from .v2.download.naming import displayed_episode_number, positive_number, url_facts
 
 
 class DownloadFailure(RuntimeError):
@@ -68,6 +70,9 @@ class ResolvedMedia:
     default_episode_id: str | None
     api_mode: str = "web"
     warning: str | None = None
+    naming_parts: list[int] | None = None
+    naming_chapter: str | None = None
+    naming_part: int | None = None
 
 
 def _parse_int(value: str) -> int | None:
@@ -140,12 +145,20 @@ class YtDlpRunner:
             return
         def identifier(name):
             value = data.get(name)
-            return str(value) if isinstance(value, (str, int)) and not isinstance(value, bool) and value != '' else None
+            return str(value) if isinstance(value, (str, int)) and not isinstance(value, bool) and str(value) not in {'', 'NA'} else None
         index = data.get('episode_number') or data.get('playlist_index')
         title = data.get('series') or data.get('title')
         origin = {'bvid':identifier('bvid'), 'cid':identifier('cid'), 'season_id':identifier('season_id'),
                   'ep_id':identifier('episode_id'), 'original_title':title if isinstance(title,str) else None,
-                  'episode_index':index if type(index) is int else None}
+                  'episode_index':index if type(index) is int else None,
+                  'webpage_url':identifier('webpage_url'), 'part_number':positive_number(data.get('part_number'))}
+        video = url_facts(origin["webpage_url"])
+        entry_id = identifier("id") or ""
+        match = re.fullmatch(r"(BV[A-Za-z0-9]{6,20})_p([0-9]+)", entry_id, re.I)
+        if not origin["bvid"]:
+            origin["bvid"] = video.identifier if (video.identifier or "").lower().startswith("bv") else match[1] if match else None
+        if not origin["part_number"]:
+            origin["part_number"] = video.number or (positive_number(match[2]) if match else None)
         self.completion_item_origins.setdefault(job_id,{})[data['filepath']] = origin
 
     def has_active_operation(self) -> bool:
@@ -334,7 +347,28 @@ class YtDlpRunner:
                 flat_playlist=is_favorite,
                 deadline=deadline,
             )
-            return self._normalize_resolved(payload, is_favorite=is_favorite)
+            resolved = self._normalize_resolved(payload, is_favorite=is_favorite)
+            video = url_facts(url)
+            if video.identifier and video.identifier.lower().startswith(("bv", "av")) and not is_favorite:
+                # Bilibili's multipart extractor identifies each P in its URL or ID.
+                parts = []
+                for item in payload.get("entries") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    part = url_facts(item.get("webpage_url") or item.get("url")).number
+                    if not part:
+                        match = re.fullmatch(re.escape(video.identifier) + r"_p([0-9]+)", str(item.get("id") or ""), re.I)
+                        part = positive_number(match[1]) if match else None
+                    if part:
+                        parts.append(part)
+                resolved.naming_parts = sorted(set(parts)) or None
+                selected = re.fullmatch(re.escape(video.identifier) + r"_p([0-9]+)", str(payload.get("id") or ""), re.I)
+                resolved.naming_part = video.number or (positive_number(selected[1]) if selected else None)
+                if resolved.naming_part:
+                    title = re.split(rf"\s+p0*{resolved.naming_part}\b\s*", resolved.title, maxsplit=1, flags=re.I)
+                    if len(title) == 2 and title[0].strip():
+                        resolved.title, resolved.naming_chapter = title[0].strip(), title[1].strip()[:300] or None
+            return resolved
         except BiliAPIError as exc:
             raise DownloadFailure(str(exc)) from exc
         finally:
@@ -683,6 +717,8 @@ class YtDlpRunner:
         elif "view" in locals():
             origin.update(bvid=view.get("bvid"), original_title=view.get("title"),
                 episode_index=next((item.get("page") for item in view.get("pages", []) if item.get("cid") == cid), None))
+            if len(view.get("pages") or []) > 1:
+                origin["part_number"] = positive_number(origin["episode_index"])
         payload["_v2_origin"] = origin
         return payload
 
@@ -838,6 +874,9 @@ class YtDlpRunner:
                 result.append(
                     {
                         "id": ep_id,
+                        "display_episode_number": displayed_episode_number(item.get("title") or detail.get("title")) if group_title == "正片" else None,
+                        "chapter_title": str(item.get("long_title") or detail.get("long_title") or ""),
+
                         "index": len(result) + 1,
                         "group": group_title,
                         "group_index": group_index,
@@ -1545,7 +1584,7 @@ class YtDlpRunner:
                 "--print",
                 "after_move:__RESULT__%(filepath)s",
                 "--print",
-                "after_move:__V2_ORIGIN__%(.{filepath,bvid,cid,season_id,episode_id,series,title,episode_number,playlist_index})j",
+                "after_move:__V2_ORIGIN__%(.{filepath,bvid,cid,season_id,episode_id,series,title,episode_number,playlist_index,webpage_url,part_number,id})j",
             ]
             if use_aria2:
                 command.extend(
@@ -2194,14 +2233,21 @@ class DownloadManager:
                 last_progress_write = now
             self.database.update_job(job["id"], **clean)
 
-        result = await self.runner.download(job, output_root, log_path, update)
-        self.database.update_job(
-            job["id"],
-            status="completed",
-            progress=100,
-            result_path=result,
-            finished_at=utc_now(),
-        )
+        naming = self.database.get_download_naming(job["id"])
+        if naming:
+            stage = staging_directory(output_root, job["id"])
+            result = await self.runner.download(job, stage, log_path, update)
+            paths = getattr(self.runner, "completion_paths", {}).get(job["id"], []) or ([result] if result else [])
+            facts = getattr(self.runner, "completion_origins", {}).get(job["id"], {})
+            items = getattr(self.runner, "completion_item_origins", {}).get(job["id"], {})
+            outputs, links = await finalize_download(self.settings, output_root, stage, job["id"], naming["plan"], paths, facts, items)
+            if not outputs:
+                raise DownloadFailure("未找到已完成后处理的媒体文件，暂存文件已保留")
+            self.database.complete_named_download(job["id"], outputs[-1]["path"], outputs)
+            await asyncio.to_thread(cleanup_staging, stage, links)
+        else:
+            result = await self.runner.download(job, output_root, log_path, update)
+            self.database.update_job(job["id"], status="completed", progress=100, result_path=result, finished_at=utc_now())
         if self.completion_hook:
             try:
                 await asyncio.wait_for(self.completion_hook(self.database.get_job(job["id"])), timeout=30)

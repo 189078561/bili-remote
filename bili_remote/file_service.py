@@ -572,19 +572,18 @@ class FileService:
 
         try:
             jobs = self.database.fetch_all(
-                "SELECT output_dir, result_path FROM jobs "
+                "SELECT jobs.id, output_dir, result_path, download_naming.job_id AS named "
+                "FROM jobs LEFT JOIN download_naming ON download_naming.job_id=jobs.id "
                 "WHERE status IN ('queued', 'running')"
             )
             for job in jobs:
                 raw = str(job.get("output_dir") or "")
-                if raw:
+                if raw or job.get("named"):
                     candidate = Path(raw)
-                    output = (
-                        candidate
-                        if candidate.is_absolute()
-                        else self.settings.download_root / candidate
-                    ).resolve(strict=False)
+                    output = (candidate if candidate.is_absolute() else self.settings.download_root / candidate).resolve(strict=False)
                     download_dirs.add(output)
+                    if job.get("named"):
+                        tree_paths.add(output / f".bili-remote-job-{job['id']}")
                 result_raw = str(job.get("result_path") or "")
                 if result_raw:
                     result = Path(result_raw)

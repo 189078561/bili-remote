@@ -66,6 +66,7 @@ from .validation import (
     validate_output_template,
 )
 from .v2.download import project_download_job
+from .v2.download.naming import NameOptions, NamePreviewRequest, download_plan, episode_facts, initial_filename, url_facts, without_video_part
 from .workspace import (
     WorkspaceError,
     normalize_relative_path,
@@ -123,6 +124,7 @@ class JobCreateRequest(BaseModel):
     output_dir: str | None = None
     title: str | None = None
     uploader: str | None = None
+    naming: NameOptions | None = None
 
     @field_validator("output_template")
     @classmethod
@@ -155,6 +157,8 @@ class BatchJobCreateRequest(BaseModel):
     format_profile: BatchFormatProfile | None = None
     output_template: str | None = None
     output_dir: str | None = None
+
+    naming: NameOptions | None = None
 
     @field_validator("output_template")
     @classmethod
@@ -953,6 +957,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         service_container.bili.tv_logout()
         return {"ok": True}
 
+    @app.post("/api/download/naming/preview")
+    def preview_download_naming(
+        payload: NamePreviewRequest,
+        _: SessionData = Depends(require_csrf),
+    ) -> dict[str, Any]:
+        if payload.options.mode == "source":
+            return {"items": []}
+        items = []
+        for facts in payload.items:
+            identifier = facts.identifier or ""
+            episode_id = identifier[2:] if identifier.startswith("ep") else None
+            plan = download_plan(payload.title, facts, payload.options, episode_id=episode_id)
+            items.append(initial_filename(plan))
+        return {"items": items}
+
     @app.post("/api/resolve")
     async def resolve(
         payload: ResolveRequest,
@@ -980,7 +999,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             formats=resolved.formats,
             episodes=resolved.episodes,
         )
+        naming_items = episode_facts(resolved.episodes)
+        naming_video = url_facts(url)
+        naming_video.chapter = getattr(resolved, "naming_chapter", None)
+        naming_parts = getattr(resolved, "naming_parts", None) or []
+        first_part = getattr(resolved, "naming_part", None) or (naming_parts[0] if naming_parts else None)
+        if first_part and not naming_video.number:
+            naming_video.number_kind, naming_video.number = "part", first_part
         return {
+            "source_url": url,
+            "naming_items": {key: facts.model_dump() for key, facts in naming_items.items()},
+            "naming_video": naming_video.model_dump(),
+            "naming_parts": naming_parts,
             "title": resolved.title,
             "uploader": resolved.uploader,
             "duration": resolved.duration,
@@ -1071,8 +1101,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not output_template:
             raise HTTPException(status_code=422, detail="缺少默认下载命名模板")
         output_dir = service_container.files.resolve_new_job_output(payload.output_dir)
+        smart = payload.naming and payload.naming.mode == "smart"
         job_id = service_container.database.create_job(
-            source_url=url,
+            source_url=without_video_part(url) if smart and payload.all_parts else url,
             kind="manual",
             api_mode=payload.api_mode,
             output_template=output_template,
@@ -1082,6 +1113,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             title=payload.title,
             uploader=payload.uploader,
             log_path=str(log_path),
+            naming_plan=download_plan(payload.title, url_facts(url), payload.naming, all_parts=payload.all_parts)
+            if smart else None,
         )
         service_container.manager.wake()
         return {"id": job_id}
@@ -1140,6 +1173,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             selector = validate_format_selector(payload.format_selector)
         jobs = []
+        facts = episode_facts(resolved.episodes)
         for episode in selected:
             template = render_episode_template(
                 output_template,
@@ -1158,6 +1192,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "all_parts": False,
                     "output_template": template,
                     "output_dir": output_dir,
+                    "naming_plan": download_plan(resolved.title, facts[str(episode["id"])], payload.naming,
+                                                  episode_id=str(episode["id"]))
+                    if payload.naming and payload.naming.mode == "smart" else None,
                     "title": episode.get("title"),
                     "uploader": resolved.uploader,
                     "log_path": str(create_job_log_path(service_container.settings)),

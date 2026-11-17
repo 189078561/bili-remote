@@ -229,18 +229,28 @@ class NamingService:
         previous_episodes = self.analyzed_episodes.get(result["context_id"], {})
         result["files"] = []
         semaphore = asyncio.Semaphore(4)
+        origins_by_path = {(x["original_resource"]["root_key"], x["original_resource"]["relative_path"]): x for x in verified_origins}
+        downloaded_probes = self.origins.probes_for(verified_origins) if verified_origins and hasattr(self.origins, "probes_for") else {}
+
         async def probe_one(ref):
             async with semaphore:
-                old = old_files.get((ref["root_key"], ref["relative_path"]))
+                key = (ref["root_key"], ref["relative_path"])
+                old = old_files.get(key)
                 same = old and old["ref"].get("fingerprint") == ref["fingerprint"]
-                measured = await self.probe.probe(self.files.path(ref), source_ref=ref, previous=old.get("probe") if same else None)
+                path = self.files.path(ref)
+                measured = downloaded_probes.get(key)
+                if measured is None:
+                    measured = await self.probe.probe(path, source_ref=ref, previous=old.get("probe") if same else None)
+                elif same:
+                    measured.update({name: deepcopy(val) for name, val in (old.get("probe") or {}).items()
+                                     if name in measured and isinstance(val, dict) and val.get("manual")})
                 if self.files.fingerprint(ref) != ref["fingerprint"]:
                     raise NamingError("stale_resource", "探测过程中源文件已变化", status=409)
                 return measured
         probes = await asyncio.gather(*(probe_one(ref) for ref in expanded))
         for index, ref in enumerate(expanded):
             probe = probes[index]
-            origin = next((x for x in verified_origins if x.get("original_resource", {}).get("root_key") == ref["root_key"] and x.get("original_resource", {}).get("relative_path") == ref["relative_path"]), None)
+            origin = origins_by_path.get((ref["root_key"], ref["relative_path"]))
             episode = resolve_episode(ref["relative_path"], origin=origin, identity=result.get("identity"),
                 mappings=result.get("episode_mappings", []), tmdb_episodes=self.episode_evidence.get(result["context_id"], []),
                 previous=previous_episodes.get((ref["root_key"], ref["relative_path"])), rules=effective, index=index)

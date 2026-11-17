@@ -119,3 +119,10 @@
  .dv2 dialog {width:100%;height:100dvh;max-height:100dvh;border-radius:0;margin:0;padding:20px 17px;}
  .dv2-log-shell {max-height:calc(100dvh - 40px);}
 }
+
+.dv2-naming {margin-top:16px;padding-top:12px;border-top:1px solid var(--ws-line,#e0e5de);}
+.dv2-naming h3 {margin:0 0 8px;}
+.dv2-naming-controls {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:8px;align-items:end;}
+.dv2-naming-controls label {min-width:0;}
+.dv2-naming-controls :is(input,select) {display:block;width:100%;min-width:0;}
+.dv2-naming-preview {color:var(--ws-ink,#23342f);overflow-wrap:anywhere;font-size:.86rem;line-height:1.6;}

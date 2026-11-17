@@ -122,6 +122,27 @@ class DownloadOriginRepository:
                                (job_id, ref.get('root_key'), ref.get('relative_path')))
         return self._decode(row) if row else None
 
+    def probes_for(self, origins):
+        """Read each downloaded job's evidence once per handoff."""
+        jobs = {}
+        result = {}
+        for origin in origins:
+            job_id = origin["job_id"]
+            if job_id not in jobs:
+                naming = self.db.get_download_naming(job_id)
+                jobs[job_id] = {item["fingerprint"]: item for item in (naming or {}).get("outputs", [])}
+            ref = origin["original_resource"]
+            item = jobs[job_id].get(ref["fingerprint"])
+            if not item or not item["path"].endswith("/" + ref["relative_path"]):
+                continue
+            probe = item.get("probe")
+            if probe and not probe.get("probe_error"):
+                result[(ref["root_key"], ref["relative_path"])] = {
+                    key: {**val, "source_ref": ref["relative_path"]} if isinstance(val, dict) else val
+                    for key, val in probe.items()
+                }
+        return result
+
     @staticmethod
     def _decode(row):
         return {**{k: row[k] for k in ('job_id','bvid','season_id','ep_id','cid','original_title','episode_index','api_mode')},

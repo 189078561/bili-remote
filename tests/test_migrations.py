@@ -78,18 +78,18 @@ def test_old_database_upgrades_preserves_data_and_backs_up(settings) -> None:
     versions = [row["version"] for row in database.fetch_all(
         "SELECT version FROM schema_migrations ORDER BY version"
     )]
-    assert versions == [1, 2, 3, 4, 5]
+    assert versions == [1, 2, 3, 4, 5, 6]
     assert database.get_auth()["account_name"] == "Tester"
     assert database.get_job(1)["status"] == "completed"
     assert database.list_history()[0]["title"] == "Existing"
     assert database.list_naming_profiles()
     backups = list((settings.data_dir / "backups").glob("bili-remote-schema-v*.sqlite3"))
     assert {path.name.split("-schema-")[1].split("-")[0] for path in backups} == {
-        "v1",
         "v2",
         "v3",
         "v4",
         "v5",
+        "v6",
     }
 
     before = {path.name for path in backups}
@@ -111,7 +111,7 @@ def test_failed_migration_does_not_record_version(settings, monkeypatch) -> None
     monkeypatch.setattr(
         database_module,
         "MIGRATIONS",
-        ((6, "broken", "CREATE TABLE broken_table(id INTEGER); INVALID SQL;"),),
+        ((7, "broken", "CREATE TABLE broken_table(id INTEGER); INVALID SQL;"),),
     )
     database = Database(settings.database_path)
     try:
@@ -124,5 +124,5 @@ def test_failed_migration_does_not_record_version(settings, monkeypatch) -> None
         row["version"]
         for row in database.fetch_all("SELECT version FROM schema_migrations")
     }
-    assert 6 not in versions
-    assert list((settings.data_dir / "backups").glob("bili-remote-schema-v6-*.sqlite3"))
+    assert 7 not in versions
+    assert list((settings.data_dir / "backups").glob("bili-remote-schema-v7-*.sqlite3"))
