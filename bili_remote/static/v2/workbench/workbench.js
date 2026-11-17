@@ -220,7 +220,7 @@
       this.fieldVersions = {}; this.tasks = new Map(); this.jobs = new Map(); this.notified = new Set(); this.applied = new Set(); this.pending = new Set(); this.timers = new Set(); this.abort = new AbortController(); this.destroyed = false;
       this.cancelPending = new Set(); this.stopAcks = new Set(); this.actionErrors = new Map();
       this.toolTasks = new Map(); this.toolErrors = new Map(); this.resultErrors = new Map();
-      this.introVersion = 0; this.introIdentityKey = null;
+      this.introVersion = 0;
       this.introApplied = null; this.introPending = null;
       this.buttonLabels = new WeakMap(); this.copyFeedback = new WeakMap(); this.dialogState = new WeakMap(); this.torrentIds = new Set();
       this.listen();
@@ -306,12 +306,7 @@
           this.nameEdits?.add(event.target.dataset.wb); this.scheduleNamingOverride();
         }
       }, opts);
-      const introSource = this.el("intro-source"), introQuery = this.el("intro-query"), introFetch = this.el("intro-fetch");
-      introSource.addEventListener("change", () => {
-        introQuery.value = "";
-        this.resetIntroductionLookup();
-        this.updateIntroductionControls();
-      }, opts);
+      const introQuery = this.el("intro-query"), introFetch = this.el("intro-fetch");
       introQuery.addEventListener("input", () => this.resetIntroductionLookup(), opts);
       introQuery.addEventListener("keydown", event => {
         if (event.key === "Enter") { event.preventDefault(); introFetch.click(); }
@@ -621,11 +616,10 @@
       this.setCollapse("naming", false);
       this.setCollapse("overview", false);
       this.context = null; this.origins = origins; this.dirty.clear();
-      this.introIdentityKey = null; this.introApplied = null;
+      this.introApplied = null;
       this.el("intro-applied").hidden = true;
-      this.el("intro-source").value = "current";
       this.el("intro-query").value = "";
-      this.resetIntroductionLookup(); this.updateIntroductionControls(); this.renameBatch = null; this.el("rename-list").replaceChildren(); this.editVersion++;
+      this.resetIntroductionLookup(); this.renameBatch = null; this.el("rename-list").replaceChildren(); this.editVersion++;
       this.cancelTimer(this.composeTimer); this.contextChanged("selection");
       this.imageTask = null; this.images = []; this.artifacts = []; this.links = []; this.renderToolProgress(); this.episodeOverrides = {}; this.episodeEdits.clear(); this.pendingReplacement = null; this.probedResources = null; this.invalidateRename();
       for (const field of Object.keys(this.fields)) this.setField(field, "");
@@ -794,7 +788,6 @@
       this.el("episode-offset").value = ctx.effective_rules?.episode_rules?.offset ?? "";
       this.el("subtitle-rule").value = ctx.effective_rules?.subtitle_rule?.template_id || "";
       this.el("cast-limit").value = String(ctx.effective_rules?.subtitle_rule?.cast_limit || 3);
-      this.syncIntroduction(ctx);
       const choices = this.el("title-choice"); choices.replaceChildren(node("option", "选择中文、英文或其他译名")); choices.firstChild.value = "";
       for (const title of ctx.titles || []) { const option = node("option", `${title.text} · ${title.language} / ${title.kind}`); option.value = title.id; option.selected = title.text === val(ctx.selected_title); choices.append(option); }
       choices.disabled = !(ctx.titles || []).length;
@@ -884,100 +877,57 @@
       this.el("intro-options").replaceChildren();
       this.el("intro-status").textContent = "";
     }
-    updateIntroductionControls() {
-      const source = this.el("intro-source").value;
-      this.el("intro-query-label").hidden = source === "current";
-      this.el("intro-query").placeholder = {
-        tmdb_season: "留空使用当前 TMDB 剧集，也可填写剧集 ID",
-        ptgen: "豆瓣 ID、条目链接或作品名",
-        bangumi: "Bangumi ID、条目链接或作品名"
-      }[source] || "";
-      this.el("intro-fetch").textContent = {
-        current: "读取当前匹配作品", tmdb_season: "列出分季", ptgen: "获取或搜索资料", bangumi: "获取或搜索资料"
-      }[source];
-    }
-    syncIntroduction(context) {
-      if (this.dirty.has("overview") || this.introApplied?.explicit || this.el("intro-source").value !== "current") return;
-      const identity = context.identity || {};
-      const key = identity.tmdb_id ? `tmdb:${identity.tmdb_id}` : identity.bangumi_id ? `bgm:${identity.bangumi_id}` : `${context.context_id}:${val(context.metadata?.overview)}`;
-      if (key === this.introIdentityKey) return;
-      this.introIdentityKey = key;
-      if (this.introApplied) {
-        this.introApplied = null;
-        this.el("intro-applied").hidden = true;
-        this.setField("overview", "");
-        this.editVersion++;
-        this.scheduleCompose();
-      }
-      if (["series", "anime"].includes(identity.media_type) && (identity.tmdb_id || identity.bangumi_id)) {
-        this.resetIntroductionLookup();
-        this.el("intro-source").value = "ptgen";
-        this.updateIntroductionControls();
-        this.el("intro-status").textContent = "输入该篇章的豆瓣 ID 或链接，即可生成对应简介。整部作品和 TMDB 分季可在资料来源中另选。";
-        return;
-      }
-      void this.loadIntroduction({source: "current", context, automatic: true});
-    }
     async lookupIntroduction() {
-      const source = this.el("intro-source").value, query = this.el("intro-query").value.trim();
+      const reference = this.el("intro-query").value.trim();
       this.resetIntroductionLookup();
-      if (source === "current") {
-        if (!this.context) { this.el("intro-status").textContent = "请先选择媒体并匹配作品。"; return; }
-        await this.loadIntroduction({source, context: this.context});
+      if (!reference) {
+        this.el("intro-status").textContent = "请填写豆瓣条目链接、ID 或作品名。";
         return;
       }
-      const reference = query || (source === "tmdb_season" ? this.context?.identity?.tmdb_id : "");
-      if (!reference) { this.el("intro-status").textContent = "请填写条目编号或作品名。"; return; }
-      if (source !== "tmdb_season" && (/^\d+$/.test(reference) || /^https?:/i.test(reference))) {
-        await this.loadIntroduction({source, reference});
+      if (/^\d+$/.test(reference) || /^https?:/i.test(reference)) {
+        await this.loadIntroduction(reference);
         return;
       }
       const ticket = this.introVersion, epoch = this.epoch;
       const current = () => ticket === this.introVersion && epoch === this.epoch && !this.destroyed;
       const status = this.el("intro-status"), options = this.el("intro-options");
-      status.textContent = "正在查找资料条目…";
+      status.textContent = "正在搜索豆瓣条目…";
       try {
-        const response = await this.api.introductionOptions({source, query: reference});
+        const response = await this.api.introductionOptions({source: "ptgen", query: reference});
         if (!current()) return;
-        status.textContent = response.items.length ? "请选择用于发布简介的条目。" :
-          (response.warnings || []).map(item => item.message || item).join("；") || "没有找到条目，可尝试其他来源。";
+        status.textContent = response.items.length ? "请选择要发布的豆瓣条目。" :
+          (response.warnings || []).map(item => item.message || item).join("；") || "没有找到豆瓣条目，可直接输入豆瓣 ID 或链接。";
         for (const item of response.items) {
-          const label = [item.title || item.reference, item.date, item.series_title].filter(Boolean).join(" · ");
+          const label = [item.title || item.reference, item.date].filter(Boolean).join(" · ");
           const button = node("button", label, "wb-candidate");
           button.type = "button";
-          button.onclick = () => this.withButton(button, () => this.loadIntroduction({source, reference: item.reference,
-            ...(item.season == null ? {} : {season: item.season})}));
+          button.onclick = () => this.withButton(button, () => this.loadIntroduction(item.reference));
           options.append(button);
         }
       } catch (error) {
         if (current()) status.textContent = error.message;
       }
     }
-    async loadIntroduction(request) {
+    async loadIntroduction(reference) {
       const ticket = ++this.introVersion, epoch = this.epoch, version = this.fieldVersions.overview || 0;
       const current = () => ticket === this.introVersion && epoch === this.epoch && !this.destroyed;
       const status = this.el("intro-status");
       this.clearIntroductionProposal();
-      status.textContent = "正在读取简介资料…";
+      status.textContent = "正在通过 PT-Gen 读取豆瓣简介…";
       try {
-        const data = await this.api.introduction(request);
+        const data = await this.api.introduction({source: "ptgen", reference});
         if (!current()) return;
         const edited = this.dirty.has("overview") || version !== (this.fieldVersions.overview || 0);
-        if (request.automatic && edited) {
-          status.textContent = "已保留人工编辑。";
-          return;
-        }
         if (!data.text) {
           status.textContent = [data.message, ...(data.warnings || [])].filter(Boolean).join("；") || "此条目没有可用简介。";
           return;
         }
-        const result = {...data, explicit: !request.automatic};
-        if (edited || (result.explicit && this.fields.overview && this.introApplied?.label !== result.label)) {
-          this.introPending = result;
+        if (edited || (this.fields.overview && this.introApplied?.label !== data.label)) {
+          this.introPending = data;
           this.el("intro-proposal").textContent = data.text;
           this.el("intro-review").hidden = false;
           status.textContent = data.label || "已找到资料";
-        } else this.applyIntroduction(result);
+        } else this.applyIntroduction(data);
       } catch (error) {
         if (current()) status.textContent = error.message;
       }
@@ -1033,7 +983,18 @@
       if (!this.context) return; const current = this.stamp("compose"), edit = this.editVersion, revision = this.context.revision;
       try {
         const format = this.el("format").value;
-        const result = await this.api.compose({context: this.context, ...this.fields, poster: val(this.context.metadata?.poster_url) && safeURL(val(this.context.metadata?.poster_url)) ? {kind:'upload',id:'identity-poster',url:safeURL(val(this.context.metadata.poster_url))} : null, reports: this.artifacts.filter(x => x.kind === "report"), screenshots: this.artifacts.filter(x => ["screenshot", "collage", "upload"].includes(x.kind) && /^https?:\/\//i.test(x.url || "") && safeURL(x.url)), links: this.links, format});
+        const cover = this.context.metadata?.poster_url;
+        const result = await this.api.compose({
+          context: this.context,
+          ...this.fields,
+          overview_is_introduction: true,
+          introduction_poster: cover?.source === "tmdb" ? safeURL(val(cover)) || null : null,
+          reports: this.artifacts.filter(item => item.kind === "report"),
+          screenshots: this.artifacts.filter(item => ["screenshot", "collage", "upload"].includes(item.kind)
+            && /^https?:\/\//i.test(item.url || "") && safeURL(item.url)),
+          links: this.links,
+          format,
+        });
         if (!current() || edit !== this.editVersion || revision !== this.context?.revision || result.context_revision !== revision) return;
         const localImages=this.el('local-images-preview');localImages.replaceChildren();
         const unpublished=this.images.length && !this.artifacts.some(x=>x.kind==='upload' && safeURL(x.url));

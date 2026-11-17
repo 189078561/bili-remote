@@ -333,6 +333,20 @@ class IntroductionService:
             raise ProviderError("unconfigured", "当前资料源未启用，可选择其他来源或直接粘贴资料")
         return provider
 
+    async def ptgen_call(self, method, *args):
+        try:
+            return await getattr(self.provider("ptgen"), method)(*args)
+        except ProviderError as exc:
+            message = {
+                "unconfigured": "请在设置的「TMDB 与 PT-Gen」中填写 PT-Gen 服务地址及所需的 API Key。",
+                "upstream_http_401": "PT-Gen 鉴权失败，请在设置中检查 PT-Gen API Key（HTTP 401）。",
+                "upstream_http_403": "PT-Gen 拒绝访问，请检查 API Key 权限及服务端的豆瓣访问状态（HTTP 403）。",
+                "upstream_rejected": "PT-Gen 未能读取豆瓣资料，请检查 PT-Gen 服务端的豆瓣访问状态。",
+            }.get(exc.code)
+            if not message:
+                raise
+            raise ProviderError(exc.code, message) from exc
+
     async def options(self, request):
         if request.source == "tmdb_season":
             ref = identifier(request.query.strip())
@@ -342,7 +356,11 @@ class IntroductionService:
                  "date": text(item.get("air_date")), "series_title": text(row.get("name"))}
                 for item in row.get("seasons", []) if type(item.get("season_number")) is int and item["season_number"] >= 0
             ]}
-        page = await self.provider(request.source).search(request.query.strip(), "anime")
+        query = request.query.strip()
+        if request.source == "ptgen":
+            page = await self.ptgen_call("search", query, "anime")
+        else:
+            page = await self.provider("bangumi").search(query, "anime")
         return {"items": [{"reference": str(item["id"]), "title": item.get("title"), "date": item.get("year")}
                           for item in page["items"]], "warnings": page.get("warnings", [])}
 
@@ -391,8 +409,10 @@ class IntroductionService:
             label = f"TMDB · 第 {request.season} 季 · {text(fields['title'])}"
         elif source == "ptgen":
             ref = canonical_reference(request.reference, source)
-            data = await self.provider("ptgen").get({"url": "https://movie.douban.com/subject/" + ref + "/", "format": "bbcode"})
+            data = await self.ptgen_call("get", {"url": "https://movie.douban.com/subject/" + ref + "/", "format": "bbcode"})
             row = data.get("data") if isinstance(data.get("data"), dict) else data
+            if row.get("site") == "douban" and row.get("id") and str(row["id"]) != ref:
+                raise ProviderError("invalid_schema", "PT-Gen 返回的豆瓣条目与所填 ID 不一致。")
             formatted = clean_ptgen_format((row.get("formats") or {}).get("bbcode") or row.get("format") or data.get("format"))
             fields = ptgen_fields(row, ref)
             label = "PT-Gen · 豆瓣 " + ref

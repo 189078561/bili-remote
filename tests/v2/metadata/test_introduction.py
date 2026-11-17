@@ -85,6 +85,28 @@ def test_ptgen_universal_formats_douban_chapter_with_all_cast(with_format):
     assert result["text"].splitlines() == expected
 
 
+@pytest.mark.parametrize("status, payload, expected", [
+    (401, {}, "API Key"),
+    (403, {}, "豆瓣访问状态"),
+    (200, {"data": {"site": "douban", "id": "12345", "title": "错误条目"}}, "ID 不一致"),
+])
+def test_douban_failure_does_not_return_other_metadata(status, payload, expected):
+    seen = []
+
+    def response(request):
+        seen.append(request.url.params["url"])
+        return httpx.Response(status, json=payload)
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+            service = IntroductionService({"ptgen": PTGenProvider("https://test.example/info", client=client)})
+            with pytest.raises(ProviderError, match=expected):
+                await service.build(IntroductionRequest(source="ptgen", reference="37457082"))
+
+    asyncio.run(run())
+    assert seen == ["https://movie.douban.com/subject/37457082/"]
+
+
 def test_tmdb_season_uses_only_selected_season_fields_and_cover():
     paths = []
 

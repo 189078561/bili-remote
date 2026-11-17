@@ -118,15 +118,11 @@
         <div id="wb-collapse-overview" class="wb-collapse" inert aria-hidden="true"><div class="wb-collapse-inner">
         <div class="wb-introduction-source">
           <div class="wb-inline wb-introduction-controls">
-            <label>简介资料来源<select data-wb="intro-source">
-              <option value="current">当前匹配作品</option><option value="tmdb_season">TMDB 分季</option>
-              <option value="ptgen">按豆瓣条目生成（PT-Gen）</option><option value="bangumi">Bangumi 条目</option>
-            </select></label>
-            <label data-wb="intro-query-label" hidden>条目或搜索词<input data-wb="intro-query" maxlength="200"></label>
-            <button type="button" data-wb="intro-fetch">读取当前匹配作品</button>
+            <label>豆瓣条目<input data-wb="intro-query" maxlength="200" placeholder="豆瓣 ID、条目链接或作品名"></label>
+            <button type="button" data-wb="intro-fetch">获取豆瓣简介</button>
           </div>
           <p class="wb-note" data-wb="intro-applied" hidden></p>
-          <p class="wb-note" data-wb="intro-status" role="status">可选择独立资料条目，或直接粘贴已有 PT-Gen 文本。</p>
+          <p class="wb-note" data-wb="intro-status" role="status">通过 PT-Gen 读取豆瓣资料。剧集请填写要发布的篇章条目，也可直接粘贴完整简介。</p>
           <div class="wb-candidates" data-wb="intro-options"></div>
           <div data-wb="intro-review" hidden>
             <p class="wb-note">已保留现有内容。核对下方资料后，可选择替换。</p>

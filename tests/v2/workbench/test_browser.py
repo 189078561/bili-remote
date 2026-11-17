@@ -92,8 +92,6 @@ def v2_fixture(page, requests, identity=None):
             result = {"context": resolved, "changes": [], "capabilities": []}
         elif path in ("release-title/render", "subtitles/render"):
             result = {"text": "Generated title" if path.startswith("release-title") else "合成副标题", "context_revision": rev, "warnings": []}
-        elif path == "publishing/introduction":
-            result = {"text": payload["context"]["metadata"]["overview"]["value"], "label": "合成介绍", "poster": None, "warnings": []}
         elif path == "publishing/preview":
             import html
             text = '\n'.join(payload[x] for x in ("release_title", "subtitle", "overview"))
@@ -118,7 +116,8 @@ def test_contract_edit_copy_formats_responsive_and_no_draft(live_server):
         page.evaluate("wb.select([{root_key:'downloads',relative_path:'Media/episode01.mp4',kind:'video',fingerprint:'fixture'}])")
         expect(page.locator('[data-edit="release_title"]')).to_have_value('Generated title')
         expect(page.locator('[data-wb="template-source"]')).to_contain_text('规则来源：文件名 episode01.mp4')
-        expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
+        expect(page.locator('[data-wb="output"]')).to_contain_text('Generated title')
+        assert page.locator('[data-edit="overview"]').input_value() == ""
         show_panel(page, None)
         page.locator('[data-edit="release_title"]').fill('人工主标题 <script>window.bad=true</script>')
         show_panel(page, None)
@@ -1218,17 +1217,21 @@ def test_independent_introduction_late_result_requires_review_and_copies_full_te
         show_panel(page, None)
         pending = []
         page.route('**/api/v2/publishing/introduction', lambda route: pending.append(route))
-        page.route('**/api/v2/publishing/introduction/options', lambda route: route.fulfill(json={
-            'items': [{'reference': '8', 'season': 4, 'title': '年番4／慕兰之战', 'date': '2026-07-01'}]
-        }))
-        page.locator('[data-wb=intro-source]').select_option('tmdb_season')
-        page.locator('[data-wb=intro-query]').fill('8')
+        def search(route):
+            assert route.request.post_data_json == {'source': 'ptgen', 'query': '慕兰之战'}
+            route.fulfill(json={
+                'items': [{'reference': '37457082', 'title': '年番4／慕兰之战', 'date': '2026'}]
+            })
+
+        page.route('**/api/v2/publishing/introduction/options', search)
+        page.locator('[data-wb=intro-query]').fill('慕兰之战')
         page.locator('[data-wb=intro-fetch]').click()
         page.get_by_role('button', name=re.compile('年番4／慕兰之战')).click()
         editor = page.locator('[data-edit=overview]')
         editor.fill('用户粘贴的旧资料')
         intro = '◎片　　名　年番4／慕兰之战\n◎年　　代　2026\n◎主　　演　演员甲\n　　　　　演员乙\n\n◎简　　介\n\n　　当季剧情。'
-        pending[0].fulfill(json={'text': intro, 'label': 'TMDB 第 4 季', 'poster': None, 'warnings': []})
+        assert pending[0].request.post_data_json == {'source': 'ptgen', 'reference': '37457082'}
+        pending[0].fulfill(json={'text': intro, 'label': 'PT-Gen · 豆瓣 37457082', 'poster': None, 'warnings': []})
         expect(editor).to_have_value('用户粘贴的旧资料')
         expect(page.locator('[data-wb=intro-proposal]')).to_have_text(intro, use_inner_text=False)
         page.locator('[data-wb=intro-accept]').click()
@@ -1242,30 +1245,59 @@ def test_independent_introduction_late_result_requires_review_and_copies_full_te
         playwright.stop()
 
 
-def test_matched_series_prompts_for_douban_chapter(live_server):
+def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server):
     base_url, _ = live_server
     playwright, browser, page, errors = browser_session(base_url)
     requests = []
     try:
+        from bili_remote.v2.workbench.publishing import PublishingService
+
         v2_fixture(page, requests, {"media_type": "anime", "tmdb_id": "8"})
         intro = "◎片　　名　凡人修仙传 年番4\n◎年　　代　2026"
+        failed_reference = "12345"
 
         def introduction(route):
-            requests.append(("publishing/introduction", route.request.post_data_json))
-            route.fulfill(json={"text": intro, "label": "PT-Gen · 豆瓣 37457082", "warnings": []})
+            payload = route.request.post_data_json
+            requests.append(("publishing/introduction", payload))
+            if payload["reference"] == failed_reference:
+                route.fulfill(status=502, json={"detail": "PT-Gen 鉴权失败"})
+            else:
+                route.fulfill(json={"text": intro, "label": "PT-Gen · 豆瓣 37457082", "warnings": []})
+
+        def preview(route):
+            payload = route.request.post_data_json
+            assert payload["overview_is_introduction"] is True
+            context = payload["context"]
+            context["metadata"]["year"] = {"value": 2020, "source": "tmdb"}
+            route.fulfill(json=PublishingService().compose(
+                context, payload["release_title"], payload["subtitle"], payload["overview"],
+                format=payload["format"], overview_is_introduction=payload["overview_is_introduction"],
+            ))
 
         page.route("**/api/v2/publishing/introduction", introduction)
+        page.route("**/api/v2/publishing/preview", preview)
         mount(page)
         page.evaluate("wb.select([{root_key:'downloads',relative_path:'Media/episode01.mp4',kind:'video',fingerprint:'fixture'}])")
         show_panel(page)
-        expect(page.locator("[data-wb=intro-source]")).to_have_value("ptgen")
-        expect(page.locator("[data-wb=intro-status]")).to_contain_text("篇章的豆瓣 ID")
+        expect(page.locator("[data-wb=intro-source]")).to_have_count(0)
+        expect(page.locator("[data-wb=validation]")).to_contain_text("简介正文尚未生成")
+        editor = page.locator("[data-edit=overview]")
+        expect(editor).to_have_value("")
+        expect(page.locator("[data-wb=output]")).not_to_contain_text("2020")
         assert not [payload for name, payload in requests if name == "publishing/introduction"]
-        page.locator("[data-wb=intro-query]").fill("37457082")
-        page.locator("[data-wb=intro-fetch]").click()
-        expect(page.locator("[data-edit=overview]")).to_have_value(intro)
+        query = page.locator("[data-wb=intro-query]")
+        fetch = page.locator("[data-wb=intro-fetch]")
+        query.fill("https://movie.douban.com/subject/37457082/")
+        fetch.click()
+        expect(editor).to_have_value(intro)
+        expect(page.locator("[data-wb=output]")).to_have_text(intro)
+        query.fill(failed_reference)
+        fetch.click()
+        expect(page.locator("[data-wb=intro-status]")).to_contain_text("PT-Gen 鉴权失败")
+        expect(editor).to_have_value(intro)
         assert [payload for name, payload in requests if name == "publishing/introduction"] == [
-            {"source": "ptgen", "reference": "37457082"}
+            {"source": "ptgen", "reference": "https://movie.douban.com/subject/37457082/"},
+            {"source": "ptgen", "reference": failed_reference},
         ]
         assert not errors, errors
     finally:
