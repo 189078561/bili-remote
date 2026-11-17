@@ -85,6 +85,30 @@ def test_ptgen_universal_formats_douban_chapter_with_all_cast(with_format):
     assert result["text"].splitlines() == expected
 
 
+def test_other_douban_series_uses_all_structured_credits_and_discloses_missing_writer():
+    actors = [{"name": f"演员 {i:03}"} for i in range(1, 121)]
+
+    def response(request):
+        assert request.url.params["url"] == "https://movie.douban.com/subject/25754848/"
+        return httpx.Response(200, json={
+            "site": "douban", "id": "25754848", "this_title": ["琅琊榜"], "trans_title": ["Nirvana in Fire"],
+            "episodes": 54, "language": ["汉语普通话"], "director": [{"name": "导演甲"}], "cast": actors,
+            "format": "◎主　　演　" + "\n　　　　　".join(actor["name"] for actor in actors[:15]),
+        })
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+            service = IntroductionService({"ptgen": PTGenProvider("https://test.example/info", client=client)})
+            return await service.build(IntroductionRequest(source="ptgen", reference="25754848"))
+
+    result = asyncio.run(run())
+    intro = result["text"]
+    assert "◎集　　数　54" in intro and "◎译　　名　Nirvana in Fire" in intro
+    assert intro.count("演员 ") == 120 and "演员 120" in intro
+    assert "◎编　　剧" not in intro and "凡人修仙传" not in intro
+    assert result["warnings"] == ["PT-Gen 本次未提供：编剧。"]
+
+
 @pytest.mark.parametrize("status", [200, 401])
 def test_exact_douban_subject_completes_legacy_mobile_response(status):
     mobile = {

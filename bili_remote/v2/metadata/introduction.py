@@ -452,11 +452,11 @@ class IntroductionService:
             content = complete_ptgen_format(formatted, {**fields, **supplement})
             warnings.append("已用该条目的用户提供资料补充：" +
                             "、".join(labels[key].replace("　", "") for key in supplement) + "。")
-        elif not supplied:
-            missing_labels = [labels[key].replace("　", "") for key in
-                              ("aliases", "languages", "directors", "writers", "cast") if missing(key)]
-            if len(missing_labels) >= 3:
-                warnings.append("PT-Gen 本次未返回：" + "、".join(missing_labels) + "。可在简介中补充。")
+        missing_labels = [labels[key].replace("　", "") for key in
+                          ("aliases", "languages", "directors", "writers", "cast")
+                          if key not in supplement and missing(key)]
+        if missing_labels:
+            warnings.append("PT-Gen 本次未提供：" + "、".join(missing_labels) + "。")
         return {"text": content, "poster": None, "label": label, "warnings": warnings}
 
     async def bangumi(self, ref):
