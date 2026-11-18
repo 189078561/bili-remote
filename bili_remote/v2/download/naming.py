@@ -36,6 +36,7 @@ class NameFacts(BaseModel):
     number_kind: NumberKind | None = None
     number: int | None = Field(default=None, ge=1, le=99999)
     chapter: str | None = Field(default=None, max_length=300)
+    extra_title: str | None = Field(default=None, max_length=300)
 
 
 class NamePreviewRequest(BaseModel):
@@ -81,12 +82,15 @@ def episode_facts(episodes):
     result = {}
     for item in episodes:
         number = item.get("display_episode_number")
-        if not number or item.get("group") != "正片" or counts[number] != 1:
+        group = item.get("group")
+        if not number or group != "正片" or counts[number] != 1:
             number = None
         key = str(item["id"])
+        extra_title = str(item.get("title") or "").strip()[:300] if group and group != "正片" else None
         result[key] = NameFacts(identifier=safe_identifier("ep" + key), number=number,
                                 number_kind="episode" if number else None,
-                                chapter=str(item.get("chapter_title") or "")[:300] or None)
+                                chapter=str(item.get("chapter_title") or "")[:300] or None,
+                                extra_title=extra_title or None)
     return result
 
 
@@ -103,17 +107,21 @@ def download_plan(title, facts, options, *, episode_id=None, all_parts=False):
             number, kind = edited, "episode"
     elif not all_parts and options.number:
         number, kind = options.number, options.number_kind
-    return {
+    plan = {
         "title": (options.title or title or "").strip()[:300],
         "identifier": safe_identifier(facts.identifier),
         "number_kind": kind,
         "number": number,
         "all_parts": all_parts,
     }
+    if episode_id is not None and not number and facts.extra_title:
+        plan["extra_title"] = facts.extra_title
+    return plan
 
 
 def initial_filename(plan, extension="mp4", *, collision=None):
-    title = normalize_naming_text(plan.get("title") or "Bilibili")
+    extra_title = plan.get("extra_title")
+    title = normalize_naming_text(extra_title or plan.get("title") or "Bilibili")
     # Reserve space for IDs, suffixes and language-qualified sidecars even for UTF-8 names.
     title = title.encode()[:155].decode(errors="ignore").strip(" ._-") or "Bilibili"
     try:
@@ -123,7 +131,12 @@ def initial_filename(plan, extension="mp4", *, collision=None):
     number = positive_number(plan.get("number"))
     kind = plan.get("number_kind")
     identifier = safe_identifier(plan.get("identifier"))
-    label = ("E" if kind == "episode" else "P") + str(number).zfill(2) if number and kind in {"episode", "part"} else ("Bili" + identifier if identifier and identifier.lower().startswith("ep") else identifier)
+    if number and kind in {"episode", "part"}:
+        label = ("E" if kind == "episode" else "P") + str(number).zfill(2)
+    elif extra_title:
+        label = None
+    else:
+        label = "Bili" + identifier if identifier and identifier.lower().startswith("ep") else identifier
     if safe_identifier(collision) and collision.lower().startswith("ep"):
         collision = "Bili" + collision
     suffix = ".".join(dict.fromkeys(part for part in (label, collision) if part))

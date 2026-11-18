@@ -139,7 +139,7 @@ def result_plan(plan, origin):
     result["title"] = plan.get("title") or origin.get("original_title") or ""
     origin_id = safe_identifier(origin.get("bvid")) or safe_identifier("cid" + str(origin.get("cid") or ""))
     part = None
-    if not (origin.get("ep_id") or origin.get("season_id")):
+    if not (origin.get("ep_id") or origin.get("season_id") or result.get("extra_title")):
         part = url_facts(origin.get("webpage_url")).number or positive_number(origin.get("part_number"))
     if result.get("all_parts") or not result.get("number") and part:
         result.update(number_kind="part" if part else None, number=part,

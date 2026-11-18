@@ -455,6 +455,41 @@ def test_number_and_title_preview_stay_inline_with_episode_selection(live_server
         browser.close()
         playwright.stop()
 
+def test_saved_parse_names_main_episode_and_bonus_by_their_own_metadata(live_server):
+    base, app = live_server
+    source = "https://www.bilibili.com/bangumi/play/ep4507157"
+    services = app.state.services
+    episodes, _ = services.runner._build_episodes({}, {
+        "main_section": {"episodes": [{"id": 3065290, "title": "1", "long_title": "来世，你可以找我报仇"}]},
+        "section": [{"title": "PV花絮", "episodes": [{"id": 4507157, "title": "兢慎篇 预热PV"}]}],
+    })
+    services.database.save_history(
+        source_url=source, api_mode="web", title="盗妖行", uploader="",
+        duration=None, is_playlist=True, playlist_count=1, default_episode_id="4507157",
+        formats=[], episodes=episodes,
+    )
+    playwright, browser, page, errors = browser_session(base)
+    try:
+        page.route("**/api/episodes/formats", lambda route: route.fulfill(json={"formats": []}))
+        page.locator("[data-view=download]").click()
+        page.get_by_text("解析记录", exact=True).click()
+        page.get_by_role("button", name="复用解析").click()
+        preview = page.locator("[data-naming-preview]")
+        expect(preview).to_have_text("兢慎篇.预热PV.mp4")
+        page.get_by_role("button", name="正片", exact=True).click()
+        page.locator('[data-episode-id="3065290"]').click()
+        expect(page.locator("[data-naming-episode]")).to_have_value("3065290")
+        expect(page.locator("[data-naming-facts]")).to_contain_text("连续第 1 集")
+        expect(preview.locator("div")).to_have_text(["盗妖行.E01.mp4", "兢慎篇.预热PV.mp4"])
+
+        page.locator("[data-naming-number]").fill("7")
+        expect(preview.locator("div")).to_have_text(["盗妖行.E07.mp4", "兢慎篇.预热PV.mp4"])
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
 def test_grid_hides_empty_categories_and_reuses_saved_parse_without_resolving(live_server):
     base, _ = live_server
     playwright, browser, page, errors = browser_session(base, legacy=False)

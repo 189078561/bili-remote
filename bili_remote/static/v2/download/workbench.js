@@ -194,6 +194,29 @@
     return /预告|先导|trailer|teaser/i.test(episode.title || "") ? "预告" : "花絮";
   }
 
+  function savedEpisodeNamingFacts(episodes) {
+    // History stores the resolved episode list, including the platform's
+    // explicit episode numbers. Its grid positions are only for navigation.
+    const counts = new Map();
+    for (const {group, display_episode_number: number} of episodes) {
+      if (group === "正片" && Number.isInteger(number) && number >= 1 && number <= 99999) {
+        counts.set(number, (counts.get(number) || 0) + 1);
+      }
+    }
+    return Object.fromEntries(episodes.map(episode => {
+      const id = String(episode.id);
+      const number = episode.group === "正片" && counts.get(episode.display_episode_number) === 1
+        ? episode.display_episode_number : null;
+      return [id, {
+        identifier: /^\d{1,20}$/.test(id) ? `ep${id}` : null,
+        number_kind: number === null ? null : "episode",
+        number,
+        chapter: String(episode.chapter_title || "").slice(0, 300) || null,
+        extra_title: episode.group && episode.group !== "正片" ? String(episode.title || "").trim().slice(0, 300) || null : null
+      }];
+    }));
+  }
+
   function mount(root, options = {}) {
     if (!root) throw new TypeError("download workbench root is required");
     const api = options.api || createApi();
@@ -287,7 +310,7 @@
         episode_numbers: batch ? Object.fromEntries(state.namingNumbers) : {}
       };
     }
-    function updateNamingEditor() {
+    function updateNamingEditor(preferredEpisodeId) {
       const result = state.resolved;
       if (!result) return;
       const batch = Boolean(result.episodes?.length);
@@ -297,7 +320,10 @@
       if (batch) {
         const chosen = result.episodes.filter(episode => ids.has(String(episode.id)));
         select.replaceChildren(...chosen.map(episode => new Option(episode.title || String(episode.id), String(episode.id))));
-        if (ids.has(previous)) select.value = previous;
+        const preferred = ids.has(preferredEpisodeId) ? preferredEpisodeId : previous;
+        const main = chosen.find(episode => episode.group === "正片");
+        if (ids.has(preferred)) select.value = preferred;
+        else if (main) select.value = String(main.id);
         $("[data-naming-number]").value = state.namingNumbers.get(select.value) || "";
       }
       $("[data-naming-episode-label]").hidden = !enabled || !batch || !select.value;
@@ -305,13 +331,21 @@
       $("[data-naming-number-label]").hidden = !enabled || (batch ? !select.value : allPartsSelected());
       $("[data-naming-name]").disabled = !enabled;
       $("[data-naming-number]").disabled = !enabled || (batch ? !select.value : allPartsSelected());
-      const picked = batch ? result.naming_items?.[select.value] : result.naming_video;
-      const inferred = picked?.number_kind === "part" ? `分 P · 第 ${picked.number} P` :
+      queueNamingPreview();
+    }
+    function updateNamingHint(result, preferences) {
+      const batch = Boolean(result.episodes?.length);
+      const id = $("[data-naming-episode]").value;
+      const picked = batch ? result.naming_items?.[id] : result.naming_video;
+      const edited = batch ? preferences.episode_numbers[id] : preferences.number;
+      const unit = !batch && preferences.number_kind === "part" ? "P" : "集";
+      const inferred = edited ? `手动编号 · 第 ${edited} ${unit}` :
+        picked?.extra_title ? `按标题命名 · ${picked.extra_title}` :
+        picked?.number_kind === "part" ? `分 P · 第 ${picked.number} P` :
         picked?.number_kind === "episode" ? `连续第 ${picked.number} 集` : picked?.identifier ? `平台 ID ${picked.identifier}` : "未确认集号，保留可用平台标识";
       $("[data-naming-facts]").textContent = allPartsSelected()
         ? (result.naming_parts?.length ? `已识别 ${result.naming_parts.length} 个分 P` : "下载全部内容，按各文件的实际信息命名")
-        : batch && !select.value ? "选择剧集后显示连续集号或平台 ID。" : [inferred, picked?.chapter].filter(Boolean).join(" · ");
-      queueNamingPreview();
+        : batch && !id ? "选择剧集后显示命名依据。" : [inferred, picked?.extra_title ? null : picked?.chapter].filter(Boolean).join(" · ");
     }
     function queueNamingPreview() {
       clearTimeout(state.namingTimer);
@@ -320,6 +354,7 @@
       if (!result) return;
       const output = $("[data-naming-preview]");
       const preferences = namingOptions();
+      updateNamingHint(result, preferences);
       if (preferences.mode === "source") { output.textContent = "沿用现有来源模板。"; return; }
       const ids = selectedIds();
       const items = result.episodes?.length ? ids.slice(0, 8).map(id => result.naming_items?.[id] || {identifier: `ep${id}`}) :
@@ -346,7 +381,7 @@
         }
       }, 180);
     }
-    function updateCount({preserveFormats = false} = {}) {
+    function updateCount({preserveFormats = false, preferredEpisodeId} = {}) {
       const count = selectedIds().length;
       selectedCount.textContent = `已选 ${count} 集`;
       $("[data-check-batch]").hidden = count < 2;
@@ -357,7 +392,7 @@
       state.formatRequest += 1;
       if (!preserveFormats && count === 1) loadSelectedEpisodeFormat(selectedIds()[0], state.formatRequest);
       if (state.resolved) stage("selecting"); summary();
-      updateNamingEditor();
+      updateNamingEditor(preferredEpisodeId);
     }
     function renderEpisodes(data, saved) {
       state.categories.clear();
@@ -453,10 +488,11 @@
           if (!$("[data-episode-detail]").contains(document.activeElement)) showEpisodeDetail(episode, title);
         });
         tile.addEventListener("click", () => {
-          if (!state.selected.delete(id)) state.selected.add(id);
+          const added = !state.selected.delete(id);
+          if (added) state.selected.add(id);
           showEpisodeDetail(episode, title);
           updateEpisodeTiles();
-          updateCount();
+          updateCount({preferredEpisodeId: added ? id : undefined});
         });
         episodeList.append(tile);
       }
@@ -652,6 +688,9 @@
     }
     function applyResolved(result, url, {fromHistory = false} = {}) {
       result = {...result, episodes: Array.isArray(result.episodes) ? result.episodes : []};
+      if (fromHistory && result.episodes.length && !result.naming_items) {
+        result.naming_items = savedEpisodeNamingFacts(result.episodes);
+      }
       state.resolved = result;
       state.episodeChoices.clear();
       state.episodeFormats.clear();
@@ -1093,7 +1132,7 @@
     });
     listen(form, "submit", submit);
     listen(formatField, "change", summary);
-    listen($("[data-naming-mode]"), "change", updateNamingEditor);
+    listen($("[data-naming-mode]"), "change", () => updateNamingEditor());
     listen($("[data-naming-episode]"), "change", () => {
       const id = $("[data-naming-episode]").value;
       $("[data-naming-number]").value = state.namingNumbers.get(id) || "";
@@ -1109,7 +1148,7 @@
       }
       queueNamingPreview();
     });
-    listen($("[data-all-parts] input"), "change", updateNamingEditor);
+    listen($("[data-all-parts] input"), "change", () => updateNamingEditor());
     listen($("[data-output]"), "input", summary);
     listen(modeField, "change", () => { ++state.parseVersion; if (urlField.value.trim()) parse(); });
     listen(selectAll, "click", togglePageSelection);

@@ -31,6 +31,12 @@ def test_initial_names_use_displayed_episode_and_preserve_unknown_ids():
     assert initial_filename(download_plan("普通视频", url_facts(VIDEO_URL + "?p=2"), options)) == "普通视频.P02.mp4"
     edited = NameOptions(title="Mortal’s Journey", episode_numbers={"3854802": 178})
     assert initial_filename(download_plan("凡人修仙传", facts["3854802"], edited, episode_id="3854802")) == "Mortals.Journey.E178.mp4"
+    extra = episode_facts([{"id": "4507157", "group": "PV花絮", "title": "兢慎篇 预热PV"}])["4507157"]
+    plan = download_plan("盗妖行", extra, options, episode_id="4507157")
+    assert initial_filename(plan) == "兢慎篇.预热PV.mp4"
+    assert initial_filename(plan, collision=plan["identifier"]) == "兢慎篇.预热PV.Biliep4507157.mp4"
+    overridden = download_plan("盗妖行", extra, NameOptions(episode_numbers={"4507157": 89}), episode_id="4507157")
+    assert initial_filename(overridden) == "盗妖行.E89.mp4"
 
 
 def test_stage_blocks_symlinks_and_ignores_partial_paths(tmp_path):
@@ -151,7 +157,10 @@ def test_naming_options_are_previewed_and_persisted_by_existing_apis(settings, m
     monkeypatch.setattr(services.manager, "start", lambda: None)
     raw = [{"id": 3854802, "title": "200", "long_title": "暮兰之战24"},
            {"id": 3854803, "title": "新章", "long_title": "暮兰之战25"}]
-    episodes, _ = services.runner._build_episodes({}, {"main_section": {"episodes": raw}})
+    episodes, _ = services.runner._build_episodes({}, {
+        "main_section": {"episodes": raw},
+        "section": [{"title": "PV花絮", "episodes": [{"id": 4507157, "title": "兢慎篇 预热PV"}]}],
+    })
     assert displayed_episode_number("暮兰之战24") is None
 
     async def resolve(url, mode):
@@ -170,13 +179,16 @@ def test_naming_options_are_previewed_and_persisted_by_existing_apis(settings, m
         preview = client.post("/api/download/naming/preview", json={
             "options": options, "title": resolved["title"], "items": list(resolved["naming_items"].values())
         })
-        assert preview.json()["items"] == ["凡人.修仙传.E198.mp4", "凡人.修仙传.Biliep3854803.mp4"]
+        assert preview.json()["items"] == [
+            "凡人.修仙传.E198.mp4", "凡人.修仙传.Biliep3854803.mp4", "兢慎篇.预热PV.mp4"
+        ]
         batch = client.post("/api/jobs/batch", json={
-            "url": SERIES_URL, "episode_ids": ["3854802", "3854803"], "naming": options
+            "url": SERIES_URL, "episode_ids": ["3854802", "3854803", "4507157"], "naming": options
         })
         assert batch.status_code == 200, batch.text
         plans = [services.database.get_download_naming(job)["plan"] for job in batch.json()["ids"]]
-        assert [plan["number"] for plan in plans] == [198, None]
+        assert [plan["number"] for plan in plans] == [198, None, None]
+        assert [initial_filename(plan) for plan in plans] == preview.json()["items"]
         single = client.post("/api/jobs", json={"url": VIDEO_URL + "?p=5", "naming": {"mode": "smart"}, "title": "测试"})
         assert single.status_code == 200, single.text
         single_plan = services.database.get_download_naming(single.json()["id"])["plan"]
