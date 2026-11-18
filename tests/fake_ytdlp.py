@@ -102,6 +102,18 @@ def main() -> int:
         if not info.get("formats"):
             print("ERROR: info json has no formats", file=sys.stderr)
             return 1
+        if info.get("title") == "__CDN_RECOVERY__":
+            video, audio = info["formats"]
+            if video["url"].endswith("/bad"):
+                # Real aria2 emits the useful status on stdout.
+                print(f"[ERROR] URI={video['url']}", flush=True)
+                print("Exception: response status=567", flush=True)
+                print("Exception: response status=403", flush=True)
+                print("ERROR: aria2c exited with code 22", file=sys.stderr)
+                return 1
+            assert audio["url"].endswith("/audio")
+            assert "--no-continue" in sys.argv
+            assert option_value("--downloader") == "aria2c"
         if info.get("title") == "__TV403__":
             print(
                 "ERROR: unable to download video data: HTTP Error 403: Forbidden",

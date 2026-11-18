@@ -11,7 +11,7 @@
 - 单集格式按分辨率分组并显示视频/音频编码、帧率、HDR 和码率，视频选项只保留 1080P 及以上清晰度；多集下载可选择统一画质偏好，缺失时自动就近回退，并可抽样检测所选集数的实际格式覆盖率。
 - 支持 Web 与 TV 两条解析线路。TV 线路用于无水印片源，但不会解除地区限制，也不支持多 P 视频。
 - 支持 B 站可提供的 8K、4K、HDR、杜比视界、FLAC 和杜比音轨，但画质取决于视频本身和账号权限。
-- 默认使用 aria2c 16 连接、5MB 分片、20MB 最小分片下载；aria2 失败时自动回退到 yt-dlp 原生下载。
+- 默认使用 aria2c 8 路连接、4 MiB 分片和 4 MiB 最小拆分下载；aria2 失败时自动回退到 yt-dlp 原生下载。
 - TV 解析只展示接口实际返回的码流挡位；下载前会对 baseUrl/backupUrl 做短测速，Web 与 TV 同画质片源也会参与对比。
 - 不绕过会员、付费、地域或 DRM 限制。受 DRM 保护的内容可能无法由 yt-dlp 下载。
 - 不转码，仅合流音视频。容器由 yt-dlp/ffmpeg 按实际编码自动选择。
@@ -93,16 +93,16 @@ TV 线路只使用 `android_tv_yst` 片源，不会混入 Web PC 流；否则会
 
 ### 下载加速与风控
 
-镜像内置 aria2c，默认采用 BBDown 同类快速档：16 连接、5MB 分片、20MB 最小分片。视频流和音频流仍按顺序下载，最后由 ffmpeg 合流。遇到 403、404、连接中断或空数据块时，会先切换 CDN 备用节点，再回退到 yt-dlp 原生下载和更保守的清晰度。
+镜像内置 aria2c，默认 8 路连接、4 MiB 分片和最小拆分，小体积音轨也能并发下载。视频和音频按顺序下载，最后由 ffmpeg 合流。明确限流时在原节点退避并降低并发。节点连续返回服务端错误时尝试同轨备用地址，403 或链接过期时优先尝试备用地址，必要时重新获取一次原轨播放地址。切换来源时重新下载未完成的轨道。
 
 可通过 `.env` 调整：
 
 ```text
 ARIA2_ENABLED=true
-ARIA2_CONNECTIONS=16
+ARIA2_CONNECTIONS=8
 ARIA2_RESUME_RETRIES=2
-ARIA2_MIN_SPLIT_SIZE=20M
-ARIA2_PIECE_SIZE=5M
+ARIA2_MIN_SPLIT_SIZE=4M
+ARIA2_PIECE_SIZE=4M
 TV_CDN_PROBE=true
 CDN_PROBE_TIMEOUT_SECONDS=3
 CDN_PROBE_SAMPLE_BYTES=524288
@@ -110,7 +110,7 @@ CDN_PROBE_CONNECTIONS=8
 LINE_COMPARE=true
 ```
 
-`ARIA2_CONNECTIONS` 最大 16。网络较慢或频繁出现 403 时可降到 8 或 4。`ARIA2_RESUME_RETRIES` 控制 aria2 连接中断后的断点续传重试次数，默认 2 次，期间保留 `.aria2` 控制文件，不会从 0 重下。`CDN_PROBE_SAMPLE_BYTES` 控制短测速采样量，默认 512KB；`CDN_PROBE_TIMEOUT_SECONDS` 控制单节点测速上限。`LINE_COMPARE` 只允许 Web 线路把 TV 同画质片源纳入测速；TV 线路始终只使用 TV 片源。关闭 `ARIA2_ENABLED` 后完全使用 yt-dlp 原生下载。这些环境变量作为首次启动和“恢复默认值”的默认值；登录后也可在独立设置页在线调整，保存值会持久化并覆盖环境默认值。
+`ARIA2_CONNECTIONS` 最大 16。网络较慢或频繁出现 403 时可降到 8 或 4。`ARIA2_RESUME_RETRIES` 控制 aria2 连接中断后的断点续传重试次数，默认 2 次，同节点重试会保留 `.aria2` 断点。`CDN_PROBE_SAMPLE_BYTES` 控制短测速采样量，默认 512KB；`CDN_PROBE_TIMEOUT_SECONDS` 控制单节点测速上限。`LINE_COMPARE` 只允许 Web 线路把 TV 同画质片源纳入测速；TV 线路始终只使用 TV 片源。关闭 `ARIA2_ENABLED` 后完全使用 yt-dlp 原生下载。这些环境变量作为首次启动和“恢复默认值”的默认值；登录后也可在独立设置页在线调整，保存值会持久化并覆盖环境默认值。
 
 ### 文件浏览
 

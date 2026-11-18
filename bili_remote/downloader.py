@@ -49,7 +49,7 @@ TV_CDN_BLOCKED_MESSAGE = (
     "TV 线路不能解除地区限制，请切换到 Web 线路，或更换服务器出口 IP 后重试。"
 )
 MIN_FORMAT_HEIGHT = 1080
-ARIA2_STABLE_MAX_CONNECTIONS = 8
+ARIA2_STABLE_CONNECTIONS = 8
 ARIA2_STABLE_FLOOR_CONNECTIONS = 4
 TV_STREAM_USER_AGENT = (
     "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
@@ -608,6 +608,7 @@ class YtDlpRunner:
         self,
         url: str,
         cookie_path: Path | None,
+        selector: str = "",
     ) -> dict[str, Any] | None:
         """Resolve once, attach Web/TV CDN candidates, and rank them by speed."""
         deadline = (
@@ -698,8 +699,11 @@ class YtDlpRunner:
             except BiliAPIError:
                 pass
 
+        # An exact video+audio request needs no warm-up on unselected tracks.
+        ids = set(selector.split("+"))
+        selected = [item for item in formats if item.get("format_id") in ids]
         await self._rank_cdn_candidates(
-            formats,
+            selected if ids == {item["format_id"] for item in selected} else formats,
             candidate_key="_cdn_candidates",
             drop_unavailable=False,
             max_items=12,
@@ -731,95 +735,99 @@ class YtDlpRunner:
             pass
 
     @staticmethod
-    def _advance_cdn_info(info: dict[str, Any]) -> bool:
+    def _advance_cdn_info(info: dict[str, Any], failed_urls: set[str] | None = None) -> bool:
         changed = False
         for item in info.get("formats") or []:
-            candidates = item.get("_cdn_candidates") or item.get("_tv_candidates")
-            if not isinstance(candidates, list) or len(candidates) < 2:
-                continue
-            candidates = [url for url in candidates if isinstance(url, str) and url]
-            if len(candidates) < 2:
-                continue
             current = item.get("url")
-            try:
-                index = candidates.index(current)
-            except ValueError:
-                index = 0
-            item["url"] = candidates[(index + 1) % len(candidates)]
-            changed = True
+            if failed_urls and current not in failed_urls:
+                continue
+            candidates = item.get("_cdn_candidates") or item.get("_tv_candidates") or []
+            if current in candidates:
+                remaining = candidates[candidates.index(current) + 1:]
+                if remaining:
+                    item["url"] = remaining[0]
+                    changed = True
         return changed
 
     @staticmethod
-    def _is_cdn_failure(message: str) -> bool:
-        text = message.lower()
-        return YtDlpRunner._has_retryable_cdn_status(message) or any(
-            pattern in text
-            for pattern in (
-                "http error 403",
-                "403: forbidden",
-                "403 forbidden",
-                "http error 404",
-                "404: not found",
-                "did not get any data blocks",
-                "remote end closed connection",
-                "connection reset by peer",
-                "connection aborted",
-                "unable to download video data",
-            )
-        )
-
-    @staticmethod
-    def _has_retryable_cdn_status(message: str) -> bool:
-        text = message.lower()
-        retryable_status = (
-            r"(?:429|5(?:00|01|02|03|04|20|21|22|23|24|25|26|27)|567)"
-        )
-        if re.search(
-            rf"(?:\bhttp(?:\s+error)?(?:\s+status)?|\berrorcode|"
-            rf"\bstatus(?:\s+code)?)\s*[:=/]?\s*{retryable_status}\b",
-            text,
-        ):
-            return True
-        if re.search(
-            rf"\bhttp/\d(?:\.\d)?\s+{retryable_status}\b",
-            text,
-        ):
-            return True
-        return bool(
-            re.search(
-                rf"\b{retryable_status}\b\s*:?\s*"
-                r"(?:too many requests|internal server error|bad gateway|"
-                r"service unavailable|gateway timeout|web server is down|"
-                r"connection timed out|origin is unreachable)",
-                text,
-            )
-        )
-
-    @staticmethod
-    def _should_rotate_cdn(message: str) -> bool:
-        """Keep resumable downloads on one CDN unless the node itself is bad."""
-        text = message.lower()
-        if (
-            YtDlpRunner._has_retryable_cdn_status(message)
-            or "too many requests" in text
-            or "rate limit" in text
-        ):
+    def _renew_track_urls(info: dict, fresh: dict, failed_urls: set[str]) -> bool:
+        """Replace expired URLs only for the same media item and exact tracks."""
+        if not info.get("id") or info["id"] != fresh.get("id"):
             return False
-        return any(
-            pattern in text
-            for pattern in (
-                "http error 403",
-                "403: forbidden",
-                "403 forbidden",
-                "http error 404",
-                "404: not found",
-                "did not get any data blocks",
-                "remote end closed connection",
-                "connection reset by peer",
-                "connection aborted",
-                "unable to download video data",
-            )
+        old_cid = (info.get("_v2_origin") or {}).get("cid")
+        if old_cid and old_cid != (fresh.get("_v2_origin") or {}).get("cid"):
+            return False
+        def track_key(item: dict) -> tuple:
+            return tuple(item.get(key) for key in ("format_id", "vcodec", "acodec", "ext"))
+
+        tracks = {track_key(item): item for item in fresh.get("formats", []) if item.get("format_id")}
+        changed = False
+        for item in info.get("formats", []):
+            if failed_urls and item.get("url") not in failed_urls:
+                continue
+            match = tracks.get(track_key(item))
+            if not match or not match.get("url"):
+                continue
+            key = "_tv_candidates" if "_tv_candidates" in match else "_cdn_candidates"
+            previous = item.get(key) or [item.get("url")]
+            urls = dict.fromkeys([match["url"], *(match.get(key) or [])])
+            remaining = [url for url in urls if url and url not in previous]
+            if remaining:
+                item["url"] = remaining[0]
+                item[key] = remaining
+                if "http_headers" in match:
+                    item["http_headers"] = match["http_headers"]
+                changed = True
+        return changed
+
+    @staticmethod
+    def _http_statuses(message: str) -> set[int]:
+        # Query parameters in signed URLs are not HTTP diagnostics.
+        diagnostic = re.sub(r"https?://\S+", "", message, flags=re.I)
+        prefixed = re.findall(
+            r"(?:\bHTTP(?:/\d(?:\.\d)?|\s+Error|\s+Status)?|\berrorCode|"
+            r"\bstatus(?:\s+code)?)\s*[:=/]?\s*(\d{3})\b",
+            diagnostic, flags=re.I,
         )
+        with_reason = re.findall(
+            r"\b(\d{3})\s*:?\s+(?:forbidden|not found|too many requests|"
+            r"internal server error|bad gateway|service unavailable|gateway timeout|"
+            r"web server is down|connection timed out|origin is unreachable)\b",
+            diagnostic, flags=re.I,
+        )
+        return {int(value) for value in prefixed + with_reason}
+
+    @staticmethod
+    def _rate_limited(message: str) -> bool:
+        text = message.lower()
+        return (429 in YtDlpRunner._http_statuses(message)
+                or "too many requests" in text or "rate limit" in text)
+
+    @staticmethod
+    def _node_error(message: str) -> bool:
+        return bool(YtDlpRunner._http_statuses(message) & {
+            500, 501, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 567,
+        })
+
+    @staticmethod
+    def _should_rotate_cdn(message: str, consecutive_errors: int = 1) -> bool:
+        if YtDlpRunner._rate_limited(message):
+            return False
+        if YtDlpRunner._http_statuses(message) & {403, 404, 410}:
+            return True
+        if YtDlpRunner._node_error(message):
+            return consecutive_errors >= 2
+        text = message.lower()
+        return any(pattern in text for pattern in (
+            "403: forbidden", "403 forbidden", "404: not found",
+            "did not get any data blocks", "remote end closed connection",
+            "connection reset by peer", "connection aborted", "unable to download video data",
+        ))
+
+    @staticmethod
+    def _is_cdn_failure(message: str) -> bool:
+        return (YtDlpRunner._rate_limited(message) or YtDlpRunner._node_error(message)
+                or YtDlpRunner._should_rotate_cdn(message))
 
     async def _season_bundle(
         self, kind: str, item_id: str
@@ -1108,6 +1116,11 @@ class YtDlpRunner:
             height = 0.0
         return tbr, fps, height
 
+    @staticmethod
+    def _flac_tracks(dash: dict) -> list:
+        tracks = (dash.get("flac") or {}).get("audio") or []
+        return [tracks] if isinstance(tracks, dict) else tracks
+
     @classmethod
     def _stream_candidate_map(
         cls, dash: dict[str, Any]
@@ -1125,7 +1138,7 @@ class YtDlpRunner:
                     candidates.append(url)
         audio_items = list(dash.get("audio") or [])
         audio_items.extend(list((dash.get("dolby") or {}).get("audio") or []))
-        audio_items.extend(list((dash.get("flac") or {}).get("audio") or []))
+        audio_items.extend(cls._flac_tracks(dash))
         for item in audio_items:
             key = ("a", str(item.get("id") or ""), "")
             candidates = result.setdefault(key, [])
@@ -1192,7 +1205,7 @@ class YtDlpRunner:
         audio_groups = [
             ("", "m4a", list(dash.get("audio") or [])),
             ("dolby-", "m4a", list((dash.get("dolby") or {}).get("audio") or [])),
-            ("flac-", "flac", list((dash.get("flac") or {}).get("audio") or [])),
+            ("flac-", "flac", YtDlpRunner._flac_tracks(dash)),
         ]
         for item in videos:
             candidates = YtDlpRunner._tv_url_candidates(item)
@@ -1325,6 +1338,9 @@ class YtDlpRunner:
                 original = item.get("url") or (deduped[0] if deduped else None)
                 if not deduped:
                     return False
+                if not drop_unavailable and len(deduped) == 1:
+                    item["url"] = deduped[0]
+                    return True
                 headers = dict(item.get("http_headers") or {})
 
                 async def probe(url: str) -> float | None:
@@ -1451,14 +1467,13 @@ class YtDlpRunner:
 
     def _aria2_connection_plan(self) -> tuple[int, ...]:
         attempts = 1 + self.settings.aria2_resume_retries
-        connections = min(
-            max(1, self.settings.aria2_connections),
-            ARIA2_STABLE_MAX_CONNECTIONS,
-        )
+        connections = self.settings.aria2_connections
         plan: list[int] = []
         for _ in range(attempts):
             plan.append(max(1, connections))
-            if connections <= ARIA2_STABLE_FLOOR_CONNECTIONS:
+            if connections > ARIA2_STABLE_CONNECTIONS:
+                connections = ARIA2_STABLE_CONNECTIONS
+            elif connections <= ARIA2_STABLE_FLOOR_CONNECTIONS:
                 connections = max(1, connections - 1)
             else:
                 connections = max(
@@ -1521,7 +1536,7 @@ class YtDlpRunner:
             if not job.get("all_parts"):
                 try:
                     info_payload = await self._web_download_info(
-                        job["source_url"], cookie_path
+                        job["source_url"], cookie_path, job["format_selector"]
                     )
                     if info_payload:
                         info_path = (
@@ -1638,7 +1653,9 @@ class YtDlpRunner:
         try:
             attempt_messages: list[str] = []
             result_path: str | None = None
-            errors: list[str] = []
+            failed_urls: set[str] = set()
+            consecutive_node_errors = 0
+            renewal_attempted = False
             previous_selector: str | None = None
             aria2_partial_file: Path | None = None
             with log_path.open("a", encoding="utf-8") as log_file:
@@ -1663,31 +1680,45 @@ class YtDlpRunner:
                     log_file.write(f"[{utc_now()}] {cdn_warning}\n")
                 log_file.flush()
             for index, (selector, use_aria2, connections) in enumerate(attempts):
-                if (
-                    index > 0
-                    and info_payload
-                    and info_path
-                    and selector == previous_selector
-                    and attempt_messages
-                    and self._should_rotate_cdn(attempt_messages[-1])
-                    and self._advance_cdn_info(info_payload)
-                ):
-                    self._remove_aria2_partial(aria2_partial_file, output_root)
-                    aria2_partial_file = None
-                    self._write_info_json(info_path, info_payload)
-                    with log_path.open("a", encoding="utf-8") as log_file:
-                        next_engine = (
-                            f"aria2c x{connections}"
-                            if use_aria2
-                            else "yt-dlp 原生下载"
-                        )
-                        log_file.write(
-                            f"\n[{utc_now()}] CDN 节点发生不可恢复错误，"
-                            "已切换到下一个备用节点；"
-                            f"下一次尝试使用 {next_engine}\n"
-                        )
-                        log_file.flush()
+                same_selector = selector == previous_selector
+                previous_error = attempt_messages[-1] if attempt_messages else ""
+                new_source = False
+                if self._rate_limited(previous_error):
+                    await asyncio.sleep(min(2 ** (index - 1), 4))
+                elif (same_selector and info_payload and info_path
+                      and self._should_rotate_cdn(previous_error, consecutive_node_errors)):
+                    new_source = self._advance_cdn_info(info_payload, failed_urls)
+                    reason = "已切换到同轨备用节点"
+                    if (not new_source and not renewal_attempted
+                            and self._http_statuses(previous_error) & {403, 410}):
+                        renewal_attempted = True
+                        try:
+                            if api_mode == "tv":
+                                fresh = await self._tv_download_info(job["source_url"], job)
+                            else:
+                                fresh = await self._web_download_info(job["source_url"], cookie_path, selector)
+                        except DownloadFailure as exc:
+                            if exc.auth_required:
+                                raise
+                            fresh = None
+                        except BiliAPIError:
+                            fresh = None
+                        if fresh:
+                            new_source = self._renew_track_urls(info_payload, fresh, failed_urls)
+                            reason = "已更新同轨播放地址"
+                    if new_source:
+                        self._remove_aria2_partial(aria2_partial_file, output_root)
+                        aria2_partial_file = None
+                        self._write_info_json(info_path, info_payload)
+                        consecutive_node_errors = 0
+                        if use_aria2:
+                            connections = min(connection_plan[0], ARIA2_STABLE_CONNECTIONS)
+                        with log_path.open("a", encoding="utf-8") as log_file:
+                            log_file.write(f"\n[{utc_now()}] {reason}，从新地址重新下载未完成的轨道\n")
+                if self.cancel_requested:
+                    raise CancelledFailure("任务已取消")
                 if selector != previous_selector:
+                    consecutive_node_errors = 0
                     aria2_partial_file = None
                     if previous_selector is not None:
                         with log_path.open("a", encoding="utf-8") as log_file:
@@ -1706,7 +1737,7 @@ class YtDlpRunner:
                     else:
                         await progress_callback({"format_selector": selector})
                     previous_selector = selector
-                elif use_aria2 and attempts[index - 1][1]:
+                elif use_aria2 and attempts[index - 1][1] and not new_source:
                     with log_path.open("a", encoding="utf-8") as log_file:
                         log_file.write(
                             f"\n[{utc_now()}] aria2c 下载失败，"
@@ -1724,8 +1755,15 @@ class YtDlpRunner:
                         log_file.flush()
 
                 command = build_command(selector, use_aria2, connections)
+                if new_source or (same_selector and not use_aria2 and attempts[index - 1][1]):
+                    # Sparse aria2 pieces cannot be resumed as a contiguous HTTP
+                    # file, nor reused across unverified CDN representations.
+                    command.insert(len(self.settings.ytdlp_command), "--no-continue")
                 result_path = None
-                errors = []
+                errors: list[str] = []
+                status_codes: set[int] = set()
+                failed_urls = set()
+                current_urls = {item.get("url") for item in (info_payload or {}).get("formats", [])}
                 with log_path.open("a", encoding="utf-8") as log_file:
                     engine = (
                         f"aria2c x{connections}"
@@ -1796,6 +1834,13 @@ class YtDlpRunner:
                             if aria_update:
                                 await progress_callback(aria_update)
                                 continue
+                            if use_aria2 and ("error" in line.lower() or "status=" in line.lower()):
+                                # aria2 writes some HTTP failures to stdout. yt-dlp
+                                # may report only its generic exit code on stderr.
+                                status_codes.update(self._http_statuses(line))
+                                for url in re.findall(r"\bURI=(https?://\S+)", line):
+                                    if url in current_urls:
+                                        failed_urls.add(url)
                             if is_stderr:
                                 errors.append(clean_line)
 
@@ -1812,10 +1857,14 @@ class YtDlpRunner:
                     return result_path
 
                 message = redact_sensitive("\n".join(errors[-20:]).strip())
+                if status_codes:
+                    diagnostics = ", ".join(f"HTTP {code}" for code in sorted(status_codes))
+                    message = f"{message}\n{diagnostics}".strip()
+                consecutive_node_errors = consecutive_node_errors + 1 if self._node_error(message) else 0
                 attempt_messages.append(message or f"状态码 {return_code}")
-                if self._looks_like_auth_error(message):
+                if self._looks_like_auth_error(message) or 401 in self._http_statuses(message):
                     self._remove_aria2_partial(aria2_partial_file, output_root)
-                    break
+                    raise DownloadFailure(message, auth_required=True)
                 if use_aria2:
                     next_is_aria2 = (
                         index + 1 < len(attempts)
@@ -1894,6 +1943,8 @@ class YtDlpRunner:
         if path is None:
             return
         try:
+            if path.is_symlink() or path.suffix != ".part":
+                return
             partial = path.resolve()
             if not partial.is_relative_to(output_root.resolve()):
                 return

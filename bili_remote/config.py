@@ -43,8 +43,8 @@ class Settings:
     aria2c_command: str = "aria2c"
     aria2_connections: int = 8
     aria2_resume_retries: int = 2
-    aria2_min_split_size: str = "20M"
-    aria2_piece_size: str = "5M"
+    aria2_min_split_size: str = "4M"
+    aria2_piece_size: str = "4M"
     timezone: str = "Asia/Shanghai"
     log_retention_days: int = 30
     resolve_timeout_seconds: int = 120
@@ -111,8 +111,8 @@ class Settings:
             aria2c_command=os.getenv("ARIA2C_COMMAND", "aria2c"),
             aria2_connections=int(os.getenv("ARIA2_CONNECTIONS", "8")),
             aria2_resume_retries=int(os.getenv("ARIA2_RESUME_RETRIES", "2")),
-            aria2_min_split_size=os.getenv("ARIA2_MIN_SPLIT_SIZE", "20M"),
-            aria2_piece_size=os.getenv("ARIA2_PIECE_SIZE", "5M"),
+            aria2_min_split_size=os.getenv("ARIA2_MIN_SPLIT_SIZE", "4M"),
+            aria2_piece_size=os.getenv("ARIA2_PIECE_SIZE", "4M"),
             timezone=os.getenv("TZ", "Asia/Shanghai"),
             log_retention_days=int(os.getenv("LOG_RETENTION_DAYS", "30")),
             resolve_timeout_seconds=int(os.getenv("RESOLVE_TIMEOUT_SECONDS", "120")),

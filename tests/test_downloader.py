@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from unittest.mock import AsyncMock, Mock
+
+import pytest
 
 from bili_remote.bili import BiliTvClient
 from bili_remote.downloader import YtDlpRunner
@@ -121,8 +124,8 @@ def test_aria2_defaults_are_balanced_for_bilibili(settings) -> None:
     args = runner._aria2_args()
     assert "--max-connection-per-server=8" in args
     assert "--split=8" in args
-    assert "--min-split-size=20M" in args
-    assert "--piece-length=5M" in args
+    assert "--min-split-size=4M" in args
+    assert "--piece-length=4M" in args
     assert "--summary-interval=1" in args
 
 
@@ -131,7 +134,9 @@ def test_aria2_connections_downgrade_after_cdn_rate_limits(settings) -> None:
     settings.aria2_resume_retries = 2
     runner = YtDlpRunner(settings, None)
 
-    assert runner._aria2_connection_plan() == (8, 6, 4)
+    assert runner._aria2_connection_plan() == (16, 8, 6)
+    settings.aria2_connections = 12
+    assert runner._aria2_connection_plan() == (12, 8, 6)
     assert "--max-connection-per-server=8" in runner._aria2_args(8)
     assert "--split=8" in runner._aria2_args(8)
 
@@ -164,6 +169,85 @@ def test_rate_limits_keep_the_current_cdn_and_partial_download() -> None:
     assert YtDlpRunner._should_rotate_cdn(
         "ERROR: connection reset by peer"
     )
+
+
+def test_aria2_status_lines_handle_mixed_and_repeated_failures() -> None:
+    rotate = YtDlpRunner._should_rotate_cdn
+    assert rotate("status=567\nstatus=403")
+    assert not rotate("status=567\nstatus=403\nstatus=429", 2)
+    assert not rotate("status=567", 1)
+    assert rotate("status=567", 2)
+    assert rotate("HTTP/1.1 503 Service Unavailable", 2)
+    assert not rotate("URI=https://cdn.example/track?status=403")
+
+
+def test_refresh_only_replaces_an_identically_identified_track() -> None:
+    track = {"url": "old", "format_id": "80", "vcodec": "avc1", "ext": "mp4"}
+    info = {"id": "a", "_v2_origin": {"cid": "123"}, "formats": [track.copy()]}
+    fresh = {**info, "formats": [{**track, "url": "new"}]}
+    assert not YtDlpRunner._renew_track_urls(info, {**fresh, "id": "b"}, {"old"})
+    assert not YtDlpRunner._renew_track_urls(info, {**fresh, "_v2_origin": {"cid": "456"}}, {"old"})
+    assert not YtDlpRunner._renew_track_urls(info, {**fresh, "formats": [{**track, "url": "new", "vcodec": "hevc"}]}, {"old"})
+    assert YtDlpRunner._renew_track_urls(info, fresh, {"old"})
+    assert info["formats"][0]["url"] == "new"
+
+
+def test_unexpired_audio_is_kept_when_one_video_url_fails() -> None:
+    video = {"url": "v1", "_cdn_candidates": ["v1", "v2"]}
+    audio = {"url": "a1", "_cdn_candidates": ["a1", "a2"]}
+    info = {"formats": [video, audio]}
+    assert YtDlpRunner._advance_cdn_info(info, {"v1"})
+    assert video["url"] == "v2"
+    assert not YtDlpRunner._advance_cdn_info(info, {"v2"})
+    assert audio["url"] == "a1"
+
+
+@pytest.mark.parametrize("flac_as_list", [True, False])
+def test_hires_audio_preserves_its_own_backup_urls(flac_as_list) -> None:
+    track = {"id": 30251, "baseUrl": "https://example.test/f",
+             "backupUrl": ["https://backup.test/f"], "codecs": "flac"}
+    dash = {"flac": {"audio": [track] if flac_as_list else track}}
+    expected = [track["baseUrl"], *track["backupUrl"]]
+    assert YtDlpRunner._tv_formats(dash)[0]["_tv_candidates"] == expected
+    assert YtDlpRunner._stream_candidate_map(dash)[("a", "30251", "")] == expected
+
+
+def test_download_recovers_mixed_aria_errors_from_stdout(settings, tmp_path) -> None:
+    settings.ensure_directories()
+    runner = YtDlpRunner(settings, Mock(load_cookies=lambda: {}))
+    runner.aria2_executable = "aria2c"
+    tracks = [
+        {"format_id": "v", "url": "https://cdn.test/bad",
+         "_cdn_candidates": ["https://cdn.test/bad", "https://cdn.test/backup"]},
+        {"format_id": "a", "url": "https://cdn.test/audio",
+         "_cdn_candidates": ["https://cdn.test/audio", "https://cdn.test/audio2"]},
+    ]
+    runner._web_download_info = AsyncMock(return_value={
+        "id": "fixture", "title": "__CDN_RECOVERY__", "formats": tracks,
+    })
+    job = {"id": 1, "source_url": "https://www.bilibili.com/video/BV1TEST",
+           "output_template": "new.mp4", "format_selector": "v+a"}
+    log = tmp_path / "job.log"
+    path = asyncio.run(runner.download(job, tmp_path, log, AsyncMock()))
+    assert path == str(tmp_path / "new.mp4")
+    assert log.read_text().count("Starting job") == 2
+    runner._web_download_info.assert_awaited_once()
+
+
+def test_web_single_candidate_skips_probe_but_tv_still_checks_availability(settings) -> None:
+    settings.tv_cdn_probe_enabled = True
+    runner = YtDlpRunner(settings, None)
+    calls = []
+    async def unavailable(_client, url, _headers):
+        calls.append(url)
+        return None
+    runner._probe_tv_url = unavailable
+    track = {"url": "https://example.test/v"}
+    assert asyncio.run(runner._rank_cdn_candidates(
+        [track], candidate_key="_cdn_candidates", drop_unavailable=False)) == [track]
+    assert not calls
+    assert asyncio.run(runner._prepare_tv_formats([track])) == []
+    assert calls == [track["url"]]
 
 
 def test_tv_formats_have_stable_ids() -> None:
@@ -324,6 +408,7 @@ def test_cdn_failure_rotates_to_original_url() -> None:
     }
     assert YtDlpRunner._advance_cdn_info(info)
     assert info["formats"][0]["url"] == "https://base.example.com/v.m4s"
+    assert not YtDlpRunner._advance_cdn_info(info)
 
 
 def test_web_download_info_maps_playurl_candidates(settings) -> None:
