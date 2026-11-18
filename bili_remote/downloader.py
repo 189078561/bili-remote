@@ -57,6 +57,12 @@ TV_STREAM_USER_AGENT = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class CDNProbe:
+    speed: float
+    range_size: int | None = None
+
+
 @dataclass(slots=True)
 class ResolvedMedia:
     title: str
@@ -775,6 +781,7 @@ class YtDlpRunner:
             if remaining:
                 item["url"] = remaining[0]
                 item[key] = remaining
+                item["_cdn_range_sizes"] = match.get("_cdn_range_sizes", {})
                 if "http_headers" in match:
                     item["http_headers"] = match["http_headers"]
                 changed = True
@@ -1343,23 +1350,30 @@ class YtDlpRunner:
                     return True
                 headers = dict(item.get("http_headers") or {})
 
-                async def probe(url: str) -> float | None:
+                async def probe(url: str) -> CDNProbe | None:
                     async with semaphore:
                         return await self._probe_tv_url(client, url, headers)
 
                 results = await asyncio.gather(*(probe(url) for url in deduped))
-                speeds: list[tuple[str, float]] = []
-                for url, speed in zip(deduped, results):
-                    if isinstance(speed, bool):
-                        speed = 1.0 if speed else None
-                    if speed is not None:
-                        speeds.append((url, float(speed)))
+                speeds = [(url, probe.speed) for url, probe in zip(deduped, results) if probe]
+                sizes = {
+                    url: probe.range_size
+                    for url, probe in zip(deduped, results)
+                    if probe and probe.range_size is not None
+                    and (not item.get("filesize") or item["filesize"] == probe.range_size)
+                }
+                item["_cdn_range_sizes"] = sizes
                 if not speeds:
                     if drop_unavailable:
                         return False
                     item[candidate_key] = deduped
                     return True
-                speeds.sort(key=lambda pair: pair[1], reverse=True)
+                prefer_ranges = (
+                    self.aria2_executable and self.settings.aria2_connections > 1
+                    and "none" in (item.get("vcodec"), item.get("acodec"))
+                    and not item.get("fragments")
+                )
+                speeds.sort(key=lambda pair: (bool(prefer_ranges and pair[0] in sizes), pair[1]), reverse=True)
                 ordered = [url for url, _ in speeds]
                 if original and original not in ordered:
                     ordered.append(original)
@@ -1380,7 +1394,7 @@ class YtDlpRunner:
 
     async def _probe_tv_url(
         self, client: httpx.AsyncClient, url: str, headers: dict[str, str]
-    ) -> float | None:
+    ) -> CDNProbe | None:
         return await self._probe_url_speed(
             client,
             url,
@@ -1397,15 +1411,24 @@ class YtDlpRunner:
         *,
         sample_bytes: int,
         timeout: float,
-    ) -> float | None:
+    ) -> CDNProbe | None:
         started = time.perf_counter()
         received = 0
-        probe_headers = dict(headers)
+        range_size = None
+        expected = None
+        probe_headers = httpx.Headers(headers)
+        probe_headers["Accept-Encoding"] = "identity"
         probe_headers["Range"] = f"bytes=0-{max(0, sample_bytes - 1)}"
         try:
             async with client.stream("GET", url, headers=probe_headers) as response:
                 if response.status_code not in {200, 206}:
                     return None
+                if response.status_code == 206 and response.headers.get("content-encoding", "identity").lower() == "identity":
+                    span = re.fullmatch(r"bytes 0-(\d{1,19})/(\d{1,19})", response.headers.get("content-range", ""), re.I)
+                    if span:
+                        end, size = map(int, span.groups())
+                        if 0 < size < 2**63 and end + 1 == min(size, sample_bytes):
+                            range_size, expected = size, end + 1
                 async for chunk in response.aiter_bytes():
                     received += len(chunk)
                     if (
@@ -1418,7 +1441,7 @@ class YtDlpRunner:
         elapsed = max(0.001, time.perf_counter() - started)
         if received < 1024:
             return None
-        return received / elapsed
+        return CDNProbe(received / elapsed, range_size if received == expected else None)
 
     @staticmethod
     def _fallback_selectors(selector: str) -> list[str]:
@@ -1555,6 +1578,20 @@ class YtDlpRunner:
         if info_payload and info_payload.get("_v2_origin"):
             self.completion_origins[job["id"]] = info_payload["_v2_origin"]
 
+        range_downloader = Path(__file__).parent / "v2/download/aria2c_range.py"
+        use_range_metadata = bool(
+            self.aria2_executable and info_path and info_payload
+            and os.name == "posix" and os.access(range_downloader, os.X_OK)
+            and any(item.get("_cdn_range_sizes") for item in info_payload.get("formats", []))
+        )
+        transfer_env = None
+        if use_range_metadata:
+            transfer_env = {
+                **os.environ,
+                "BILI_RANGE_ARIA2": str(Path(self.aria2_executable).resolve()),
+                "BILI_RANGE_INFO": str(info_path),
+            }
+
         def build_command(
             selector: str,
             use_aria2: bool,
@@ -1605,7 +1642,7 @@ class YtDlpRunner:
                 command.extend(
                     [
                         "--downloader",
-                        "aria2c",
+                        str(range_downloader) if use_range_metadata else "aria2c",
                         "--downloader-args",
                         self._aria2_args(connections),
                     ]
@@ -1777,6 +1814,7 @@ class YtDlpRunner:
                     log_file.flush()
                     process = await asyncio.create_subprocess_exec(
                         *command,
+                        env=transfer_env if use_aria2 else None,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         start_new_session=os.name == "posix",

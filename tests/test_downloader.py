@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from bili_remote.bili import BiliTvClient
-from bili_remote.downloader import YtDlpRunner
+from bili_remote.downloader import CDNProbe, YtDlpRunner
 from bili_remote.validation import render_episode_template
 
 
@@ -318,7 +318,7 @@ def test_prepare_tv_formats_uses_working_backup_url(settings) -> None:
     )
 
     async def probe(_client, url, _headers):
-        return "working.example.com" in url
+        return CDNProbe(1) if "working.example.com" in url else None
 
     runner._probe_tv_url = probe
     prepared = asyncio.run(runner._prepare_tv_formats(formats))
@@ -382,7 +382,7 @@ def test_cdn_probe_prefers_fastest_and_keeps_original_fallback(settings) -> None
     ]
 
     async def probe(_client, url, _headers):
-        return 10.0 if "fast.example.com" in url else 2.0
+        return CDNProbe(10.0 if "fast.example.com" in url else 2.0)
 
     runner._probe_tv_url = probe
     prepared = asyncio.run(runner._prepare_tv_formats(formats))
@@ -469,7 +469,7 @@ def test_web_download_info_maps_playurl_candidates(settings) -> None:
     runner._resolve_payload = resolve
 
     async def probe(_client, url, _headers):
-        return 20.0 if "fast.example.com" in url else 2.0
+        return CDNProbe(20.0 if "fast.example.com" in url else 2.0)
 
     runner._probe_tv_url = probe
     info = asyncio.run(
