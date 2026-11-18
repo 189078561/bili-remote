@@ -130,7 +130,11 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
                 formats
               };
               if (url === '/api/episodes/formats') return {formats};
-              if (url === '/api/episodes/formats/batch') return {selected_count:2,checked:2,sampled:false,failed:0,profiles:[{height:1080,fps_high:true,vcodec:'avc',dynamic_range:'SDR',coverage:2,sample:{width:1920,height:1080,fps:60,vcodec:'avc1'}}]};
+              if (url === '/api/episodes/formats/batch') return {episode_formats:{
+                'ep-a': [{...formats[0], fps:25, dynamic_range:'SDR', locked_selector:'(137+30280)',size_with_audio:2317143245},
+                         {...formats[1], fps:25, dynamic_range:'SDR', locked_selector:'(136+30280)',size_with_audio:1027577549}],
+                'ep-b': [{...formats[1], fps:25, dynamic_range:'SDR', locked_selector:'(136+30280)',size_with_audio:827577549}]
+              }};
               if (url === '/api/jobs/batch') return {count: 2, ids: [10, 11]};
               if (url.endsWith('/cancel')) { window.jobs[0].status = 'cancelled'; return {ok:true}; }
               if (url.endsWith('/retry')) { window.jobs[0].status = 'queued'; return {ok:true}; }
@@ -177,13 +181,21 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.locator(".dv2-select-actions summary").click()
         page.get_by_role("button", name="检测所选画质").click()
         page.wait_for_function("window.calls.some(call => call.url === '/api/episodes/formats/batch')")
-        page.locator("[data-format]").select_option("profile:0")
+        quality = page.locator("[data-batch-format]")
+        expect(quality.locator("option").nth(1)).to_contain_text("15.84 Mbps")
+        quality.select_option(label=quality.locator("option").nth(1).inner_text())
+        confirmed_tier = quality.input_value()
+        expect(page.locator("[data-download-form] button[type=submit]")).to_be_disabled()
+        page.locator("[data-batch-fallback]").check()
+        expect(page.locator("[data-batch-size]")).to_have_text("3.14 GB")
+        expect(page.locator("[data-batch-list]")).to_contain_text("缺档降一档")
+        expect(page.locator("[data-batch-list]")).to_contain_text("1.00 Mbps")
         resolve_calls_before = page.evaluate("window.calls.filter(call => call.url === '/api/resolve').length")
         assert page.locator(".dv2-episodes").is_visible()
         page.locator("[data-episode-toggle]").click()
         assert page.locator(".dv2-episodes").is_hidden()
         assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
-        assert page.locator("[data-format]").input_value() == "profile:0"
+        assert quality.input_value() == confirmed_tier
         page.locator("[data-episode-toggle]").click()
         assert page.locator(".dv2-episodes").is_visible()
         assert page.evaluate("document.querySelectorAll('.dv2-episode[aria-pressed=true]').length") == 2
@@ -195,11 +207,11 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.wait_for_function("window.calls.some(call => call.url === '/api/jobs/batch')")
         payload = page.evaluate("JSON.parse(window.calls.find(call => call.url === '/api/jobs/batch').options.body)")
         assert payload["episode_ids"] == ["ep-a", "ep-b"]
-        assert payload["format_profile"] == {"height": 1080, "fps_high": True, "vcodec": "avc", "dynamic_range": "SDR"}
+        assert payload["episode_selectors"] == {"ep-a": "(137+30280)", "ep-b": "(136+30280)"}
         assert payload["api_mode"] == "web"
         assert page.locator(".dv2-episodes").is_hidden()
         assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
-        assert page.locator("[data-format]").input_value() == "profile:0"
+        assert quality.input_value() == confirmed_tier
         assert page.locator(".dv2-job").count() == 1
         page.get_by_role("button", name="取消").click()
         page.locator("[data-download-history]").locator("..").locator("summary").click()
@@ -536,6 +548,17 @@ def test_grid_hides_empty_categories_and_reuses_saved_parse_without_resolving(li
             "formats": [{"selector": "episode-only", "format_id": "ep", "height": 1080}]
         }))
 
+        def detailed(route):
+            ids = route.request.post_data_json["episode_ids"]
+            route.fulfill(json={"episode_formats": {item: [
+                {"selector": "default+30280", "format_id": "default", "locked_selector": "(default+30280)", "height": 1080,
+                 "vcodec": "avc1", "fps": 25, "dynamic_range": "SDR", "tbr": 2940, "size_with_audio": 177800000},
+                {"selector": "episode-only", "format_id": "ep", "locked_selector": "(ep)", "height": 720,
+                 "vcodec": "avc1", "fps": 25, "dynamic_range": "SDR", "tbr": 683, "size_with_audio": 41300000},
+            ] for item in ids}})
+
+        page.route("**/api/episodes/formats/batch", detailed)
+
         def batch(route):
             submitted.append(route.request.post_data_json)
             route.fulfill(json={"ids": [2], "count": 1})
@@ -557,6 +580,11 @@ def test_grid_hides_empty_categories_and_reuses_saved_parse_without_resolving(li
         controls.get_by_role("button", name="全选", exact=True).click()
         expect(page.locator(".dv2-episode[aria-pressed=true]")).to_have_count(20)
         expect(page.locator("[data-selected-count]")).to_have_text("已选 21 集")
+        expect(page.locator('[data-batch-group="same"] b')).to_have_text("21")
+        batch_list = page.locator("[data-batch-list]")
+        assert batch_list.evaluate("e => e.clientHeight === 4 * e.firstElementChild.offsetHeight && e.scrollHeight > e.clientHeight")
+        batch_list.evaluate("e => e.scrollTop = e.scrollHeight")
+        expect(page.locator("[data-batch-window]")).to_contain_text("21 / 21 集")
         page.get_by_role("button", name="101–150", exact=True).click()
         expect(page.locator(".dv2-episode[aria-pressed=true]")).to_have_count(0)
         expect(controls.get_by_role("button", name="全选", exact=True)).to_be_visible()
@@ -595,8 +623,8 @@ def test_grid_hides_empty_categories_and_reuses_saved_parse_without_resolving(li
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         page.locator("[data-download-form] button[type=submit]").click()
         expect(page.locator(".dv2")).to_have_attribute("data-stage", "submitted")
-        assert [job["episode_ids"] for job in submitted] == [["1", "7"], ["8"]]
-        assert submitted[-1]["format_selector"] == "episode-only"
+        assert [job["episode_ids"] for job in submitted] == [["1", "7", "8"]]
+        assert submitted[0]["episode_selectors"] == {"1": "(default+30280)", "7": "(default+30280)", "8": "(ep)"}
         page.get_by_role("button", name="复用解析").click()
         expect(page.locator("[data-selected-count]")).to_have_text("已选 2 集")
         expect(page.locator("[data-episode-categories] button")).to_have_text(["正片"])

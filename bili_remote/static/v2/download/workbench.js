@@ -5,8 +5,7 @@
   const CATEGORIES = ["正片", "花絮", "预告"];
   const HISTORY_STATUSES = new Set(["completed", "failed", "cancelled", "auth_required"]);
   const DEFAULT_FORMAT = "bv*+ba/b";
-  const formatModes = new Set(["avc", "hevc", "av1", "any"]);
-  const ranges = new Set(["SDR", "HDR10", "DV", "HLG", "any"]);
+  const TRACKS_PER_REQUEST = 12;
   const parseHistoryTime = new Intl.DateTimeFormat("zh-CN", {
     timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
@@ -31,9 +30,9 @@
 
   function codecName(value) {
     const text = String(value || "").toLowerCase();
-    if (text.includes("avc")) return "H.264";
-    if (text.includes("hev") || text.includes("hvc")) return "H.265";
-    if (text.includes("av01")) return "AV1";
+    if (text.includes("avc") || text === "h264") return "H.264";
+    if (text.includes("hev") || text.includes("hvc") || text === "h265") return "H.265";
+    if (text.includes("av01") || text === "av1") return "AV1";
     if (text.includes("mp4a")) return "AAC";
     if (text.includes("opus")) return "Opus";
     if (text.includes("ac-3") || text.includes("ec-3")) return "Dolby";
@@ -71,6 +70,35 @@
     if (className) node.className = className;
     if (text !== undefined) node.textContent = String(text);
     return node;
+  }
+
+  function trackFamily(track) {
+    const codec = track.vcodec && track.vcodec !== "none" ? track.vcodec : track.acodec;
+    const name = codecName(codec);
+    return JSON.stringify([name === "未知编码" ? codec : name, track.dynamic_range || "", Number(track.fps) || 0]);
+  }
+
+  function trackTier(track) {
+    return JSON.stringify([track.format_id, Number(track.height) || 0, trackFamily(track)]);
+  }
+
+  function bitrateRange(values) {
+    const rates = values.map(Number).filter(rate => Number.isFinite(rate) && rate > 0);
+    if (!rates.length) return "码率未知";
+    const low = Math.min(...rates), high = Math.max(...rates);
+    const label = low === high ? formatBitrate(low) :
+      low >= 1000 ? (low / 1000).toFixed(2) + "–" + formatBitrate(high) :
+      high < 1000 ? Math.round(low) + "–" + formatBitrate(high) :
+      formatBitrate(low) + "–" + formatBitrate(high);
+    return label + (rates.length < values.length ? "（部分未知）" : "");
+  }
+
+  function combinedSize(rows) {
+    const known = rows.filter(row => Number(row.track?.size_with_audio) > 0);
+    return {
+      bytes: known.reduce((sum, row) => sum + Number(row.track.size_with_audio), 0),
+      complete: known.length === rows.length && rows.length > 0
+    };
   }
 
   function elapsed(seconds) {
@@ -234,7 +262,9 @@
       resolved: null, resolvedUrl: "", jobs: [], previousStatuses: new Map(), seenInitialJobs: false,
       timer: null, refreshInFlight: null, refreshQueued: false, refreshAbort: null, destroyed: false,
       jobCards: new Map(), listeners: [], logScrollY: 0, logReturnFocus: null,
-      episodeFormats: new Map(), episodeChoices: new Map(), formatProfiles: [], formatRequest: 0,
+      episodeFormats: new Map(), episodeChoices: new Map(), formatRequest: 0,
+      batchTracks: new Map(), batchErrors: new Map(), batchTarget: null, batchGroup: null,
+      batchTimer: null, batchProbe: null, batchPlan: null,
       parseVersion: 0, episodesOpen: false, submitting: false,
       historyVersion: 0,
       selected: new Set(), categories: new Map(), category: null, activeEpisodeId: null,
@@ -245,6 +275,9 @@
     const urlField = $("#dv2-url");
     const modeField = $("[data-mode]");
     const formatField = $("[data-format]");
+    const batchFormat = $("[data-batch-format]");
+    const batchFallback = $("[data-batch-fallback]");
+    const batchList = $("[data-batch-list]");
     const parseState = $("[data-parse-state]");
     const errorBox = $("[data-error]");
     const resolution = $("[data-resolution]");
@@ -284,6 +317,8 @@
       const customized = selectedIds().filter(id=>state.episodeChoices.has(id)).length;
       $('[data-summary-quality]').textContent = customized ? `${customized} 集单独设置，其余跟随统一画质` : formatField.selectedOptions[0]?.textContent || '最高可用';
       $('[data-summary-output]').textContent = $('[data-output]').value.trim() || '下载目录';
+      if (state.batchPlan) $('[data-summary-quality]').textContent = state.batchPlan.title;
+      form.querySelector('button[type=submit]').disabled = state.submitting || Boolean(state.batchPlan && !state.batchPlan.ready);
       $('[data-submit-summary]').textContent = `已选 ${count} ${state.resolved?.episodes?.length ? '集' : '个视频'}`;
       form.querySelector('button[type=submit]').textContent = state.submitting ? '正在提交…' : `开始下载${count ? ` · ${count} ${state.resolved?.episodes?.length ? '集' : '项'}` : ''}`;
     }
@@ -394,12 +429,17 @@
       const count = selectedIds().length;
       selectedCount.textContent = `已选 ${count} 集`;
       $("[data-check-batch]").hidden = count < 2;
+      if (!preserveFormats && count > 1 && !state.batchPlan && !state.batchTarget && formatField.value !== DEFAULT_FORMAT) {
+        const track = JSON.parse(formatField.dataset.formats || "[]").find(item => item.selector === formatField.value);
+        if (track?.format_id) state.batchTarget = {key: trackTier(track), track};
+      }
       if (!preserveFormats && count !== 1) formatField.value = DEFAULT_FORMAT;
-      if (count > 1) formatHint.textContent = `批量下载 ${count} 集；已选画质偏好会应用到每集。`;
+      if (count > 1) formatHint.textContent = "体积包含每集实际匹配的视频轨和音轨。";
       else if (count === 1) formatHint.textContent = "已选 1 集；提交时使用该集可用格式。";
       else formatHint.textContent = "请选择剧集，或使用默认格式下载单个视频。";
       state.formatRequest += 1;
       if (!preserveFormats && count === 1) loadSelectedEpisodeFormat(selectedIds()[0], state.formatRequest);
+      updateBatchQuality();
       if (state.resolved) stage("selecting"); summary();
       updateNamingEditor(preferredEpisodeId);
     }
@@ -544,7 +584,7 @@
       const quality = make("select", "dv2-episode-quality");
       quality.setAttribute("aria-label", `${title} 的画质`);
       quality.append(new Option("跟随统一画质", ""));
-      const cached = state.episodeFormats.get(id);
+      const cached = state.batchTracks.get(id) || state.episodeFormats.get(id);
       if (cached) {
         for (const item of cached) quality.append(new Option(formatLabel(item), item.selector));
         quality.dataset.loaded = "true";
@@ -554,7 +594,7 @@
       quality.addEventListener("change", () => {
         if (quality.value) state.episodeChoices.set(id, quality.value);
         else state.episodeChoices.delete(id);
-        summary();
+        updateBatchQuality();
       });
       detail.replaceChildren(text, quality);
       detail.hidden = false;
@@ -566,6 +606,7 @@
       try {
         const result=await api('/api/episodes/formats',{method:'POST',body:JSON.stringify({url:episode.url || `https://www.bilibili.com/bangumi/play/ep${episode.id}`,api_mode:resolved.api_mode || modeField.value})});
         if (state.resolved!==resolved || version!==state.parseVersion || !select.isConnected) return;
+        if (state.batchTracks.has(id)) return;
         const formats=(result.formats || []).filter(item=>item.selector);
         state.episodeFormats.set(id,formats);select.replaceChildren(new Option('跟随统一画质',''));
         for (const item of formats) select.append(new Option(formatLabel(item),item.selector));
@@ -578,7 +619,6 @@
     function renderFormats(formats) {
       formatField.replaceChildren(new Option("最高可用视频 · 最佳音轨", DEFAULT_FORMAT));
       const ordered = [...(formats || [])].filter((item) => item.selector).sort((a, b) => (Number(b.height) || 0) - (Number(a.height) || 0) || (Number(b.fps) || 0) - (Number(a.fps) || 0));
-      state.formatProfiles = [];
       const groups = new Map();
       for (const item of ordered) {
         const group = item.height ? `${item.height}P` : "音轨";
@@ -595,26 +635,212 @@
       summary();
       formatHint.textContent = ordered.length ? `列出 ${ordered.length} 种可用格式；音视频编码与音轨信息来自解析结果。` : "当前没有额外格式信息，将使用最高可用画质。";
     }
-    function renderBatchProfiles(profiles, meta = {}) {
-      formatField.replaceChildren(new Option("最高可用画质 · 最佳音轨", DEFAULT_FORMAT));
-      state.formatProfiles = (profiles || []).map((item) => item.profile || {
-        height: Number(item.height), fps_high: item.fps_high, vcodec: item.vcodec,
-        dynamic_range: item.dynamic_range
-      });
-      state.formatProfiles.forEach((profile, index) => {
-        const coverage = Number(profiles[index].coverage);
-        const total = Number(meta.selected_count) || selectedIds().length;
-        const coverageText = Number.isFinite(coverage) ? ` · ${coverage}/${meta.checked || total} 集可用` : "";
-        const codec = String(profile.vcodec || "any");
-        const label = `${profile.height}P · ${codec === "hevc" ? "H.265" : codec === "avc" ? "H.264" : codec.toUpperCase()}${profile.fps_high ? " · 高帧率" : ""}${profile.dynamic_range && profile.dynamic_range !== "SDR" ? ` · ${profile.dynamic_range}` : ""}${coverageText}`;
-        formatField.append(new Option(label, `profile:${index}`));
-      });
-      formatField.dataset.formats = "[]";
-      summary();
-      const checked = Number(meta.checked) || 0;
-      const failed = Number(meta.failed) || 0;
-      formatHint.textContent = `已检测 ${checked}/${Number(meta.selected_count) || selectedIds().length} 集${meta.sampled ? "（抽样）" : ""}${failed ? ` · ${failed} 集检测失败` : ""}；所选画质缺失时由下载引擎处理。`;
+    function batchCatalogue(ids) {
+      const tiers = new Map();
+      for (const id of ids) {
+        for (const track of state.batchTracks.get(id) || []) {
+          const key = trackTier(track);
+          if (!tiers.has(key)) tiers.set(key, {key, track, rates: []});
+          tiers.get(key).rates.push(track.tbr);
+        }
+      }
+      if (state.batchTarget && !tiers.has(state.batchTarget.key)) {
+        tiers.set(state.batchTarget.key, {...state.batchTarget, rates: []});
+      }
+      const highest = tier => Math.max(0, Number(tier.track.tbr) || 0, ...tier.rates.map(Number).filter(Number.isFinite));
+      const ordered = [...tiers.values()].sort((a, b) =>
+        (Number(b.track.height) || 0) - (Number(a.track.height) || 0) || highest(b) - highest(a)
+      );
+      for (const tier of ordered) {
+        const track = tier.track;
+        const group = ordered.filter(other => other.track.height === track.height && trackFamily(other.track) === trackFamily(track));
+        if (group.length > 1) {
+          const rank = group.indexOf(tier);
+          tier.label = rank === 0 ? "高码" : rank === 1 ? "标准" : "档位 " + (rank + 1);
+        }
+      }
+      return ordered;
     }
+
+    function batchRows(ids, selectedTier, catalogue) {
+      const target = selectedTier?.track;
+      const nextTier = target?.height && batchFallback.checked
+        ? catalogue.slice(catalogue.indexOf(selectedTier) + 1).find(tier =>
+          tier.track.height && trackFamily(tier.track) === trackFamily(target))
+        : null;
+      return ids.map(id => {
+        const tracks = state.batchTracks.get(id);
+        if (!tracks) return {id, reason: state.batchErrors.get(id) || "正在检测"};
+        const override = state.episodeChoices.get(id);
+        const baseline = target ? tracks.find(track => trackTier(track) === selectedTier.key)
+          : tracks.find(track => track.height) || tracks[0];
+        const exact = override ? tracks.find(track => track.selector === override || track.locked_selector === override) : baseline;
+        const lower = !override && !exact && nextTier && tracks.find(track => trackTier(track) === nextTier.key);
+        const track = exact || lower;
+        return {id, track, reason: !track ? "目标档位缺失" : lower ? "缺档降一档" :
+          override && track.locked_selector !== baseline?.locked_selector ? "单集指定" : ""};
+      });
+    }
+
+    function batchTrackLabel(track, tier, rate) {
+      const video = track.height && track.vcodec !== "none";
+      return [
+        video ? track.height + "P" : "仅音频",
+        video && track.fps ? track.fps + "fps" : null,
+        codecName(video ? track.vcodec : track.acodec), tier?.label,
+        video ? track.dynamic_range : null, rate
+      ].filter(Boolean).join(" · ");
+    }
+
+    function renderBatchWindow() {
+      const rows = batchList.children;
+      const height = rows[0]?.offsetHeight;
+      const index = height ? Math.floor(batchList.scrollTop / height) + 1 : 1;
+      const end = height ? Math.floor((batchList.scrollTop + batchList.clientHeight) / height) : rows.length;
+      $("[data-batch-window]").textContent = rows.length > 4
+        ? "显示 " + index + "–" + Math.max(index, Math.min(end, rows.length)) + " / " + rows.length + " 集 · 在列表内滚动" : "";
+    }
+
+    function renderBatchBreakdown(rows, catalogue) {
+      const ordinary = rows.filter(row => row.track && !row.reason);
+      // Highest-available can choose different formats per episode. Compare them to the first match.
+      if (!state.batchTarget && ordinary.length) {
+        const first = trackTier(ordinary[0].track);
+        for (const row of ordinary) {
+          if (trackTier(row.track) !== first) row.reason = "各集最高可用档位不同";
+        }
+      }
+      const groups = {
+        different: rows.filter(row => row.reason || !row.track),
+        same: rows.filter(row => row.track && !row.reason)
+      };
+      const group = groups[state.batchGroup]?.length ? state.batchGroup : groups.different.length ? "different" : "same";
+      const sameGroup = batchList.dataset.group === group;
+      const previousScroll = sameGroup ? batchList.scrollTop : 0;
+      batchList.dataset.group = group;
+      for (const button of root.querySelectorAll("[data-batch-group]")) {
+        const name = button.dataset.batchGroup;
+        button.querySelector("b").textContent = groups[name].length;
+        button.disabled = !groups[name].length;
+        button.setAttribute("aria-pressed", String(name === group));
+      }
+      const episodes = new Map(state.resolved.episodes.map(item => [String(item.id), item]));
+      const tiers = new Map(catalogue.map(tier => [tier.key, tier]));
+      batchList.replaceChildren(...groups[group].map(({id, track, reason}) => {
+        const episode = episodes.get(id);
+        const number = episode.display_episode_number || episode.group_index;
+        const title = episodeCategory(episode) === "正片" && number ? "第 " + number + " 集" : episode.title || id;
+        const row = make("div", "dv2-batch-track");
+        const header = make("div", "dv2-batch-track-head");
+        header.append(make("strong", "", title));
+        if (reason) header.append(make("small", "dv2-batch-reason", reason));
+        if (reason) header.lastElementChild.title = reason;
+        header.append(make("span", "dv2-batch-track-size", track ? formatResourceSize(track.size_with_audio) || "体积未知" : "待确认"));
+        const description = track ? batchTrackLabel(track, tiers.get(trackTier(track)), formatBitrate(track.tbr) || "码率未知")
+          : episode.title || "";
+        const detail = make("div", "dv2-batch-track-detail", description);
+        detail.title = description;
+        row.append(header, detail);
+        return row;
+      }));
+      batchList.scrollTop = previousScroll;
+      renderBatchWindow();
+    }
+
+    function updateBatchQuality({retry = false} = {}) {
+      const ids = selectedIds();
+      const active = ids.length > 1 || Boolean(ids.length && state.batchTarget);
+      $("[data-single-quality]").hidden = active;
+      $("[data-batch-quality]").hidden = !active;
+      $("[data-batch-review]").hidden = !active;
+      $("[data-batch-totals]").hidden = !active;
+      clearTimeout(state.batchTimer);
+      if (!active) {
+        state.batchPlan = null;
+        summary();
+        return;
+      }
+      if (retry) for (const id of ids) state.batchErrors.delete(id);
+      const catalogue = batchCatalogue(ids);
+      const selectedTier = catalogue.find(tier => tier.key === state.batchTarget?.key);
+      const rows = batchRows(ids, selectedTier, catalogue);
+      const total = combinedSize(rows);
+      const knownSize = formatResourceSize(total.bytes);
+      const title = selectedTier ? batchTrackLabel(selectedTier.track, selectedTier, bitrateRange(selectedTier.rates)) : "最高可用 · 最佳音轨";
+      const ready = rows.every(row => row.track);
+      state.batchPlan = {ready, title, selectors: Object.fromEntries(rows.filter(row => row.track).map(row => [row.id, row.track.locked_selector]))};
+      const optionText = tier => {
+        const size = combinedSize(batchRows(ids, tier, catalogue));
+        const estimated = formatResourceSize(size.bytes);
+        const label = tier ? batchTrackLabel(tier.track, tier, bitrateRange(tier.rates)) : "最高可用 · 最佳音轨";
+        return label + " · " + (size.complete ? estimated : estimated ? "已知 " + estimated : "体积待确认");
+      };
+      batchFormat.replaceChildren(new Option(optionText(null), ""), ...catalogue.map(tier => new Option(optionText(tier), tier.key)));
+      batchFormat.value = selectedTier?.key || "";
+      batchFormat.disabled = !catalogue.length;
+      state.batchCatalogue = catalogue;
+      $("[data-batch-size]").textContent = total.complete ? knownSize : knownSize ? "已知 " + knownSize : "待确认";
+      $("[data-batch-totals]").textContent = "已选 " + ids.length + " 集 · 每集按自己的档位和大小算 · " +
+        (total.complete ? "本档合计 " + knownSize + " · 每集约 " + formatResourceSize(total.bytes / rows.length)
+          : knownSize ? "已知部分 " + knownSize + " · 总体积待确认" : "总体积待确认");
+      const failed = ids.filter(id => state.batchErrors.has(id)).length;
+      const pending = ids.filter(id => !state.batchTracks.has(id) && !state.batchErrors.has(id)).length;
+      $("[data-batch-status]").textContent = pending ? "正在检测画质 · 剩余 " + pending + " 集" :
+        failed ? failed + " 集检测失败，可重新检测" : ready ? "" : "有剧集缺档，请调整画质或启用同编码降档。";
+      $("[data-batch-retry]").hidden = !failed;
+      renderBatchBreakdown(rows, catalogue);
+      summary();
+      if (pending && !state.batchProbe) state.batchTimer = setTimeout(probeBatchQuality, 180);
+    }
+
+    async function probeBatchQuality() {
+      const resolved = state.resolved;
+      const ids = selectedIds().filter(id => !state.batchTracks.has(id) && !state.batchErrors.has(id)).slice(0, TRACKS_PER_REQUEST);
+      if (!resolved || !ids.length || !state.batchPlan || state.batchProbe) return;
+      const controller = new AbortController();
+      state.batchProbe = controller;
+      try {
+        const result = await api("/api/episodes/formats/batch", {
+          method: "POST", signal: controller.signal, body: JSON.stringify({
+            url: state.resolvedUrl, api_mode: resolved.api_mode || modeField.value, episode_ids: ids, detailed: true
+          })
+        });
+        if (controller.signal.aborted || resolved !== state.resolved) return;
+        const failures = new Map((result.failed_episodes || []).map(episode => [String(episode.id), episode.error]));
+        for (const id of ids) {
+          const tracks = result.episode_formats?.[id]?.filter(track => track.locked_selector);
+          if (tracks?.length) {
+            state.batchTracks.set(id, tracks);
+            if (id === state.activeEpisodeId) {
+              const quality = $(".dv2-episode-quality");
+              quality?.replaceChildren(new Option("跟随统一画质", ""), ...tracks.map(track => new Option(formatLabel(track), track.selector)));
+              if (quality) {
+                quality.value = state.episodeChoices.get(id) || "";
+                quality.dataset.loaded = "true";
+              }
+            }
+          } else state.batchErrors.set(id, failures.get(id) || "未返回可用轨道");
+        }
+      } catch (error) {
+        if (!controller.signal.aborted && resolved === state.resolved) for (const id of ids) state.batchErrors.set(id, error.message);
+      } finally {
+        if (state.batchProbe === controller) state.batchProbe = null;
+        if (!controller.signal.aborted && resolved === state.resolved) updateBatchQuality();
+      }
+    }
+
+    function resetBatchQuality() {
+      clearTimeout(state.batchTimer);
+      state.batchProbe?.abort();
+      state.batchProbe = null;
+      state.batchTracks.clear();
+      state.batchErrors.clear();
+      state.batchTarget = null;
+      state.batchGroup = null;
+      state.batchPlan = null;
+      batchFallback.checked = false;
+    }
+
     async function loadSelectedEpisodeFormat(episodeId, requestId) {
       const episode = state.resolved?.episodes?.find((item) => String(item.id) === String(episodeId));
       if (!episode) return;
@@ -631,33 +857,13 @@
         if (requestId === state.formatRequest) formatHint.textContent = `该集格式读取失败，仍可使用默认画质：${error.message}`;
       }
     }
-    async function checkBatchFormats() {
-      const ids = selectedIds();
-      if (!state.resolved?.episodes?.length || ids.length < 2) return;
-      const button = $("[data-check-batch]");
-      const requestId = ++state.formatRequest;
-      button.disabled = true;
-      button.textContent = "检测中…";
-      try {
-        const result = await api("/api/episodes/formats/batch", {
-          method: "POST",
-          body: JSON.stringify({url: state.resolvedUrl || urlField.value.trim(), episode_ids: ids, api_mode: state.resolved.api_mode || modeField.value})
-        });
-        if (requestId !== state.formatRequest) return;
-        renderBatchProfiles(result.profiles || [], result);
-      } catch (error) {
-        if (requestId === state.formatRequest) formatHint.textContent = `画质检测失败，继续使用解析结果：${error.message}`;
-      } finally {
-        button.disabled = false;
-        button.textContent = "检测所选画质";
-      }
-    }
     async function parse() {
       clearError();
       const url = urlField.value.trim();
       if (!url) { showError("请先粘贴 B 站链接。"); urlField.focus(); return; }
       const request=++state.parseVersion, mode=modeField.value;
       rememberSelection();
+      resetBatchQuality();
       state.resolved = null;
       resolution.hidden = true;
       ++state.formatRequest;
@@ -701,6 +907,7 @@
         result.naming_items = savedEpisodeNamingFacts(result.episodes);
       }
       state.resolved = result;
+      resetBatchQuality();
       state.episodeChoices.clear();
       state.episodeFormats.clear();
       state.resolvedUrl = result.source_url || result.webpage_url || url;
@@ -740,24 +947,6 @@
       updateEpisodeTiles();
       updateCount();
     }
-    function makeProfile() {
-      const chosen = formatField.value;
-      if (chosen.startsWith("profile:")) return state.formatProfiles[Number(chosen.slice(8))] || null;
-      const selected = JSON.parse(formatField.dataset.formats || "[]").find((item) => item.selector === chosen);
-      if (!selected?.height || selected.height < 144) return null;
-      let vcodec = "any";
-      const codec = String(selected.vcodec || "").toLowerCase();
-      if (codec.includes("avc")) vcodec = "avc";
-      else if (codec.includes("hev") || codec.includes("hvc")) vcodec = "hevc";
-      else if (codec.includes("av01")) vcodec = "av1";
-      const range = String(selected.dynamic_range || "SDR").toUpperCase();
-      return {
-        height: Number(selected.height),
-        fps_high: selected.fps == null ? null : Number(selected.fps) >= 50,
-        vcodec: formatModes.has(vcodec) ? vcodec : "any",
-        dynamic_range: ranges.has(range) ? range : "any"
-      };
-    }
     async function submit(event) {
       event.preventDefault();
       clearError();
@@ -777,27 +966,13 @@
           if (!ids.length) throw new Error("请至少选择一集。");
           if (ids.length > 600) throw new Error("单次最多创建 600 个任务。");
           const payload = {url, episode_ids: ids, api_mode: state.resolved.api_mode || modeField.value, format_selector: formatField.value, output_template: template || null, output_dir: outputDir, naming};
-          if (ids.length > 1) payload.format_profile = makeProfile();
-          const customized = ids.filter(id=>state.episodeChoices.has(id));
-          if (!customized.length) await api("/api/jobs/batch", {method: "POST", body: JSON.stringify(payload)});
-          else {
-            // Existing batch API owns creation. Each explicit per-episode selector is
-            // submitted only for its episode. Remove acknowledged selections so a
-            // partial failure can be retried without duplicating accepted jobs.
-            const uniform=ids.filter(id=>!state.episodeChoices.has(id));
-            const groups=[...(uniform.length ? [{...payload,episode_ids:uniform}] : []),...customized.map(id=>({...payload,episode_ids:[id],format_selector:state.episodeChoices.get(id),format_profile:null}))];
-            let accepted=0;
-            for(const group of groups) {
-              try {await api('/api/jobs/batch',{method:'POST',body:JSON.stringify(group)});}
-              catch(error){await refreshJobs();throw new Error(`已提交 ${accepted} 集，其余保持勾选：${error.message}`);}
-              accepted+=group.episode_ids.length;
-              if(current()){
-                for (const id of group.episode_ids) state.selected.delete(id);
-                updateEpisodeTiles();
-                updateCount({preserveFormats: true});
-              }
-            }
+          if (state.batchPlan) {
+            if (!state.batchPlan?.ready) throw new Error("请确认每集下载档位后再提交。");
+            payload.episode_selectors = state.batchPlan.selectors;
+          } else if (state.episodeChoices.has(ids[0])) {
+            payload.format_selector = state.episodeChoices.get(ids[0]);
           }
+          await api("/api/jobs/batch", {method: "POST", body: JSON.stringify(payload)});
         } else {
           await api("/api/jobs", {method: "POST", body: JSON.stringify({url, api_mode: modeField.value, format_selector: formatField.value, all_parts: allPartsSelected(), output_template: template || null, output_dir: outputDir, naming, title: state.resolved.title || null, uploader: state.resolved.uploader || null})});
         }
@@ -1131,6 +1306,7 @@
       rememberSelection();
       ++state.parseVersion;
       ++state.formatRequest;
+      resetBatchQuality();
       state.resolved = null;
       resolution.hidden = true;
       stage("idle");
@@ -1163,7 +1339,19 @@
     listen(selectAll, "click", togglePageSelection);
     listen($("[data-select-invert]"), "click", () => setSelection("invert"));
     listen($("[data-select-none]"), "click", () => setSelection("none"));
-    listen($("[data-check-batch]"), "click", checkBatchFormats);
+    listen($("[data-check-batch]"), "click", () => updateBatchQuality({retry: true}));
+    listen($("[data-batch-retry]"), "click", () => updateBatchQuality({retry: true}));
+    listen(batchFallback, "change", () => {state.batchGroup = null; updateBatchQuality();});
+    listen(batchFormat, "change", () => {
+      state.batchTarget = state.batchCatalogue.find(tier => tier.key === batchFormat.value) || null;
+      state.batchGroup = null;
+      updateBatchQuality();
+    });
+    listen(batchList, "scroll", renderBatchWindow);
+    listen($(".dv2-batch-breakdown"), "toggle", renderBatchWindow);
+    for (const button of root.querySelectorAll("[data-batch-group]")) {
+      listen(button, "click", () => {state.batchGroup = button.dataset.batchGroup; updateBatchQuality();});
+    }
     for (const button of root.querySelectorAll("[data-sort]")) {
       listen(button, "click", () => {
         const group = state.categories.get(state.category);
@@ -1219,6 +1407,7 @@
       destroy() {
         if (state.destroyed) return;
         state.destroyed = true;
+        resetBatchQuality();
         ++state.parseVersion;
         ++state.formatRequest;
         clearRefreshTimer();

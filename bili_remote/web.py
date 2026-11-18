@@ -66,6 +66,7 @@ from .validation import (
     validate_output_template,
 )
 from .v2.download import project_download_job
+from .v2.download.quality import exact_tracks
 from .v2.download.naming import NameOptions, NamePreviewRequest, download_plan, episode_facts, initial_filename, url_facts, without_video_part
 from .workspace import (
     WorkspaceError,
@@ -155,6 +156,7 @@ class BatchJobCreateRequest(BaseModel):
     api_mode: str = "web"
     format_selector: str = "bv*+ba/b"
     format_profile: BatchFormatProfile | None = None
+    episode_selectors: dict[str, str] | None = Field(default=None, max_length=600)
     output_template: str | None = None
     output_dir: str | None = None
 
@@ -190,6 +192,7 @@ class BatchEpisodeFormatsRequest(BaseModel):
     url: str
     episode_ids: list[str] = Field(min_length=1, max_length=600)
     api_mode: str = "web"
+    detailed: bool = False
 
     @field_validator("api_mode")
     @classmethod
@@ -1056,7 +1059,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         try:
             result = await service_container.runner.batch_episode_formats(
-                payload.url, payload.episode_ids, payload.api_mode
+                payload.url, payload.episode_ids, payload.api_mode,
+                **({"detailed": True} if payload.detailed else {}),
             )
         except ValidationError:
             raise
@@ -1159,7 +1163,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not output_template:
             raise HTTPException(status_code=422, detail="缺少合集默认下载命名模板")
         output_dir = service_container.files.resolve_new_job_output(payload.output_dir)
-        if payload.format_profile is not None:
+        episode_selectors = payload.episode_selectors
+        if episode_selectors is not None:
+            if set(episode_selectors) != seen or any(
+                not exact_tracks(value) for value in episode_selectors.values()
+            ):
+                raise HTTPException(status_code=422, detail="逐集画质与所选剧集不匹配，请重新检测")
+            selector = ""
+        elif payload.format_profile is not None:
             selector = validate_format_selector(
                 compile_format_profile(
                     height=payload.format_profile.height,
@@ -1188,7 +1199,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     or f"https://www.bilibili.com/bangumi/play/ep{episode['id']}",
                     "kind": "manual",
                     "api_mode": payload.api_mode,
-                    "format_selector": selector,
+                    "format_selector": episode_selectors[str(episode["id"])] if episode_selectors is not None else selector,
                     "all_parts": False,
                     "output_template": template,
                     "output_dir": output_dir,

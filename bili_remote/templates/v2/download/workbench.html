@@ -16,7 +16,7 @@
             <div class="dv2-section-heading" data-episode-heading hidden>
               <button type="button" class="dv2-episode-toggle" data-episode-toggle aria-expanded="false" aria-controls="dv2-episodes"><strong>解析列表</strong><span data-selected-count>已选 0 集</span></button>
             </div>
-            <div class="dv2-quality-section"><div class="dv2-quality-setting"><label>统一画质<select data-format><option value="bv*+ba/b">最高可用 · 最佳音轨</option></select></label></div><p class="dv2-hint" data-format-hint>画质信息来自解析结果。</p></div>
+            <div class="dv2-quality-section"><div class="dv2-quality-setting"><label data-single-quality>统一画质<select data-format><option value="bv*+ba/b">最高可用 · 最佳音轨</option></select></label><label data-batch-quality hidden>统一画质<select data-batch-format></select></label></div><p class="dv2-hint" data-format-hint>画质信息来自解析结果。</p><p class="dv2-batch-totals" data-batch-totals aria-live="polite" hidden></p></div>
             <section class="dv2-episodes" id="dv2-episodes" data-episodes hidden>
               <div class="dv2-picker-toolbar">
                 <div class="dv2-categories" data-episode-categories role="group" aria-label="内容分类"></div>
@@ -47,6 +47,17 @@
             </section>
           </div>
           <aside class="dv2-selection-summary"><h3>本次选择</h3><dl><dt>内容</dt><dd data-summary-count>—</dd><dt>画质</dt><dd data-summary-quality>最高可用</dd><dt>保存到</dt><dd data-summary-output>下载目录</dd></dl>
+            <section class="dv2-batch-review" data-batch-review hidden>
+              <div class="dv2-batch-estimate"><span>预计体积</span><strong data-batch-size></strong></div>
+              <label class="dv2-checkbox dv2-batch-fallback"><input type="checkbox" data-batch-fallback><span>缺档自动降一档 <small>限同编码</small></span></label>
+              <div class="dv2-batch-state"><span data-batch-status aria-live="polite"></span><button type="button" data-batch-retry hidden>重新检测</button></div>
+              <details class="dv2-batch-breakdown" open>
+                <summary>逐集明细</summary>
+                <div class="dv2-batch-groups" role="group" aria-label="按档位核对"><button type="button" data-batch-group="different">不同档位 <b></b></button><button type="button" data-batch-group="same">同档位 <b></b></button></div>
+                <div class="dv2-batch-list" data-batch-list tabindex="0" role="region" aria-label="逐集明细"></div>
+                <p class="dv2-hint" data-batch-window></p>
+              </details>
+            </section>
             <details class="dv2-advanced"><summary>目录与下载选项</summary><div class="dv2-options-grid"><label>来源命名模板<input data-template></label><label class="dv2-output">保存子目录<span class="dv2-output-row"><input data-output placeholder="使用下载目录"><button type="button" data-pick-folder>浏览</button></span></label><label class="dv2-checkbox" data-all-parts><input type="checkbox"><span>下载全部分P / 合集内容</span></label></div></details>
             <div class="dv2-submit-row"><span data-submit-summary>仅使用本次选择</span><button type="submit">开始下载</button></div><p class="dv2-hint">完成后可用当前文件进入发种工作台进行 PT 命名。</p>
           </aside>

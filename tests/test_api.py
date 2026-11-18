@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from bili_remote.downloader import DownloadFailure
 from bili_remote.validation import compile_format_profile
+from bili_remote.v2.download.quality import preview_tracks
 from bili_remote.web import create_app
 
 
@@ -555,6 +556,36 @@ def test_batch_jobs_apply_format_profile_to_every_episode(settings) -> None:
             )
 
 
+def test_batch_locked_tracks_match_preview_and_never_switch_on_failure(settings) -> None:
+    app = create_app(settings)
+    install_fake_season(app)
+    with TestClient(app) as client:
+        csrf = login(client)
+        payload = {
+            "url": "https://www.bilibili.com/bangumi/play/ss28747",
+            "episode_ids": ["1001", "1002"],
+            "episode_selectors": {"1001": "(FAILHDR+30280)"},
+        }
+        headers = {"X-CSRF-Token": csrf}
+        invalid = client.post("/api/jobs/batch", headers=headers, json=payload)
+        assert invalid.status_code == 422
+        assert not app.state.services.database.list_jobs(10)
+
+        payload["episode_selectors"]["1002"] = "(30064+30280)"
+        response = client.post("/api/jobs/batch", headers=headers, json=payload)
+        assert response.status_code == 200, response.text
+        first, second = response.json()["ids"]
+        failed = wait_for_job(client, first, {"completed", "failed"})
+        assert failed["status"] == "failed"
+        assert failed["format_selector"] == "(FAILHDR+30280)"
+        log = client.get(f"/api/jobs/{first}/log").json()["content"]
+        assert "with format (FAILHDR+30280)" in log
+        assert "自动回退到" not in log
+        done = wait_for_job(client, second, {"completed", "failed"})
+        assert done["status"] == "completed"
+        assert done["format_selector"] == "(30064+30280)"
+
+
 def test_episode_formats_endpoint_returns_selected_episode_formats(settings) -> None:
     app = create_app(settings)
     install_fake_season(app)
@@ -599,10 +630,16 @@ def test_batch_episode_formats_reports_profile_coverage(settings) -> None:
         "tbr": 18000,
     }
 
-    async def episode_formats(url, api_mode="web"):
+    async def episode_formats(url, api_mode="web", *, detailed=False):
         formats = [hd.copy()]
         if url.endswith("/ep1001"):
             formats.insert(0, uhd.copy())
+        if detailed:
+            formats[-1]["filesize"] = 200_000_000 if url.endswith("/ep1001") else 250_000_000
+            return {"formats": preview_tracks([*formats, {
+                "format_id": "30280", "vcodec": "none", "acodec": "mp4a",
+                "filesize": 10_000_000, "tbr": 191,
+            }], 480)}
         return {"formats": formats}
 
     app.state.services.runner.episode_formats = episode_formats
@@ -635,6 +672,19 @@ def test_batch_episode_formats_reports_profile_coverage(settings) -> None:
             (2160, "hevc", "HDR10", 1),
             (1080, "avc", "SDR", 2),
         ]
+
+
+        detailed = client.post(
+            "/api/episodes/formats/batch",
+            headers={"X-CSRF-Token": csrf},
+            json={"url": "https://www.bilibili.com/bangumi/play/ss28747",
+                  "episode_ids": ["1001", "1002"], "detailed": True},
+        )
+        assert detailed.status_code == 200, detailed.text
+        tracks = detailed.json()["episode_formats"]
+        assert [next(t for t in tracks[ep] if t["format_id"] == "30112")["size_with_audio"]
+                for ep in ("1001", "1002")] == [210_000_000, 260_000_000]
+        assert tracks["1002"][0]["locked_selector"] == "(30112+30280)"
 
 
 def test_tv_episode_formats_endpoint(settings) -> None:

@@ -30,6 +30,7 @@ from .security import redact_sensitive
 from .validation import ValidationError, canonicalize_bilibili_url
 from .v2.download.finalize import cleanup_staging, finalize_download, staging_directory
 from .v2.download.naming import displayed_episode_number, positive_number, url_facts
+from .v2.download.quality import exact_tracks, preview_tracks
 
 
 class DownloadFailure(RuntimeError):
@@ -192,26 +193,26 @@ class YtDlpRunner:
         return await self._resolve_web(url)
 
     async def episode_formats(
-        self, url: str, api_mode: str = "web"
+        self, url: str, api_mode: str = "web", *, detailed: bool = False
     ) -> dict[str, Any]:
         self._begin_operation()
         try:
-            return await self._episode_formats(url, api_mode)
+            return await self._episode_formats(url, api_mode, detailed=detailed)
         finally:
             self._end_operation()
 
     async def _episode_formats(
-        self, url: str, api_mode: str = "web"
+        self, url: str, api_mode: str = "web", *, detailed: bool = False
     ) -> dict[str, Any]:
         url = await canonicalize_bilibili_url(url)
         if api_mode == "tv":
-            info = await self._tv_download_info(url, {})
+            info = await self._tv_download_info(url, {}, probe_cdn=not detailed)
             return {
                 "title": info.get("title"),
                 "duration": info.get("duration"),
                 "webpage_url": url,
                 "episode_id": info.get("id"),
-                "formats": self._normalize_formats(info.get("formats") or []),
+                "formats": self._episode_preview_formats(info, detailed),
             }
         if api_mode != "web":
             raise DownloadFailure("解析线路无效")
@@ -235,8 +236,14 @@ class YtDlpRunner:
             "duration": payload.get("duration"),
             "webpage_url": url,
             "episode_id": payload.get("id"),
-            "formats": self._normalize_formats(payload.get("formats") or []),
+            "formats": self._episode_preview_formats(payload, detailed),
         }
+
+    def _episode_preview_formats(self, info: dict[str, Any], detailed: bool) -> list[dict[str, Any]]:
+        formats = self._normalize_formats(
+            info.get("formats") or [], min_height=144 if detailed else MIN_FORMAT_HEIGHT
+        )
+        return preview_tracks(formats, info.get("duration")) if detailed else formats
 
     async def batch_episode_formats(
         self,
@@ -245,11 +252,12 @@ class YtDlpRunner:
         api_mode: str = "web",
         *,
         max_probe: int = 8,
+        detailed: bool = False,
     ) -> dict[str, Any]:
         self._begin_operation()
         try:
             return await self._batch_episode_formats(
-                url, episode_ids, api_mode, max_probe=max_probe
+                url, episode_ids, api_mode, max_probe=max_probe, detailed=detailed
             )
         finally:
             self._end_operation()
@@ -261,6 +269,7 @@ class YtDlpRunner:
         api_mode: str = "web",
         *,
         max_probe: int = 8,
+        detailed: bool = False,
     ) -> dict[str, Any]:
         """Probe representative episodes and report profile coverage."""
         url = await canonicalize_bilibili_url(url)
@@ -291,7 +300,9 @@ class YtDlpRunner:
         if not selected:
             raise DownloadFailure("请至少选择一集")
 
-        probes = self._sample_episodes(selected, max(1, min(max_probe, 12)))
+        if detailed and len(selected) > 12:
+            raise ValidationError("每次最多检测 12 集的逐集画质")
+        probes = selected if detailed else self._sample_episodes(selected, max(1, min(max_probe, 12)))
         semaphore = asyncio.Semaphore(2 if api_mode == "tv" else 4)
         timeout = max(
             5.0, min(float(self.settings.resolve_timeout_seconds), 30.0)
@@ -302,10 +313,10 @@ class YtDlpRunner:
         ) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
             async with semaphore:
                 try:
-                    result = await asyncio.wait_for(
-                        self.episode_formats(str(episode["url"]), api_mode),
-                        timeout=timeout,
+                    request = self.episode_formats(
+                        str(episode["url"]), api_mode, **({"detailed": True} if detailed else {})
                     )
+                    result = await asyncio.wait_for(request, timeout=timeout)
                 except TimeoutError:
                     return episode, [], "解析超时"
                 except (DownloadFailure, ValidationError) as exc:
@@ -333,6 +344,10 @@ class YtDlpRunner:
             "failed_episodes": failed,
             "profiles": self._aggregate_format_profiles(format_sets),
             "api_mode": api_mode,
+            **({"episode_formats": {
+                str(episode["id"]): formats
+                for episode, formats, error in outcomes if error is None
+            }} if detailed else {}),
         }
 
     async def _resolve_web(self, url: str) -> ResolvedMedia:
@@ -507,7 +522,7 @@ class YtDlpRunner:
         return season, episodes[0]
 
     async def _tv_download_info(
-        self, url: str, job: dict[str, Any]
+        self, url: str, job: dict[str, Any], *, probe_cdn: bool = True
     ) -> dict[str, Any]:
         if not self._has_tv_token():
             raise DownloadFailure("请先完成 TV 扫码登录", auth_required=True)
@@ -574,7 +589,13 @@ class YtDlpRunner:
                 webpage_url = url
                 item_identifier = video_id
             formats = self._tv_formats(dash)
-            formats = await self._prepare_tv_formats(formats)
+            if probe_cdn:
+                locked = exact_tracks(job.get("format_selector") or "")
+                if locked:
+                    formats = [item for item in formats if item["format_id"] in locked]
+                    if {item["format_id"] for item in formats} != set(locked):
+                        raise DownloadFailure("预览确认的 TV 格式已不可用，请重新检测画质")
+                formats = await self._prepare_tv_formats(formats)
             if not formats:
                 raise DownloadFailure(TV_CDN_BLOCKED_MESSAGE)
             origin = {"bvid": None, "season_id": None, "ep_id": None, "cid": str(cid), "original_title": None, "episode_index": None}
@@ -706,7 +727,7 @@ class YtDlpRunner:
                 pass
 
         # An exact video+audio request needs no warm-up on unselected tracks.
-        ids = set(selector.split("+"))
+        ids = set(exact_tracks(selector) or selector.split("+"))
         selected = [item for item in formats if item.get("format_id") in ids]
         await self._rank_cdn_candidates(
             selected if ids == {item["format_id"] for item in selected} else formats,
@@ -1619,7 +1640,7 @@ class YtDlpRunner:
                 "--output",
                 job["output_template"],
                 "--format",
-                selector,
+                "+".join(exact_tracks(selector)) or selector,
                 "--progress-template",
                 (
                     "download:__PROGRESS__%(progress._percent_str)s|"
@@ -1666,7 +1687,9 @@ class YtDlpRunner:
                 self._remove_file(cookie_path)
             raise CancelledFailure("任务已取消")
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        if api_mode == "tv" and info_payload:
+        if exact_tracks(job["format_selector"]):
+            fallback_selectors = []
+        elif api_mode == "tv" and info_payload:
             fallback_selectors = self._tv_fallback_selectors(info_payload)
         else:
             fallback_selectors = self._fallback_selectors(
@@ -2130,7 +2153,9 @@ class YtDlpRunner:
         }
 
     @staticmethod
-    def _normalize_formats(formats: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _normalize_formats(
+        formats: list[dict[str, Any]], *, min_height: int = MIN_FORMAT_HEIGHT
+    ) -> list[dict[str, Any]]:
         normalized_formats: list[dict[str, Any]] = []
         for item in formats:
             format_id = str(item.get("format_id") or "")
@@ -2144,7 +2169,7 @@ class YtDlpRunner:
                 height_value = int(height or 0)
             except (TypeError, ValueError):
                 height_value = 0
-            if height_value and height_value < MIN_FORMAT_HEIGHT:
+            if height_value and height_value < min_height:
                 continue
             resolution = item.get("resolution") or (
                 f"{width}x{height}" if width and height else "audio only"
