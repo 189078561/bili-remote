@@ -78,15 +78,14 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.locator("[data-title]", has_text="合成剧集").wait_for()
         assert page.locator(".dv2-episode").count() == 2
         expect(page.locator("[data-episode-categories] button")).to_have_text(["正片", "预告"])
-        if page.locator(".dv2-select-actions details").get_attribute("open") is None:
-            page.locator(".dv2-select-actions summary").click()
-        page.get_by_role("button", name="全选正片").click()
+        page.get_by_role("button", name="全选", exact=True).click()
         assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
-        page.get_by_role("button", name="反选").click()
+        page.locator(".dv2-select-actions summary").click()
+        page.get_by_role("button", name="反选全部").click()
         assert page.locator("[data-selected-count]").inner_text() == "已选 1 集"
-        if page.locator(".dv2-select-actions details").get_attribute("open") is None:
-            page.locator(".dv2-select-actions summary").click()
-        page.get_by_role("button", name="全选正片").click()
+        page.get_by_role("button", name="清空全部").click()
+        page.get_by_role("button", name="全选", exact=True).click()
+        page.locator(".dv2-select-actions summary").click()
         page.get_by_role("button", name="检测所选画质").click()
         page.wait_for_function("window.calls.some(call => call.url === '/api/episodes/formats/batch')")
         page.locator("[data-format]").select_option("profile:0")
@@ -376,7 +375,7 @@ def test_grid_hides_empty_categories_and_reuses_saved_parse_without_resolving(li
         "source_url": source, "title": "缓存剧集", "api_mode": "tv", "is_playlist": True,
         "default_episode_id": "51",
         "episodes": [{"id": str(i), "group": "正片", "group_index": i, "title": f"第 {i} 集"}
-                     for i in range(1, 121)],
+                     for i in range(1, 221)],
         "formats": [{"selector": "cached-format", "format_id": "cached", "height": 720}],
     }
     try:
@@ -414,6 +413,19 @@ def test_grid_hides_empty_categories_and_reuses_saved_parse_without_resolving(li
         expect(page.locator(".dv2-episode")).to_have_count(50)
         expect(page.locator(".dv2-episode").first).to_have_text("100")
         expect(page.locator('[data-episode-id="51"]')).to_have_attribute("aria-pressed", "true")
+        controls = page.locator(".dv2-picker-actions")
+        expect(controls.get_by_role("button")).to_have_text(["正序 ↑", "倒序 ↓", "全选"])
+        page.get_by_role("button", name="201–220", exact=True).click()
+        controls.get_by_role("button", name="全选", exact=True).click()
+        expect(page.locator(".dv2-episode[aria-pressed=true]")).to_have_count(20)
+        expect(page.locator("[data-selected-count]")).to_have_text("已选 21 集")
+        page.get_by_role("button", name="101–150", exact=True).click()
+        expect(page.locator(".dv2-episode[aria-pressed=true]")).to_have_count(0)
+        expect(controls.get_by_role("button", name="全选", exact=True)).to_be_visible()
+        page.get_by_role("button", name="201–220", exact=True).click()
+        controls.get_by_role("button", name="取消全选", exact=True).click()
+        expect(page.locator(".dv2-episode[aria-pressed=true]")).to_have_count(0)
+        expect(page.locator("[data-selected-count]")).to_have_text("已选 1 集")
         page.get_by_role("button", name="正序 ↑").click()
         page.locator('[data-episode-id="1"]').click()
         expect(page.locator("[data-selected-count]")).to_have_text("已选 2 集")
@@ -428,8 +440,11 @@ def test_grid_hides_empty_categories_and_reuses_saved_parse_without_resolving(li
         page.locator("[data-parse]").click()
         expect(page.locator("[data-episode-categories] button")).to_have_text(["正片", "花絮", "预告"])
         page.get_by_role("button", name="花絮", exact=True).click()
-        page.locator('[data-episode-id="7"]').click()
+        controls.get_by_role("button", name="全选", exact=True).click()
+        expect(page.locator('[data-episode-id="7"]')).to_have_attribute("aria-pressed", "true")
+        expect(page.locator("[data-selected-count]")).to_have_text("已选 2 集")
         page.get_by_role("button", name="预告", exact=True).click()
+        expect(controls.get_by_role("button", name="全选", exact=True)).to_be_visible()
         page.locator('[data-episode-id="8"]').click()
         expect(page.locator("[data-selected-count]")).to_have_text("已选 3 集")
         quality = page.locator(".dv2-episode-quality")

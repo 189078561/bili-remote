@@ -127,6 +127,7 @@
     const episodeHeading = $("[data-episode-heading]");
     const episodeToggle = $("[data-episode-toggle]");
     const episodeList = $("[data-episode-list]");
+    const selectAll = $("[data-select-all]");
     const selectedCount = $("[data-selected-count]");
     const jobsHost = $("[data-jobs]");
     const jobsHistoryHost = $("[data-download-history]");
@@ -306,7 +307,6 @@
         });
         buttons.append(button);
       }
-      $("[data-select-main]").hidden = !state.categories.has("正片") || categories.length === 1;
       drawEpisodePage();
       setEpisodesOpen(categories.length > 0);
     }
@@ -319,7 +319,7 @@
       $("[data-episode-detail]").hidden = true;
       $("[data-episode-detail]").replaceChildren();
       state.activeEpisodeId = null;
-      if (!group) return;
+      if (!group) { updateEpisodeTiles(); return; }
       const {items} = group;
       for (const button of $("[data-episode-categories]").children) {
         button.setAttribute("aria-pressed", String(button.dataset.category === state.category));
@@ -371,10 +371,30 @@
       episodeList.scrollTop = group.scrollTop;
     }
 
+    function pageSelectionIds() {
+      return Array.from(episodeList.children, tile => tile.dataset.episodeId);
+    }
+
     function updateEpisodeTiles() {
+      const ids = pageSelectionIds();
+      const allSelected = ids.length > 0 && ids.every(id => state.selected.has(id));
       for (const tile of episodeList.children) {
         tile.setAttribute("aria-pressed", String(state.selected.has(tile.dataset.episodeId)));
       }
+      selectAll.disabled = ids.length === 0;
+      selectAll.textContent = allSelected ? "取消全选" : "全选";
+      selectAll.setAttribute("aria-pressed", String(allSelected));
+    }
+
+    function togglePageSelection() {
+      const ids = pageSelectionIds();
+      const allSelected = ids.every(id => state.selected.has(id));
+      for (const id of ids) {
+        if (allSelected) state.selected.delete(id);
+        else state.selected.add(id);
+      }
+      updateEpisodeTiles();
+      updateCount();
     }
 
     function showEpisodeDetail(episode, title) {
@@ -570,13 +590,11 @@
       summary();
     }
     function setSelection(method) {
-      const episodes = new Map((state.resolved?.episodes || []).map(episode => [String(episode.id), episode]));
-      for (const [id, episode] of episodes) {
-        const include = method === "all"
-          || (method === "main" && episodeCategory(episode) === "正片")
-          || (method === "invert" && !state.selected.has(id));
-        if (include) state.selected.add(id);
-        else state.selected.delete(id);
+      if (method === "invert") {
+        const ids = (state.resolved?.episodes || []).map(episode => String(episode.id));
+        state.selected = new Set(ids.filter(id => !state.selected.has(id)));
+      } else {
+        state.selected.clear();
       }
       updateEpisodeTiles();
       updateCount();
@@ -966,8 +984,7 @@
     listen($("[data-all-parts] input"), "change", updateNamingEditor);
     listen($("[data-output]"), "input", summary);
     listen(modeField, "change", () => { ++state.parseVersion; if (urlField.value.trim()) parse(); });
-    listen($("[data-select-main]"), "click", () => setSelection("main"));
-    listen($("[data-select-all]"), "click", () => setSelection("all"));
+    listen(selectAll, "click", togglePageSelection);
     listen($("[data-select-invert]"), "click", () => setSelection("invert"));
     listen($("[data-select-none]"), "click", () => setSelection("none"));
     listen($("[data-check-batch]"), "click", checkBatchFormats);

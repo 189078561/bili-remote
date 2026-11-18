@@ -20,11 +20,14 @@
             <section class="dv2-episodes" id="dv2-episodes" data-episodes hidden>
               <div class="dv2-picker-toolbar">
                 <div class="dv2-categories" data-episode-categories role="group" aria-label="内容分类"></div>
-                <div class="dv2-sort" role="group" aria-label="当前分类排序"><button type="button" data-sort="asc" aria-pressed="false">正序 ↑</button><button type="button" data-sort="desc" aria-pressed="false">倒序 ↓</button></div>
+                <div class="dv2-picker-actions">
+                  <div class="dv2-sort" role="group" aria-label="当前分类排序"><button type="button" data-sort="asc" aria-pressed="false">正序 ↑</button><button type="button" data-sort="desc" aria-pressed="false">倒序 ↓</button></div>
+                  <button type="button" data-select-all aria-pressed="false">全选</button>
+                </div>
               </div>
               <div class="dv2-picker-controls">
                 <div class="dv2-ranges" data-episode-ranges role="group" aria-label="条目范围"></div>
-                <div class="dv2-select-actions"><button type="button" data-select-all>全选</button><button type="button" data-select-none>清空</button><details><summary>更多</summary><div><button type="button" data-select-main>全选正片</button><button type="button" data-select-invert>反选</button><button type="button" data-check-batch hidden>检测所选画质</button></div></details></div>
+                <div class="dv2-select-actions"><details><summary>更多</summary><div><button type="button" data-select-none>清空全部</button><button type="button" data-select-invert>反选全部</button><button type="button" data-check-batch hidden>检测所选画质</button></div></details></div>
               </div>
               <div class="dv2-episode-list" data-episode-list></div>
               <div class="dv2-episode-detail" data-episode-detail hidden></div>
