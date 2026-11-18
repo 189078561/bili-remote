@@ -76,7 +76,8 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.locator("#dv2-url").fill("https://www.bilibili.com/bangumi/play/ss42")
         page.get_by_role("button", name="解析链接").click()
         page.locator("[data-title]", has_text="合成剧集").wait_for()
-        assert page.locator(".dv2-episode").count() == 3
+        assert page.locator(".dv2-episode").count() == 2
+        expect(page.locator("[data-episode-categories] button")).to_have_text(["正片", "预告"])
         if page.locator(".dv2-select-actions details").get_attribute("open") is None:
             page.locator(".dv2-select-actions summary").click()
         page.get_by_role("button", name="全选正片").click()
@@ -91,13 +92,13 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.locator("[data-format]").select_option("profile:0")
         resolve_calls_before = page.evaluate("window.calls.filter(call => call.url === '/api/resolve').length")
         assert page.locator(".dv2-episodes").is_visible()
-        page.get_by_role("button", name="收起", exact=True).click()
+        page.locator("[data-episode-toggle]").click()
         assert page.locator(".dv2-episodes").is_hidden()
         assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
         assert page.locator("[data-format]").input_value() == "profile:0"
-        page.get_by_role("button", name="展开", exact=True).click()
+        page.locator("[data-episode-toggle]").click()
         assert page.locator(".dv2-episodes").is_visible()
-        assert page.evaluate("document.querySelectorAll('.dv2-episode input:checked').length") == 2
+        assert page.evaluate("document.querySelectorAll('.dv2-episode[aria-pressed=true]').length") == 2
         assert page.evaluate("window.calls.filter(call => call.url === '/api/resolve').length") == resolve_calls_before
         page.locator(".dv2-advanced > summary").click()
         page.get_by_role("button", name="浏览").click()
@@ -113,6 +114,7 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         assert page.locator("[data-format]").input_value() == "profile:0"
         assert page.locator(".dv2-job").count() == 1
         page.get_by_role("button", name="取消").click()
+        page.locator("[data-download-history]").locator("..").locator("summary").click()
         page.locator(".dv2-badge", has_text="已取消").wait_for()
         page.get_by_role("button", name="重试").click()
         page.locator(".dv2-badge", has_text="排队中").wait_for()
@@ -226,7 +228,7 @@ def test_download_workbench_stability_and_log_controls():
               });
             }"""
         )
-        page.locator('.dv2-job[data-job-id="2"]').wait_for()
+        page.locator('.dv2-job[data-job-id="2"]').wait_for(state="attached")
         merging = page.locator('.dv2-job[data-job-id="1"]')
         completed = page.locator('.dv2-job[data-job-id="2"]')
         expect(merging.locator(".dv2-badge")).to_have_text("Web · 合并中")
@@ -235,11 +237,14 @@ def test_download_workbench_stability_and_log_controls():
         assert "/s" not in merging.locator(".dv2-job-meta").inner_text()
         expect(merging.locator(".dv2-progress")).to_be_visible()
 
+        expect(page.locator("[data-download-history-count]")).to_have_text("1 条")
+        expect(completed).to_be_hidden()
+        page.get_by_text("下载历史", exact=True).click()
         expect(completed.locator(".dv2-badge")).to_have_text("Web · 已完成")
-        completed_meta = completed.locator(".dv2-job-meta").inner_text()
-        assert "完成于" in completed_meta
+        completed_meta = " ".join(completed.locator(".dv2-job-meta").inner_text().split())
+        assert "完成时间" in completed_meta
         assert "下载总用时 1 分 5 秒" in completed_meta
-        assert "最终大小 117.7 MiB" in completed_meta
+        assert "最终文件大小 117.7 MiB" in completed_meta
         assert "剩余" not in completed_meta
         assert "/s" not in completed_meta
         expect(completed.locator(".dv2-progress")).to_be_hidden()
@@ -273,8 +278,12 @@ def test_download_workbench_stability_and_log_controls():
         )
         assert concurrency == 1
 
-        page.evaluate("window.scrollTo(0, 700)")
-        assert page.evaluate("window.scrollY") == 700
+        log_button = completed.get_by_role("button", name="查看日志")
+        log_button.scroll_into_view_if_needed()
+        page.evaluate("(el) => window.scrollTo(0, window.scrollY + el.getBoundingClientRect().top - 180)",
+                      log_button.element_handle())
+        scroll_before_dialog = page.evaluate("window.scrollY")
+        assert scroll_before_dialog > 0
 
         def open_log():
             completed.get_by_role("button", name="查看日志").click()
@@ -296,19 +305,19 @@ def test_download_workbench_stability_and_log_controls():
         assert page.evaluate("document.querySelector('[data-log-content]').scrollTop > 0")
         page.get_by_role("button", name="关闭日志").click()
         expect(dialog).to_be_hidden()
-        page.wait_for_function("Math.abs(window.scrollY - 700) <= 2")
+        page.wait_for_function("y => Math.abs(window.scrollY - y) <= 2", arg=scroll_before_dialog)
 
         open_log()
         page.keyboard.press("Escape")
         expect(dialog).to_be_hidden()
-        page.wait_for_function("Math.abs(window.scrollY - 700) <= 2")
+        page.wait_for_function("y => Math.abs(window.scrollY - y) <= 2", arg=scroll_before_dialog)
 
         open_log()
         dialog_box = dialog.bounding_box()
         assert dialog_box
         page.mouse.click(max(2, dialog_box["x"] - 10), max(2, dialog_box["y"] - 10))
         expect(dialog).to_be_hidden()
-        page.wait_for_function("Math.abs(window.scrollY - 700) <= 2")
+        page.wait_for_function("y => Math.abs(window.scrollY - y) <= 2", arg=scroll_before_dialog)
 
         page.evaluate("window.wb.destroy()")
         assert page.locator(".dv2-job").count() == 0
@@ -354,6 +363,91 @@ def test_number_and_title_preview_stay_inline_with_episode_selection(live_server
         assert options["mode"] == "smart" and options["title"] == "凡人 修仙传"
         assert options["episode_numbers"] == {"3854802": 178}
         assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+def test_grid_hides_empty_categories_and_reuses_saved_parse_without_resolving(live_server):
+    base, _ = live_server
+    playwright, browser, page, errors = browser_session(base, legacy=False)
+    source = "https://www.bilibili.com/bangumi/play/ss42"
+    calls, submitted = [], []
+    saved = {
+        "source_url": source, "title": "缓存剧集", "api_mode": "tv", "is_playlist": True,
+        "default_episode_id": "51",
+        "episodes": [{"id": str(i), "group": "正片", "group_index": i, "title": f"第 {i} 集"}
+                     for i in range(1, 121)],
+        "formats": [{"selector": "cached-format", "format_id": "cached", "height": 720}],
+    }
+    try:
+        page.route("**/api/history?limit=200", lambda route: route.fulfill(json=[{**saved, "id": 7}]))
+        page.route("**/api/history/7", lambda route: route.fulfill(json=saved))
+
+        def fresh(route):
+            calls.append(route.request.post_data_json)
+            route.fulfill(json={
+                **saved, "source_url": "https://www.bilibili.com/bangumi/play/ss43", "api_mode": "web",
+                "title": "含花絮和预告", "episodes": [
+                    {"id": "1", "group": "正片", "title": "第一集"},
+                    {"id": "7", "group": "特别花絮", "title": "幕后制作"},
+                    {"id": "8", "group": "定档预告", "title": "首支预告"},
+                ], "default_episode_id": "1",
+            })
+
+        page.route("**/api/resolve", fresh)
+        page.route("**/api/episodes/formats", lambda route: route.fulfill(json={
+            "formats": [{"selector": "episode-only", "format_id": "ep", "height": 1080}]
+        }))
+
+        def batch(route):
+            submitted.append(route.request.post_data_json)
+            route.fulfill(json={"ids": [2], "count": 1})
+
+        page.route("**/api/jobs/batch", batch)
+        page.locator("[data-view=download]").click()
+        page.get_by_text("解析记录", exact=True).click()
+        page.get_by_role("button", name="复用解析").click()
+        expect(page.locator("[data-title]")).to_have_text("缓存剧集")
+        expect(page.locator("[data-mode]")).to_have_value("tv")
+        expect(page.locator("[data-format] option").last).to_have_attribute("value", "cached-format")
+        expect(page.locator("[data-episode-categories] button")).to_have_text(["正片"])
+        expect(page.locator(".dv2-episode")).to_have_count(50)
+        expect(page.locator(".dv2-episode").first).to_have_text("100")
+        expect(page.locator('[data-episode-id="51"]')).to_have_attribute("aria-pressed", "true")
+        page.get_by_role("button", name="正序 ↑").click()
+        page.locator('[data-episode-id="1"]').click()
+        expect(page.locator("[data-selected-count]")).to_have_text("已选 2 集")
+        expect(page.locator(".dv2-episode").first).to_have_text("1")
+        page.locator("[data-episode-toggle]").click()
+        expect(page.locator("[data-episodes]")).to_be_hidden()
+        page.locator("[data-episode-toggle]").click()
+        expect(page.locator('[data-episode-id="1"]')).to_have_attribute("aria-pressed", "true")
+        assert not calls
+
+        page.locator("#dv2-url").fill("https://www.bilibili.com/bangumi/play/ss43")
+        page.locator("[data-parse]").click()
+        expect(page.locator("[data-episode-categories] button")).to_have_text(["正片", "花絮", "预告"])
+        page.get_by_role("button", name="花絮", exact=True).click()
+        page.locator('[data-episode-id="7"]').click()
+        page.get_by_role("button", name="预告", exact=True).click()
+        page.locator('[data-episode-id="8"]').click()
+        expect(page.locator("[data-selected-count]")).to_have_text("已选 3 集")
+        quality = page.locator(".dv2-episode-quality")
+        quality.focus()
+        expect(quality.locator("option").last).to_have_attribute("value", "episode-only")
+        quality.select_option("episode-only")
+        page.get_by_role("button", name="花絮", exact=True).click()
+        for width in (390, 768, 1440):
+            page.set_viewport_size({"width": width, "height": 960})
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.locator("[data-download-form] button[type=submit]").click()
+        expect(page.locator(".dv2")).to_have_attribute("data-stage", "submitted")
+        assert [job["episode_ids"] for job in submitted] == [["1", "7"], ["8"]]
+        assert submitted[-1]["format_selector"] == "episode-only"
+        page.get_by_role("button", name="复用解析").click()
+        expect(page.locator("[data-selected-count]")).to_have_text("已选 2 集")
+        expect(page.locator("[data-episode-categories] button")).to_have_text(["正片"])
+        assert len(calls) == 1 and not errors, errors
     finally:
         browser.close()
         playwright.stop()

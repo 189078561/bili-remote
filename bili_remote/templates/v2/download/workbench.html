@@ -7,17 +7,27 @@
     <section class="dv2-create">
       <form data-download-form>
         <div class="dv2-link-row"><select data-mode aria-label="下载线路"><option value="web">Web</option><option value="tv">TV</option></select><input id="dv2-url" type="url" required aria-label="B站链接" placeholder="粘贴视频、番剧或合集链接" autocomplete="url"><button type="button" data-parse disabled>解析链接</button></div>
-        <div class="dv2-stage-line"><ol class="dv2-steps" aria-label="下载阶段"><li data-stage-index="0"><b>1</b>确认内容</li><li data-stage-index="1"><b>2</b>选集与画质</li><li data-stage-index="2"><b>3</b>下载任务</li></ol><span data-parse-state role="status">等待解析</span></div>
+        <p class="dv2-parse-status" data-parse-state role="status"></p>
         <div class="dv2-error" data-error role="alert" hidden></div>
         <div class="dv2-idle" data-idle><h2>添加一个 B站链接</h2><p>支持单个视频、分P、番剧和合集。</p><div><span>粘贴链接</span><span>选择内容与可用画质</span><span>下载完成后处理资源</span></div></div>
         <div data-resolution class="dv2-resolution-grid" hidden>
           <div class="dv2-selection-content">
             <div class="dv2-media-summary"><div class="dv2-cover-fallback" aria-hidden="true"><svg class="ws-icon"><use href="/static/v2/shared/icons.svg#film"/></svg></div><img class="dv2-cover" data-cover alt="视频封面" referrerpolicy="no-referrer" hidden><div><h2 data-title></h2><p data-summary></p></div></div>
-            <div class="dv2-section-heading" data-episode-heading hidden><div><h3>选择剧集</h3><span data-selected-count>已选 0 集</span></div><button type="button" class="dv2-episode-toggle" data-episode-toggle aria-expanded="false">收起</button><div class="dv2-select-actions"><button type="button" data-select-all>全选</button><button type="button" data-select-none>清空</button><details><summary>更多</summary><div><button type="button" data-select-main>全选正片</button><button type="button" data-select-invert>反选</button><button type="button" data-check-batch hidden>检测所选画质</button></div></details></div></div>
+            <div class="dv2-section-heading" data-episode-heading hidden>
+              <button type="button" class="dv2-episode-toggle" data-episode-toggle aria-expanded="false" aria-controls="dv2-episodes"><strong>解析列表</strong><span data-selected-count>已选 0 集</span></button>
+            </div>
             <div class="dv2-quality-section"><div class="dv2-quality-setting"><label>统一画质<select data-format><option value="bv*+ba/b">最高可用 · 最佳音轨</option></select></label></div><p class="dv2-hint" data-format-hint>画质信息来自解析结果。</p></div>
-            <section class="dv2-episodes" data-episodes hidden>
-
+            <section class="dv2-episodes" id="dv2-episodes" data-episodes hidden>
+              <div class="dv2-picker-toolbar">
+                <div class="dv2-categories" data-episode-categories role="group" aria-label="内容分类"></div>
+                <div class="dv2-sort" role="group" aria-label="当前分类排序"><button type="button" data-sort="asc" aria-pressed="false">正序 ↑</button><button type="button" data-sort="desc" aria-pressed="false">倒序 ↓</button></div>
+              </div>
+              <div class="dv2-picker-controls">
+                <div class="dv2-ranges" data-episode-ranges role="group" aria-label="条目范围"></div>
+                <div class="dv2-select-actions"><button type="button" data-select-all>全选</button><button type="button" data-select-none>清空</button><details><summary>更多</summary><div><button type="button" data-select-main>全选正片</button><button type="button" data-select-invert>反选</button><button type="button" data-check-batch hidden>检测所选画质</button></div></details></div>
+              </div>
               <div class="dv2-episode-list" data-episode-list></div>
+              <div class="dv2-episode-detail" data-episode-detail hidden></div>
             </section>
             <section class="dv2-naming" aria-labelledby="dv2-naming-title">
               <h3 id="dv2-naming-title">文件命名</h3>
@@ -44,7 +54,8 @@
       <div class="dv2-card-title"><div><h2>下载任务</h2><span data-queue-count></span></div><button type="button" class="dv2-refresh" data-refresh>刷新</button></div>
       <p class="dv2-notice" data-notice role="status">队列状态自动更新。</p><div class="dv2-jobs" data-jobs><p class="dv2-empty">读取下载任务…</p></div>
     </section>
-    <details class="dv2-history"><summary><span>解析历史</span><span data-history-count></span></summary><div class="dv2-history-tools"><button type="button" data-history-refresh>刷新历史</button></div><div class="dv2-history-list" data-history><p class="dv2-empty">读取解析历史…</p></div></details>
+    <details class="dv2-history"><summary><span>下载历史</span><span data-download-history-count></span></summary><div class="dv2-history-list" data-download-history><p class="dv2-empty">读取下载历史…</p></div></details>
+    <details class="dv2-history"><summary><span>解析记录</span><span data-history-count></span></summary><div class="dv2-history-tools"><button type="button" data-history-refresh>刷新记录</button></div><div class="dv2-history-list" data-history><p class="dv2-empty">读取解析记录…</p></div></details>
   </div>
   <dialog data-log-dialog aria-labelledby="dv2-log-title"><div class="dv2-log-shell"><div class="dv2-log-head"><strong id="dv2-log-title" data-log-title>任务日志</strong><button type="button" data-log-close aria-label="关闭日志">关闭</button></div><pre class="dv2-log-content" data-log-content tabindex="0"></pre></div></dialog>
 </section>
