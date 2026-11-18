@@ -455,14 +455,23 @@ def test_number_and_title_preview_stay_inline_with_episode_selection(live_server
         browser.close()
         playwright.stop()
 
-def test_saved_parse_names_main_episode_and_bonus_by_their_own_metadata(live_server):
+@pytest.mark.parametrize("legacy_snapshot", [False, True], ids=["structured-number", "legacy-title"])
+def test_saved_parse_names_main_episode_and_bonus_by_their_own_metadata(live_server, legacy_snapshot):
     base, app = live_server
     source = "https://www.bilibili.com/bangumi/play/ep4507157"
     services = app.state.services
     episodes, _ = services.runner._build_episodes({}, {
-        "main_section": {"episodes": [{"id": 3065290, "title": "1", "long_title": "来世，你可以找我报仇"}]},
+        "main_section": {"episodes": [
+            {"id": 3065290, "title": "1", "long_title": "来世，你可以找我报仇"},
+            {"id": 3065291, "title": "200", "long_title": "暮兰之战24"},
+            {"id": 3065292, "title": "新章", "long_title": "暮兰之战25"},
+        ]},
         "section": [{"title": "PV花絮", "episodes": [{"id": 4507157, "title": "兢慎篇 预热PV"}]}],
     })
+    if legacy_snapshot:
+        for episode in episodes:
+            episode.pop("display_episode_number")
+            episode.pop("chapter_title")
     services.database.save_history(
         source_url=source, api_mode="web", title="盗妖行", uploader="",
         duration=None, is_playlist=True, playlist_count=1, default_episode_id="4507157",
@@ -484,6 +493,11 @@ def test_saved_parse_names_main_episode_and_bonus_by_their_own_metadata(live_ser
 
         page.locator("[data-naming-number]").fill("7")
         expect(preview.locator("div")).to_have_text(["盗妖行.E07.mp4", "兢慎篇.预热PV.mp4"])
+        page.locator('[data-episode-id="3065291"]').click()
+        page.locator('[data-episode-id="3065292"]').click()
+        expect(preview.locator("div")).to_have_text([
+            "盗妖行.E07.mp4", "盗妖行.E200.mp4", "盗妖行.Biliep3065292.mp4", "兢慎篇.预热PV.mp4",
+        ])
         assert not errors, errors
     finally:
         browser.close()

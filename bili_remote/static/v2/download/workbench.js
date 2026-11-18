@@ -194,19 +194,28 @@
     return /预告|先导|trailer|teaser/i.test(episode.title || "") ? "预告" : "花絮";
   }
 
-  function savedEpisodeNamingFacts(episodes) {
-    // History stores the resolved episode list, including the platform's
-    // explicit episode numbers. Its grid positions are only for navigation.
-    const counts = new Map();
-    for (const {group, display_episode_number: number} of episodes) {
-      if (group === "正片" && Number.isInteger(number) && number >= 1 && number <= 99999) {
-        counts.set(number, (counts.get(number) || 0) + 1);
-      }
+  function savedEpisodeNumber(episode) {
+    if (episode.group !== "正片") return null;
+    let number = episode.display_episode_number;
+    // Older snapshots joined the platform's episode label and chapter as
+    // "1 来世，你可以找我报仇". A null field in newer data is already evaluated.
+    if (!Object.hasOwn(episode, "display_episode_number")) {
+      const title = String(episode.title || "").trim();
+      const match = title.match(/^(?:第\s*(\d{1,5})\s*[集话話]|(\d{1,5})(?=\s|$))/);
+      if (match) number = Number(match[1] || match[2]);
     }
-    return Object.fromEntries(episodes.map(episode => {
+    return Number.isInteger(number) && number >= 1 && number <= 99999 ? number : null;
+  }
+
+  function savedEpisodeNamingFacts(episodes) {
+    const counts = new Map();
+    const numbers = episodes.map(savedEpisodeNumber);
+    for (const number of numbers) {
+      if (number !== null) counts.set(number, (counts.get(number) || 0) + 1);
+    }
+    return Object.fromEntries(episodes.map((episode, index) => {
       const id = String(episode.id);
-      const number = episode.group === "正片" && counts.get(episode.display_episode_number) === 1
-        ? episode.display_episode_number : null;
+      const number = counts.get(numbers[index]) === 1 ? numbers[index] : null;
       return [id, {
         identifier: /^\d{1,20}$/.test(id) ? `ep${id}` : null,
         number_kind: number === null ? null : "episode",
