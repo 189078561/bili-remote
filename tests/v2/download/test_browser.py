@@ -11,6 +11,76 @@ from test_browser_modules import browser_session, live_server  # noqa: F401
 ROOT = Path(__file__).resolve().parents[3]
 
 
+def test_download_and_parse_history_delete_and_grouping(live_server, settings):
+    base, app = live_server
+    db = app.state.services.database
+    bangumi = "https://www.bilibili.com/bangumi/play/"
+    media = settings.download_root / "Media" / "episode01.mp4"
+    db.execute(
+        """
+        INSERT INTO jobs (kind, source_url, title, status, output_template, result_path, created_at)
+        VALUES ('manual', ?, '已下载视频', 'completed', '%(ext)s', ?, '2026-11-18T17:00:00+00:00')
+        """,
+        (bangumi + "ep41", str(media)),
+    )
+    job_id = db.list_jobs()[0]["id"]
+
+    def save(source, mode, episodes, minute):
+        db.save_history(
+            source_url=bangumi + source, api_mode=mode, title="同名番剧", uploader="",
+            duration=None, is_playlist=True, playlist_count=len(episodes),
+            default_episode_id=source[2:].partition("?")[0] if source.startswith("ep") else None,
+            formats=[{"selector": f"cached-{minute}", "height": 1080}],
+            episodes=[{"id": str(number), "group": "正片", "title": f"第 {number} 集"} for number in episodes],
+        )
+        db.execute(
+            "UPDATE parse_history SET updated_at=? WHERE source_url=? AND api_mode=?",
+            (f"2026-11-18T17:{minute:02d}:00+00:00", bangumi + source, mode),
+        )
+
+    save("ss11", "web", [40, 41], 0)
+    save("ep40?from=old", "web", [40, 41], 1)
+    save("ep40?from=share", "web", [40, 41], 2)
+    save("ep42", "web", [40, 41, 42], 3)
+    save("ep41", "tv", [40, 41], 4)
+    save("ss12", "web", [50, 51], 5)
+
+    playwright, browser, page, errors = browser_session(base)
+    try:
+        page.locator("[data-view=download]").click()
+        page.get_by_text("下载历史", exact=True).click()
+        download = page.locator("[data-download-history]")
+        expect(download).to_contain_text("已下载视频")
+        page.once("dialog", lambda dialog: dialog.dismiss())
+        download.get_by_role("button", name="删除记录").click()
+        expect(download).to_contain_text("已下载视频")
+        page.once("dialog", lambda dialog: dialog.accept())
+        download.get_by_role("button", name="删除记录").click()
+        expect(download).to_contain_text("暂无下载历史")
+        assert db.get_job(job_id) is None
+        assert media.read_bytes() == b"test-video"
+
+        page.get_by_text("解析记录", exact=True).click()
+        rows = page.locator("[data-history] .dv2-history-item")
+        expect(rows).to_have_count(3)
+        latest_web = rows.filter(has_text="Web · 2026/11/19 01:03:00")
+        expect(latest_web).to_be_visible()
+        latest_web.get_by_role("button", name="复用解析").click()
+        expect(page.locator("#dv2-url")).to_have_value(bangumi + "ep42")
+        expect(page.locator("[data-mode]")).to_have_value("web")
+        expect(page.locator("[data-format] option").last).to_have_attribute("value", "cached-3")
+        page.once("dialog", lambda dialog: dialog.accept())
+        latest_web.get_by_role("button", name="删除记录").click()
+        expect(rows).to_have_count(2)
+        assert [(r["source_url"], r["api_mode"]) for r in db.list_history()] == [
+            (bangumi + "ss12", "web"), (bangumi + "ep41", "tv"),
+        ]
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
 def test_download_workbench_browser_interactions_and_responsive_widths():
     playwright_api = pytest.importorskip("playwright.sync_api")
     playwright = playwright_api.sync_playwright().start()

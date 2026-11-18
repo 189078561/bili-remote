@@ -77,14 +77,16 @@
 .dv2-progress {height:5px;background:var(--dv2-line);border-radius:8px;overflow:hidden;}
 .dv2-progress span {display:block;height:100%;background:var(--dv2-accent);}
 .dv2-job-actions {display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
-.dv2-job-actions .is-danger {color:var(--danger,#ac4d3e);}
+.dv2-job-actions .is-danger,.dv2-history-actions .is-danger {color:var(--danger,#ac4d3e);}
 .dv2-error,.dv2-job-error {padding:10px 13px;color:var(--danger,#ac4d3e);background:var(--danger-bg,#fcf0ec);border-radius:6px;font-size:12px;overflow-wrap:anywhere;margin:12px 0;}
 .dv2-history {border-top:1px solid var(--dv2-line);padding-top:15px;}
 .dv2-history>summary {display:flex;align-items:center;gap:10px;min-height:34px;cursor:pointer;color:var(--dv2-ink);font-size:14px;font-weight:600;}
 .dv2-history>summary span:last-child {font-size:12px;color:var(--dv2-muted);font-weight:400;}
 .dv2-history-list {max-height:min(440px,60vh);overflow:auto;scrollbar-width:thin;}
 .dv2-history-tools {margin:12px 0;}
-.dv2-history-item {display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--dv2-line);overflow-wrap:anywhere;}
+.dv2-history-item {display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--dv2-line);overflow-wrap:anywhere;}
+.dv2-history-summary {flex:1 1 150px;min-width:0;}
+.dv2-history-actions {display:flex;gap:8px;flex-wrap:wrap;}
 .dv2-history-item span {font-size:12px;color:var(--dv2-muted);}
 .dv2 dialog {background:var(--surface,#fff);color:var(--dv2-ink);border:1px solid var(--dv2-line);border-radius:10px;padding:20px;width:min(760px,calc(100vw - 32px));max-height:85dvh;overflow:hidden;}
 .dv2 dialog[open] {display:flex;}

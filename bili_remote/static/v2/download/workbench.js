@@ -7,6 +7,10 @@
   const DEFAULT_FORMAT = "bv*+ba/b";
   const formatModes = new Set(["avc", "hevc", "av1", "any"]);
   const ranges = new Set(["SDR", "HDR10", "DV", "HLG", "any"]);
+  const parseHistoryTime = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+  });
 
   function createApi() {
     return async (url, options = {}) => {
@@ -98,6 +102,81 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "时间未知" : date.toLocaleString("zh-CN", {hour12: false});
   }
+
+  function historyIdentity(item) {
+    try {
+      const url = new URL(item.source_url);
+      const path = url.pathname.replace(/\/+$/, "");
+      const bangumi = path.match(/^\/bangumi\/play\/(ep|ss)(\d+)$/);
+      if (bangumi) return {key: bangumi[1] + bangumi[2], kind: bangumi[1], id: bangumi[2]};
+      if (/^\/video\/(?:BV[\w]+|av\d+)$/i.test(path)) {
+        return {key: `${path}?p=${Number(url.searchParams.get("p")) || 1}`};
+      }
+    } catch { /* older records may lack a usable source URL */ }
+    return {key: item.source_url || `record:${item.id}`};
+  }
+
+  async function groupHistory(items, getDetail) {
+    const exact = new Map();
+    const families = new Map();
+    items.forEach((item, index) => {
+      const identity = historyIdentity(item);
+      const key = JSON.stringify([item.api_mode, identity.key]);
+      if (exact.has(key)) {
+        exact.get(key).ids.push(item.id);
+        return;
+      }
+      const group = {item, index, ids: [item.id], identity};
+      exact.set(key, group);
+      if (identity.kind && item.is_playlist && item.title) {
+        const family = JSON.stringify([item.api_mode, item.title.trim()]);
+        if (!families.has(family)) families.set(family, []);
+        families.get(family).push(group);
+      }
+    });
+    const merged = new Set();
+    const mainEpisodeIds = episodes => new Set(episodes.filter(episode => episode.group === "正片")
+      .map(episode => String(episode.id)));
+    await Promise.all([...families.values()].map(async groups => {
+      // A season URL identifies one season. Its cached list also provides the
+      // episode IDs needed to match records opened through individual links.
+      const pending = new Set([...groups.filter(group => group.identity.kind === "ss"),
+        ...groups.filter(group => group.identity.kind === "ep")]);
+      const details = new Map();
+      const readEpisodes = async group => {
+        if (!details.has(group)) details.set(group, (await getDetail(group.item))?.episodes || []);
+        return details.get(group);
+      };
+      for (const anchor of pending) {
+        pending.delete(anchor);
+        const candidates = [...pending].filter(group => group.identity.kind === "ep");
+        if (!candidates.length) continue;
+        const episodes = await readEpisodes(anchor);
+        const episodeIds = new Set(episodes.map(episode => String(episode.id)));
+        const mainIds = mainEpisodeIds(episodes);
+        const related = [];
+        for (const group of candidates) {
+          if (episodeIds.has(group.identity.id)) {
+            related.push(group);
+          } else if (group.index < anchor.index && mainIds.size) {
+            // A newer parse can contain episodes added after the season link
+            // was cached. Require a shared main episode to match that season.
+            const newer = await readEpisodes(group);
+            if ([...mainEpisodeIds(newer)].some(id => mainIds.has(id))) related.push(group);
+          }
+        }
+        if (!related.length) continue;
+        const members = [anchor, ...related].sort((a, b) => a.index - b.index);
+        for (const group of related) pending.delete(group);
+        const [latest, ...older] = members;
+        for (const group of older) {
+          latest.ids.push(...group.ids);
+          merged.add(group);
+        }
+      }
+    }));
+    return [...exact.values()].filter(group => !merged.has(group));
+  }
   function durationSeconds(job) {
     const explicit = Number(job.download_duration_seconds);
     if (job.download_duration_seconds != null && Number.isFinite(explicit) && explicit >= 0) return Math.floor(explicit);
@@ -125,6 +204,7 @@
       jobCards: new Map(), listeners: [], logScrollY: 0, logReturnFocus: null,
       episodeFormats: new Map(), episodeChoices: new Map(), formatProfiles: [], formatRequest: 0,
       parseVersion: 0, episodesOpen: false, submitting: false,
+      historyVersion: 0,
       selected: new Set(), categories: new Map(), category: null, activeEpisodeId: null,
       selectionsBySource: new Map(),
       namingNumbers: new Map(), namingRequest: 0, namingTimer: null, namingAbort: null
@@ -752,6 +832,11 @@
         try { await options.onOpenFile(job); } catch (error) { showError(error.message); }
       });
       if(job.status==='completed' && options.onOpenDirectory) addAction(actions,'打开文件管理',()=>options.onOpenDirectory(job));
+      if (HISTORY_STATUSES.has(job.status)) addAction(actions, "删除记录", async () => {
+        if (!window.confirm("删除这条下载历史？已下载的文件会保留。")) return;
+        await deleteHistoryRecords("jobs", [job.id], $("[data-download-history-error]"),
+          () => refreshJobs({force: true}));
+      }, "is-danger");
     }
     function addAction(parent, text, callback, extraClass = "") {
       const button = make("button", extraClass, text); button.type = "button"; button.addEventListener("click", async()=>{button.disabled=true;try{await callback();}catch(error){showError(error.message);}finally{button.disabled=false;}}); parent.append(button);
@@ -874,16 +959,27 @@
       } catch (error) { showError(error.message); }
     }
     async function refreshHistory() {
-      const host = $(`[data-history]`);
+      const host = $("[data-history]");
+      const request = ++state.historyVersion;
       try {
         const items = await api("/api/history?limit=200");
-        if (state.destroyed) return;
+        if (state.destroyed || request !== state.historyVersion) return;
+        const groups = await groupHistory(items, async item => {
+          try { return await api(`/api/history/${item.id}`); }
+          catch { return null; }
+        });
+        if (state.destroyed || request !== state.historyVersion) return;
         host.replaceChildren();
-        $(`[data-history-count]`).textContent = `${items.length} 条`;
-        if (!items.length) host.append(make("p", "dv2-empty", "暂无解析记录"));
-        for (const item of items) {
+        $("[data-history-count]").textContent = `${groups.length} 条`;
+        if (!groups.length) host.append(make("p", "dv2-empty", "暂无解析记录"));
+        for (const {item, ids} of groups) {
           const row = make("div", "dv2-history-item");
-          const summary = make("div", "", `${item.title || "未命名内容"} · ${modeLabel(item.api_mode)} · ${item.updated_at || ""}`);
+          const summary = make("div", "dv2-history-summary");
+          summary.append(make("div", "", item.title || "未命名内容"));
+          const date = new Date(item.updated_at || "");
+          const time = Number.isNaN(date.getTime()) ? "时间未知" : parseHistoryTime.format(date);
+          summary.append(make("span", "", `${modeLabel(item.api_mode)} · ${time}`));
+          const actions = make("div", "dv2-history-actions");
           const restore = make("button", "", "复用解析");
           restore.type = "button";
           restore.addEventListener("click", async () => {
@@ -913,10 +1009,29 @@
               }
             }
           });
-          row.append(summary, restore); host.append(row);
+          actions.append(restore);
+          addAction(actions, "删除记录", async () => {
+            if (!window.confirm(`删除「${item.title || "未命名内容"}」的 ${modeLabel(item.api_mode)} 解析记录？`)) return;
+            await deleteHistoryRecords("history", ids, $("[data-parse-history-error]"), refreshHistory);
+          }, "is-danger");
+          row.append(summary, actions);
+          host.append(row);
         }
       } catch (error) {
-        if (!state.destroyed) host.replaceChildren(make("p", "dv2-empty", error.message));
+        if (!state.destroyed && request === state.historyVersion) {
+          host.replaceChildren(make("p", "dv2-empty", error.message));
+        }
+      }
+    }
+    async function deleteHistoryRecords(collection, ids, message, refresh) {
+      message.hidden = true;
+      const results = await Promise.allSettled(ids.map(id => api(`/api/${collection}/${id}`, {method: "DELETE"})));
+      await refresh();
+      if (state.destroyed) return;
+      const failed = results.filter(result => result.status === "rejected");
+      if (failed.length) {
+        message.textContent = `${failed.length} 条记录删除失败：${failed[0].reason.message}`;
+        message.hidden = false;
       }
     }
     async function refreshAccount() {

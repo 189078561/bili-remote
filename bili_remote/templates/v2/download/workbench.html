@@ -57,8 +57,8 @@
       <div class="dv2-card-title"><div><h2>下载任务</h2><span data-queue-count></span></div><button type="button" class="dv2-refresh" data-refresh>刷新</button></div>
       <p class="dv2-notice" data-notice role="status">队列状态自动更新。</p><div class="dv2-jobs" data-jobs><p class="dv2-empty">读取下载任务…</p></div>
     </section>
-    <details class="dv2-history"><summary><span>下载历史</span><span data-download-history-count></span></summary><div class="dv2-history-list" data-download-history><p class="dv2-empty">读取下载历史…</p></div></details>
-    <details class="dv2-history"><summary><span>解析记录</span><span data-history-count></span></summary><div class="dv2-history-tools"><button type="button" data-history-refresh>刷新记录</button></div><div class="dv2-history-list" data-history><p class="dv2-empty">读取解析记录…</p></div></details>
+    <details class="dv2-history"><summary><span>下载历史</span><span data-download-history-count></span></summary><p class="dv2-error" data-download-history-error role="alert" hidden></p><div class="dv2-history-list" data-download-history><p class="dv2-empty">读取下载历史…</p></div></details>
+    <details class="dv2-history"><summary><span>解析记录</span><span data-history-count></span></summary><div class="dv2-history-tools"><button type="button" data-history-refresh>刷新记录</button></div><p class="dv2-error" data-parse-history-error role="alert" hidden></p><div class="dv2-history-list" data-history><p class="dv2-empty">读取解析记录…</p></div></details>
   </div>
   <dialog data-log-dialog aria-labelledby="dv2-log-title"><div class="dv2-log-shell"><div class="dv2-log-head"><strong id="dv2-log-title" data-log-title>任务日志</strong><button type="button" data-log-close aria-label="关闭日志">关闭</button></div><pre class="dv2-log-content" data-log-content tabindex="0"></pre></div></dialog>
 </section>
