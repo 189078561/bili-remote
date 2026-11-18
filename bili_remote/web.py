@@ -181,6 +181,7 @@ class BatchJobCreateRequest(BaseModel):
 class EpisodeFormatsRequest(BaseModel):
     url: str
     api_mode: str = "web"
+    detailed: bool = False
 
     @field_validator("api_mode")
     @classmethod
@@ -1036,7 +1037,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         service_container: Services = Depends(get_services),
     ) -> dict[str, Any]:
         try:
-            result = await service_container.runner.episode_formats(payload.url, payload.api_mode)
+            result = await service_container.runner.episode_formats(
+                payload.url, payload.api_mode, **({"detailed": True} if payload.detailed else {})
+            )
         except ValidationError:
             raise
         except DownloadFailure as exc:

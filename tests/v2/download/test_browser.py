@@ -65,6 +65,7 @@ def test_download_and_parse_history_delete_and_grouping(live_server, settings):
         expect(rows).to_have_count(3)
         latest_web = rows.filter(has_text="Web · 2026/11/19 01:03:00")
         expect(latest_web).to_be_visible()
+        page.route("**/api/episodes/formats/batch", lambda route: route.fulfill(json={"episode_formats": {}}))
         latest_web.get_by_role("button", name="复用解析").click()
         expect(page.locator("#dv2-url")).to_have_value(bangumi + "ep42")
         expect(page.locator("[data-mode]")).to_have_value("web")
@@ -108,6 +109,15 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
             {selector:'30280',format_id:'30280',acodec:'mp4a',tbr:191,filesize:27577549},
             {selector:'30232',format_id:'30232',acodec:'mp4a'}
           ];
+          const detailed = [
+            {...formats[0], dynamic_range:'SDR', locked_selector:'(137+30280)',size_with_audio:2317143245},
+            {...formats[0], format_id:'138', selector:'138+30280', dynamic_range:'SDR', tbr:9200, locked_selector:'(138+30280)',size_with_audio:1400000000},
+            {...formats[0], format_id:'139', selector:'139+30280', vcodec:'hev1', dynamic_range:'HDR10', tbr:9800, locked_selector:'(139+30280)',size_with_audio:1500000000},
+            {...formats[1], fps:25, dynamic_range:'SDR', locked_selector:'(136+30280)',size_with_audio:1027577549},
+            {...formats[2], locked_selector:'(30280)',size_with_audio:27577549},
+            {...formats[3], locked_selector:'(30232)'}
+          ];
+          const episodeB = [{...detailed[1],size_with_audio:827577549}, detailed[3]];
           window.BiliDownloadV2.mount(document.querySelector('#mount'), {
             pollInterval: 60000,
             outputTemplate: '{title}.{id}.mp4',
@@ -120,6 +130,9 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
               if (url === '/api/bili/tv/logout') { window.loginState.tv = false; return {ok:true}; }
               if (url === '/api/jobs?limit=500') return window.jobs;
               if (url === '/api/history?limit=200') return [];
+              if (url === '/api/resolve' && JSON.parse(options.body).url.includes('/video/')) {
+                return {title:'独立视频',api_mode:'web',episodes:[],formats};
+              }
               if (url === '/api/resolve') return {
                 title: '合成剧集', uploader: '测试账号', api_mode: 'web', webpage_url: 'https://www.bilibili.com/bangumi/play/ss42',
                 episodes: [
@@ -129,12 +142,14 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
                 ], default_episode_id: 'ep-a',
                 formats
               };
-              if (url === '/api/episodes/formats') return {formats};
+              if (url === '/api/episodes/formats') {
+                return {formats:JSON.parse(options.body).url.endsWith('epep-b') ? episodeB : detailed};
+              }
               if (url === '/api/episodes/formats/batch') return {episode_formats:{
-                'ep-a': [{...formats[0], fps:25, dynamic_range:'SDR', locked_selector:'(137+30280)',size_with_audio:2317143245},
-                         {...formats[1], fps:25, dynamic_range:'SDR', locked_selector:'(136+30280)',size_with_audio:1027577549}],
-                'ep-b': [{...formats[1], fps:25, dynamic_range:'SDR', locked_selector:'(136+30280)',size_with_audio:827577549}]
+                'ep-a': detailed,
+                'ep-b': episodeB
               }};
+              if (url === '/api/jobs') return {id:12};
               if (url === '/api/jobs/batch') return {count: 2, ids: [10, 11]};
               if (url.endsWith('/cancel')) { window.jobs[0].status = 'cancelled'; return {ok:true}; }
               if (url.endsWith('/retry')) { window.jobs[0].status = 'queued'; return {ok:true}; }
@@ -158,21 +173,25 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.locator("[data-title]", has_text="合成剧集").wait_for()
         assert page.locator(".dv2-episode").count() == 2
         expect(page.locator("[data-episode-categories] button")).to_have_text(["正片", "预告"])
-        page.locator(".dv2-episode").first.focus()
+        page.locator('[data-episode-id="ep-a"]').focus()
         page.locator(".dv2-episode-quality").focus()
-        for dropdown in ("[data-format]", ".dv2-episode-quality"):
-            expect(page.locator(f'{dropdown} option[value="137+30280"]')).to_have_text(
-                "2160P · 25fps · H.264 · 15.84 Mbps · 2.29 GB [137]"
-            )
-            expect(page.locator(f'{dropdown} option[value="136+30280"]')).to_have_text(
-                "720P · H.264 · 1.00 Mbps · 1.00 GB [136]"
-            )
-            expect(page.locator(f'{dropdown} option[value="30280"]')).to_have_text(
-                "仅音频 · AAC · 191 kbps · 27.6 MB [30280]"
-            )
-            expect(page.locator(f'{dropdown} option[value="30232"]')).to_have_text("仅音频 · AAC [30232]")
+        single_labels = [
+            "2160P · 25fps · H.264 · 高码 · SDR · 15.84 Mbps · 2.32 GB",
+            "2160P · 25fps · H.265 · HDR10 · 9.80 Mbps · 1.50 GB",
+            "2160P · 25fps · H.264 · 标准 · SDR · 9.20 Mbps · 1.40 GB",
+            "720P · 25fps · H.264 · SDR · 1.00 Mbps · 1.03 GB",
+            "仅音频 · AAC · 高码 · 191 kbps · 27.6 MB",
+            "仅音频 · AAC · 标准 · 码率未知 · 体积待确认",
+        ]
+        quality = page.locator("[data-batch-format]")
+        expect(quality.locator("option")).to_have_text(["最高可用 · 最佳音轨 · 2.32 GB", *single_labels])
+        expect(page.locator(".dv2-episode-quality option")).to_have_text(["跟随统一画质", *single_labels])
+        quality.select_option(label=single_labels[0])
+        confirmed_single = quality.input_value()
+        expect(page.locator("[data-batch-size]")).to_have_text("2.32 GB")
         page.get_by_role("button", name="全选", exact=True).click()
         assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
+        expect(quality).to_have_value(confirmed_single)
         page.locator(".dv2-select-actions summary").click()
         page.get_by_role("button", name="反选全部").click()
         assert page.locator("[data-selected-count]").inner_text() == "已选 1 集"
@@ -189,7 +208,7 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.locator("[data-batch-fallback]").check()
         expect(page.locator("[data-batch-size]")).to_have_text("3.14 GB")
         expect(page.locator("[data-batch-list]")).to_contain_text("缺档降一档")
-        expect(page.locator("[data-batch-list]")).to_contain_text("1.00 Mbps")
+        expect(page.locator("[data-batch-list]")).to_contain_text("9.20 Mbps")
         resolve_calls_before = page.evaluate("window.calls.filter(call => call.url === '/api/resolve').length")
         assert page.locator(".dv2-episodes").is_visible()
         page.locator("[data-episode-toggle]").click()
@@ -207,7 +226,7 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.wait_for_function("window.calls.some(call => call.url === '/api/jobs/batch')")
         payload = page.evaluate("JSON.parse(window.calls.find(call => call.url === '/api/jobs/batch').options.body)")
         assert payload["episode_ids"] == ["ep-a", "ep-b"]
-        assert payload["episode_selectors"] == {"ep-a": "(137+30280)", "ep-b": "(136+30280)"}
+        assert payload["episode_selectors"] == {"ep-a": "(137+30280)", "ep-b": "(138+30280)"}
         assert payload["api_mode"] == "web"
         assert page.locator(".dv2-episodes").is_hidden()
         assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
@@ -220,6 +239,17 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.locator(".dv2-badge", has_text="排队中").wait_for()
         page.get_by_role("button", name="查看日志").click()
         assert page.locator("[data-log-content]").inner_text() == "synthetic log line"
+        page.locator("[data-log-close]").click()
+        page.locator("#dv2-url").fill("https://www.bilibili.com/video/BV1TEST")
+        page.get_by_role("button", name="解析链接").click()
+        expect(quality.locator("option")).to_have_text(["最高可用 · 最佳音轨 · 2.32 GB", *single_labels])
+        quality.select_option(label=single_labels[1])
+        expect(page.locator("[data-batch-size]")).to_have_text("1.50 GB")
+        page.locator("[data-download-form] button[type=submit]").click()
+        request = page.evaluate("window.calls.find(call => call.url === '/api/episodes/formats')")
+        assert json.loads(request["options"]["body"])["detailed"] is True
+        request = page.evaluate("window.calls.find(call => call.url === '/api/jobs')")
+        assert json.loads(request["options"]["body"])["format_selector"] == "(139+30280)"
         for width in (390, 768, 1440):
             page.set_viewport_size({"width": width, "height": 1000})
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), width
@@ -244,6 +274,7 @@ def test_changed_link_cannot_restore_old_parse_result(live_server):
             else:
                 route.fulfill(json={'title':'新的合成解析','formats':[],'episodes':[],'api_mode':'web'})
         page.route('**/api/resolve',respond)
+        page.route('**/api/episodes/formats', lambda route: route.fulfill(json={'formats': []}))
         page.locator('#dv2-url').fill('https://www.bilibili.com/video/old')
         page.locator('[data-parse]').click()
         page.wait_for_timeout(100)
@@ -447,7 +478,11 @@ def test_number_and_title_preview_stay_inline_with_episode_selection(live_server
             "default_episode_id": "3854802",
             "naming_items": {"3854802": {"identifier": "ep3854802", "number_kind": "episode", "number": 200, "chapter": "暮兰之战24"}},
         }))
-        page.route("**/api/episodes/formats", lambda route: route.fulfill(json={"formats": []}))
+        page.route("**/api/episodes/formats/batch", lambda route: route.fulfill(json={
+            "episode_formats": {"3854802": [{"selector": "30112+30280", "format_id": "30112",
+                "locked_selector": "(30112+30280)", "height": 1080, "vcodec": "avc1", "tbr": 2940,
+                "size_with_audio": 188239248}]},
+        }))
         page.route("**/api/jobs/batch", lambda route: route.fulfill(json={"ids": [101], "count": 1}))
         page.locator("[data-view=download]").click()
         page.locator("#dv2-url").fill(url)
@@ -459,6 +494,7 @@ def test_number_and_title_preview_stay_inline_with_episode_selection(live_server
         expect(page.locator("[data-naming-preview]")).to_have_text("凡人.修仙传.E178.mp4")
         with page.expect_request("**/api/jobs/batch") as submitted:
             page.locator("[data-download-form] button[type=submit]").click()
+        assert submitted.value.post_data_json["episode_selectors"] == {"3854802": "(30112+30280)"}
         options = submitted.value.post_data_json["naming"]
         assert options["mode"] == "smart" and options["title"] == "凡人 修仙传"
         assert options["episode_numbers"] == {"3854802": 178}
@@ -491,7 +527,7 @@ def test_saved_parse_names_main_episode_and_bonus_by_their_own_metadata(live_ser
     )
     playwright, browser, page, errors = browser_session(base)
     try:
-        page.route("**/api/episodes/formats", lambda route: route.fulfill(json={"formats": []}))
+        page.route("**/api/episodes/formats/batch", lambda route: route.fulfill(json={"episode_formats": {}}))
         page.locator("[data-view=download]").click()
         page.get_by_text("解析记录", exact=True).click()
         page.get_by_role("button", name="复用解析").click()

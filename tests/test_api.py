@@ -605,6 +605,17 @@ def test_episode_formats_endpoint_returns_selected_episode_formats(settings) -> 
         assert data["webpage_url"].endswith("/ep1002")
         assert [item["format_id"] for item in data["formats"]] == ["126", "30280"]
 
+        detailed = client.post(
+            "/api/episodes/formats",
+            headers={"X-CSRF-Token": csrf},
+            json={"url": "https://www.bilibili.com/bangumi/play/ep1002", "detailed": True},
+        )
+        assert detailed.status_code == 200, detailed.text
+        video, audio = detailed.json()["formats"]
+        assert video["locked_selector"] == "(126+30280)"
+        assert audio["locked_selector"] == "(30280)"
+        assert video["size_with_audio"] == (video["tbr"] + audio["tbr"]) * 125 * data["duration"]
+
 
 def test_batch_episode_formats_reports_profile_coverage(settings) -> None:
     app = create_app(settings)
