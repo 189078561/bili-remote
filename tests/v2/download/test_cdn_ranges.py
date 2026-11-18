@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import xml.etree.ElementTree as ET
 
@@ -7,7 +8,7 @@ import httpx
 import pytest
 
 from bili_remote.downloader import YtDlpRunner
-from bili_remote.v2.download.aria2c_range import metalink_command
+from bili_remote.v2.download.aria2c_range import metalink_command, selected_track_size
 
 
 @pytest.mark.asyncio
@@ -48,7 +49,7 @@ def test_metalink_uses_only_the_verified_track_and_original_output(tmp_path):
     assert metalink_command(opts + tail[:-1] + ["https://other.test/v"], info) is None
     for name in ("../escape.part", "./a&b.part", "./a%2Fb.part"):
         assert metalink_command(opts + ["--out", name, "--", url], info) is None
-    for fields in ({"_cdn_range_sizes": {}}, {"fragments": [{"url": url}]}, {"acodec": "aac"}):
+    for fields in ({"fragments": [{"url": url}]}, {"acodec": "aac"}):
         info.write_text(json.dumps({"formats": [{**track, **fields}]}))
         assert metalink_command(opts + tail, info) is None
 
@@ -71,3 +72,29 @@ async def test_rank_prioritizes_verified_ranges_for_parallel_dash(settings):
     assert item["url"] == "range"
     assert item["_cdn_range_sizes"] == {"range": 10000}
     assert set(item["_cdn_candidates"]) == set(peers)
+
+
+@pytest.mark.parametrize(("status", "span", "encoding", "body", "verified"), [
+    (206, "bytes 0-0/6917295620", "identity", b"v", True),
+    (206, "bytes 0-0/6917295619", "identity", b"v", False),
+    (206, "bytes 1-1/6917295620", "identity", b"v", False),
+    (206, "bytes 0-0/6917295620", "gzip", b"v", False),
+    (206, "bytes 0-0/6917295620", "identity", b"", False),
+    (200, "", "identity", b"vv", False),
+])
+def test_uncached_selected_track_validates_one_byte(monkeypatch, status, span, encoding, body, verified):
+    url = "https://cdn.test/uhd"
+    track = {"url": url, "filesize": 6917295620, "acodec": "none",
+             "http_headers": {"Referer": "https://www.bilibili.com/", "Cookie": "private"}}
+
+    def respond(request, timeout):
+        assert request.full_url == url and request.get_method() == "GET"
+        assert request.get_header("Range") == "bytes=0-0"
+        assert request.get_header("Cookie") is None and request.get_header("Referer")
+        response = io.BytesIO(body)
+        response.status = status
+        response.headers = {"Content-Range": span, "Content-Encoding": encoding}
+        return response
+
+    monkeypatch.setattr("bili_remote.v2.download.aria2c_range.urlopen", respond)
+    assert selected_track_size(track, url) == (6917295620 if verified else None)

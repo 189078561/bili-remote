@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -10,6 +11,35 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+
+def selected_track_size(item: dict, url: str) -> int | None:
+    cached = (item.get("_cdn_range_sizes") or {}).get(url)
+    if type(cached) is int and 0 < cached < 2**63:
+        return cached
+    # Ranking skips single-source and some unselected formats. Validate just
+    # the track chosen by yt-dlp, without streaming an entire response on 200.
+    headers = {k: v for k, v in (item.get("http_headers") or {}).items()
+               if k.lower() in {"user-agent", "referer", "origin"}}
+    headers.update({"Range": "bytes=0-0", "Accept-Encoding": "identity"})
+    try:
+        with urlopen(Request(url, headers=headers), timeout=4) as response:
+            span = re.fullmatch(r"bytes 0-0/([1-9]\d{0,18})",
+                                response.headers.get("Content-Range", ""), re.I)
+            if (response.status == 206 and span
+                    and response.headers.get("Content-Encoding", "identity").lower() == "identity"
+                    and response.headers.get("Content-Length", "1") == "1"):
+                size = int(span[1])
+                if (size < 2**63 and (not item.get("filesize") or size == item["filesize"])
+                        and len(response.read(2)) == 1):
+                    return size
+    except HTTPError as exc:
+        exc.close()
+    except (OSError, ValueError, http.client.HTTPException):
+        pass
+    return None
 
 
 def metalink_command(args: list[str], info_path: Path) -> tuple[list[str], bytes] | None:
@@ -34,9 +64,11 @@ def metalink_command(args: list[str], info_path: Path) -> tuple[list[str], bytes
             continue
         if item.get("vcodec") != "none" and item.get("acodec") != "none":
             continue
-        size = (item.get("_cdn_range_sizes") or {}).get(url)
-        if type(size) is not int or not 0 < size < 2**63:
-            continue
+        size = selected_track_size(item, url)
+        if size is None:
+            print("[aria2c] 无法验证当前轨道的 Range 和总长度，使用常规 aria2 传输", flush=True)
+            return None
+        print(f"[aria2c] 当前轨道已验证定长分片：{size} 字节", flush=True)
         # One URL per manifest. A retry on another CDN remains under the
         # runner's existing partial-file and signed-URL renewal policy.
         root = ET.Element("metalink", xmlns="urn:ietf:params:xml:ns:metalink")

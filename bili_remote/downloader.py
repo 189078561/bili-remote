@@ -1582,7 +1582,7 @@ class YtDlpRunner:
         use_range_metadata = bool(
             self.aria2_executable and info_path and info_payload
             and os.name == "posix" and os.access(range_downloader, os.X_OK)
-            and any(item.get("_cdn_range_sizes") for item in info_payload.get("formats", []))
+            and self.settings.tv_cdn_probe_enabled and self.settings.aria2_connections > 1
         )
         transfer_env = None
         if use_range_metadata:
@@ -1693,6 +1693,7 @@ class YtDlpRunner:
             failed_urls: set[str] = set()
             consecutive_node_errors = 0
             renewal_attempted = False
+            extra_cdn_attempts = 0
             previous_selector: str | None = None
             aria2_partial_file: Path | None = None
             with log_path.open("a", encoding="utf-8") as log_file:
@@ -1722,12 +1723,16 @@ class YtDlpRunner:
                 new_source = False
                 if self._rate_limited(previous_error):
                     await asyncio.sleep(min(2 ** (index - 1), 4))
-                elif (same_selector and info_payload and info_path
-                      and self._should_rotate_cdn(previous_error, consecutive_node_errors)):
+                elif (
+                    same_selector and info_payload and info_path
+                    and (use_aria2 or extra_cdn_attempts < 2)
+                    and self._should_rotate_cdn(previous_error, consecutive_node_errors)
+                ):
                     new_source = self._advance_cdn_info(info_payload, failed_urls)
                     reason = "已切换到同轨备用节点"
                     if (not new_source and not renewal_attempted
-                            and self._http_statuses(previous_error) & {403, 410}):
+                            and (self._http_statuses(previous_error) & {403, 410}
+                                 or self._node_error(previous_error))):
                         renewal_attempted = True
                         try:
                             if api_mode == "tv":
@@ -1748,13 +1753,19 @@ class YtDlpRunner:
                         aria2_partial_file = None
                         self._write_info_json(info_path, info_payload)
                         consecutive_node_errors = 0
-                        if use_aria2:
-                            connections = min(connection_plan[0], ARIA2_STABLE_CONNECTIONS)
+                        connections = min(connection_plan[0], ARIA2_STABLE_CONNECTIONS)
+                        if not use_aria2:
+                            # Give the newly selected address a parallel attempt
+                            # before the native fallback, even at the end of the plan.
+                            attempts.insert(index, (selector, True, connections))
+                            use_aria2 = True
+                            extra_cdn_attempts += 1
                         with log_path.open("a", encoding="utf-8") as log_file:
                             log_file.write(f"\n[{utc_now()}] {reason}，从新地址重新下载未完成的轨道\n")
                 if self.cancel_requested:
                     raise CancelledFailure("任务已取消")
                 if selector != previous_selector:
+                    extra_cdn_attempts = 0
                     consecutive_node_errors = 0
                     aria2_partial_file = None
                     if previous_selector is not None:
@@ -1783,9 +1794,13 @@ class YtDlpRunner:
                         )
                         log_file.flush()
                 elif not use_aria2 and attempts[index - 1][1]:
+                    self._remove_aria2_partial(aria2_partial_file, output_root)
+                    aria2_partial_file = None
+                    statuses = sorted(self._http_statuses(previous_error))
+                    detail = " / ".join(f"HTTP {code}" for code in statuses) or "aria2c 传输失败"
                     with log_path.open("a", encoding="utf-8") as log_file:
                         log_file.write(
-                            f"\n[{utc_now()}] aria2c 连续中断，"
+                            f"\n[{utc_now()}] 同轨多连接重试结束（{detail}）。aria2c 连续中断，"
                             "已清理临时分片，"
                             "回退到 yt-dlp 原生下载\n"
                         )
@@ -1904,15 +1919,6 @@ class YtDlpRunner:
                     self._remove_aria2_partial(aria2_partial_file, output_root)
                     raise DownloadFailure(message, auth_required=True)
                 if use_aria2:
-                    next_is_aria2 = (
-                        index + 1 < len(attempts)
-                        and attempts[index + 1][0] == selector
-                        and attempts[index + 1][1]
-                    )
-                    if next_is_aria2:
-                        continue
-                    self._remove_aria2_partial(aria2_partial_file, output_root)
-                    aria2_partial_file = None
                     continue
                 if not self._should_fallback(message) or index == len(attempts) - 1:
                     break
