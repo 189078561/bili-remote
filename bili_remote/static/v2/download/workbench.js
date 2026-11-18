@@ -36,6 +36,19 @@
     return "未知编码";
   }
 
+  function formatBitrate(kbps) {
+    const value = Number(kbps);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return value >= 1000 ? `${(value / 1000).toFixed(2)} Mbps` : `${Math.round(value)} kbps`;
+  }
+
+  function formatResourceSize(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)} GB`;
+    return value < 100_000 ? "<0.1 MB" : `${(value / 1_000_000).toFixed(1)} MB`;
+  }
+
   function formatLabel(item) {
     const bits = [
       item.height ? `${item.height}P` : "仅音频",
@@ -43,8 +56,8 @@
       item.vcodec && item.vcodec !== "none" ? codecName(item.vcodec) : codecName(item.acodec),
       item.dynamic_range && item.dynamic_range !== "SDR" ? item.dynamic_range : null,
       item.format_note,
-      item.tbr ? `${Math.round(Number(item.tbr))} kbps` : null,
-      item.filesize ? `${(Number(item.filesize) / 1048576).toFixed(1)} MiB` : null
+      formatBitrate(item.tbr),
+      formatResourceSize(item.filesize)
     ].filter(Boolean);
     return `${bits.join(" · ")} [${item.format_id || item.selector}]`;
   }

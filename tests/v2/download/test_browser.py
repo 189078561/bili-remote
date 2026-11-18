@@ -32,6 +32,12 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
           window.calls = [];
           window.jobs = [{id: 9, title: '合成剧集', api_mode: 'web', status: 'queued', progress: 0, speed: null, eta: null}];
           window.loginState = {web:true, tv:false};
+          const formats = [
+            {selector:'137+30280',format_id:'137',height:2160,fps:25,vcodec:'avc1',acodec:'none',tbr:15844,filesize:2289565696},
+            {selector:'136+30280',format_id:'136',height:720,vcodec:'avc1',acodec:'none',tbr:1000,filesize:1000000000},
+            {selector:'30280',format_id:'30280',acodec:'mp4a',tbr:191,filesize:27577549},
+            {selector:'30232',format_id:'30232',acodec:'mp4a'}
+          ];
           window.BiliDownloadV2.mount(document.querySelector('#mount'), {
             pollInterval: 60000,
             outputTemplate: '{title}.{id}.mp4',
@@ -51,9 +57,9 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
                   {id: 'ep-b', title: '第二集', group: '正片', group_index: 2},
                   {id: 'ep-c', title: '花絮', group: '预告', group_index: 3}
                 ], default_episode_id: 'ep-a',
-                formats: [{selector:'137+30280',format_id:'137',height:1080,width:1920,fps:60,vcodec:'avc1',acodec:'none',tbr:5000,dynamic_range:'SDR'}]
+                formats
               };
-              if (url === '/api/episodes/formats') return {formats: [{selector:'137+30280',format_id:'137',height:1080,width:1920,fps:60,vcodec:'avc1',acodec:'none',tbr:5000,dynamic_range:'SDR'}]};
+              if (url === '/api/episodes/formats') return {formats};
               if (url === '/api/episodes/formats/batch') return {selected_count:2,checked:2,sampled:false,failed:0,profiles:[{height:1080,fps_high:true,vcodec:'avc',dynamic_range:'SDR',coverage:2,sample:{width:1920,height:1080,fps:60,vcodec:'avc1'}}]};
               if (url === '/api/jobs/batch') return {count: 2, ids: [10, 11]};
               if (url.endsWith('/cancel')) { window.jobs[0].status = 'cancelled'; return {ok:true}; }
@@ -78,6 +84,19 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.locator("[data-title]", has_text="合成剧集").wait_for()
         assert page.locator(".dv2-episode").count() == 2
         expect(page.locator("[data-episode-categories] button")).to_have_text(["正片", "预告"])
+        page.locator(".dv2-episode").first.focus()
+        page.locator(".dv2-episode-quality").focus()
+        for dropdown in ("[data-format]", ".dv2-episode-quality"):
+            expect(page.locator(f'{dropdown} option[value="137+30280"]')).to_have_text(
+                "2160P · 25fps · H.264 · 15.84 Mbps · 2.29 GB [137]"
+            )
+            expect(page.locator(f'{dropdown} option[value="136+30280"]')).to_have_text(
+                "720P · H.264 · 1.00 Mbps · 1.00 GB [136]"
+            )
+            expect(page.locator(f'{dropdown} option[value="30280"]')).to_have_text(
+                "仅音频 · AAC · 191 kbps · 27.6 MB [30280]"
+            )
+            expect(page.locator(f'{dropdown} option[value="30232"]')).to_have_text("仅音频 · AAC [30232]")
         page.get_by_role("button", name="全选", exact=True).click()
         assert page.locator("[data-selected-count]").inner_text() == "已选 2 集"
         page.locator(".dv2-select-actions summary").click()
