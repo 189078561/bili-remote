@@ -51,10 +51,6 @@ def metalink_command(args: list[str], info_path: Path) -> tuple[list[str], bytes
         return None
     index = args.index("--out")
     name = args[index + 1].removeprefix("./")
-    # aria2's Metalink parser escapes some punctuation in filenames. Let its
-    # normal --out path handle these names verbatim, as well as fragment jobs.
-    if name.startswith((".", " ")) or not name.endswith(".part") or not re.fullmatch(r"[\w .+()\[\]-]+", name):
-        return None
     try:
         formats = json.loads(info_path.read_bytes())["formats"]
     except (OSError, ValueError, KeyError):
@@ -64,6 +60,13 @@ def metalink_command(args: list[str], info_path: Path) -> tuple[list[str], bytes
             continue
         if item.get("vcodec") != "none" and item.get("acodec") != "none":
             continue
+        # A plain basename may contain printable CJK punctuation. Metalink
+        # rewrites ampersands in names, so preserve --out for those names and
+        # keep rejecting separators, encoded paths and control characters.
+        if (name.startswith((".", " ")) or not name.endswith(".part")
+                or not name.isprintable() or any(char in name for char in '/\\&%<>:"|?*')):
+            print("[aria2c] 临时文件名无法用 Metalink 原样保存，使用常规 aria2 传输", flush=True)
+            return None
         size = selected_track_size(item, url)
         if size is None:
             print("[aria2c] 无法验证当前轨道的 Range 和总长度，使用常规 aria2 传输", flush=True)

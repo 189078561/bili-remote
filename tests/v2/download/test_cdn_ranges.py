@@ -39,15 +39,16 @@ def test_metalink_uses_only_the_verified_track_and_original_output(tmp_path):
     track = {"url": url, "acodec": "none", "_cdn_range_sizes": {url: 20000}}
     info.write_text(json.dumps({"formats": [track]}))
     opts = ["--header", "Referer: https://www.bilibili.com/", "--split=8", "--dir", "./dir/"]
-    tail = ["--out", "./第 2 集 [01].mp4.part", "--", url]
+    name = "S01 - 1 来世，你可以找我报仇！ [3065290].f30112.mp4.part"
+    tail = ["--out", f"./{name}", "--", url]
     command, xml = metalink_command(opts + tail, info)
     assert command[:len(opts)] == opts
     assert command[-1] == "--metalink-file=-"
     file = ET.fromstring(xml).find("{*}file")
-    assert file.get("name") == "第 2 集 [01].mp4.part"
+    assert file.get("name") == name
     assert file.find("{*}url").text == url and file.find("{*}size").text == "20000"
     assert metalink_command(opts + tail[:-1] + ["https://other.test/v"], info) is None
-    for name in ("../escape.part", "./a&b.part", "./a%2Fb.part"):
+    for name in ("../escape.part", "./a&b.part", "./a%2Fb.part", "./a\\b.part", "./a\tb.part"):
         assert metalink_command(opts + ["--out", name, "--", url], info) is None
     for fields in ({"fragments": [{"url": url}]}, {"acodec": "aac"}):
         info.write_text(json.dumps({"formats": [{**track, **fields}]}))
