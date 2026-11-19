@@ -93,6 +93,59 @@ def test_stale_and_casefold_conflicts(engine):
     assert not execution.audit.records
 
 
+def test_completed_episode_can_be_renamed_beside_an_active_download(engine):
+    execution, root = engine
+    season = root / "season"
+    season.mkdir()
+    (season / "E177.mp4").write_bytes(b"completed episode")
+    database = execution.files.service.database
+    job_id = database.create_job(source_url="https://example.test/ep178", kind="manual",
+                                 output_dir=str(root), output_template="%(title)s.%(ext)s", naming_plan={})
+    database.update_job(job_id, status="running", result_path=str(season / "E178.mp4"))
+    stage = root / f".bili-remote-job-{job_id}"
+    stage.mkdir()
+    (stage / "track.mp4").write_bytes(b"active track")
+
+    batch = execution.prepare(plan(execution, [("season/E177.mp4", "season/PT.E177.mp4")]), owner="s")
+    assert execution.execute(batch)["status"] == "completed"
+    assert (season / "PT.E177.mp4").read_bytes() == b"completed episode"
+
+    conflicts = execution.files.validate_operations(plan(execution, [("season/PT.E177.mp4", "season/E178.mp4")]))
+    assert [item["code"] for item in conflicts] == ["protected_target"]
+    for source in ("season", f"{stage.name}/track.mp4"):
+        with pytest.raises(NamingError) as blocked:
+            execution.prepare(plan(execution, [(source, source + ".new")]), owner="s")
+        assert blocked.value.code == "protected_resource"
+
+
+def test_download_claims_target_after_rename_preflight(engine, monkeypatch):
+    execution, root = engine
+    (root / "old.mp4").write_bytes(b"finished")
+    database = execution.files.service.database
+    job_id = database.create_job(source_url="https://example.test/active", kind="manual",
+                                 output_dir=str(root), output_template="%(title)s.%(ext)s")
+    database.update_job(job_id, status="running")
+    operations = plan(execution, [("old.mp4", "next.mp4")])
+    batch = execution.prepare(operations, owner="s")
+    move = execution.files.move
+    control = root / "next.mp4.part.aria2"
+
+    def claim_before_final_move(ref, target, fingerprint):
+        if target == "next.mp4":
+            control.write_bytes(b"download in progress")
+        return move(ref, target, fingerprint)
+
+    monkeypatch.setattr(execution.files, "move", claim_before_final_move)
+    with pytest.raises(NamingError) as blocked:
+        execution.execute(batch)
+    assert blocked.value.__cause__.code == "protected_target"
+    assert execution.audit.get(batch)["status"] == "rolled_back"
+    assert not (root / "next.mp4").exists()
+    assert (root / "old.mp4").read_bytes() == b"finished"
+    assert control.read_bytes() == b"download in progress"
+    assert [item["code"] for item in execution.files.validate_operations(operations)] == ["protected_target"]
+
+
 def test_undo_rejects_drift_and_other_session(engine):
     execution, root = engine
     (root / "a.mkv").write_bytes(b"A")

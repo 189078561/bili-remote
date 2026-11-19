@@ -4,9 +4,10 @@ from __future__ import annotations
 import ctypes
 import os
 import stat
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
-from ...file_service import FileServiceError, _path_fingerprint, validate_filename
+from ...file_service import FileServiceError, MutationSnapshot, _ACTIVE_DOWNLOAD_SUFFIXES, _path_fingerprint, validate_filename
 from ...workspace import VIDEO_EXTENSIONS, SUBTITLE_EXTENSIONS
 from .errors import NamingError
 
@@ -19,7 +20,18 @@ class NamingFiles:
     def __init__(self, file_service):
         self.service = file_service
 
-    def path(self, ref, *, exists=True, mutation=False):
+    def _rename_snapshot(self) -> MutationSnapshot:
+        snapshot = self.service._dependency_snapshot()
+        # A downloader may have reserved the output before the final file exists
+        # (e.g. video.mp4.part.aria2 -> video.mp4.part -> video.mp4).
+        writing = set(snapshot.writing_paths)
+        for path in snapshot.writing_paths:
+            while path.suffix in _ACTIVE_DOWNLOAD_SUFFIXES:
+                path = path.with_suffix("")
+                writing.add(path)
+        return replace(snapshot, writing_paths=tuple(writing))
+
+    def path(self, ref, *, exists=True, mutation_snapshot: MutationSnapshot | None = None):
         if not isinstance(ref, dict) or set(ref) - {"root_key", "relative_path", "kind", "fingerprint"} or not isinstance(ref.get("root_key"), str) or ref.get("root_key") not in ROOTS:
             raise NamingError("invalid_resource", "无效的资源根目录")
         if ref.get("kind", "file") not in {"file", "directory"} or ref.get("fingerprint") is not None and (not isinstance(ref["fingerprint"], str) or len(ref["fingerprint"]) != 64):
@@ -36,8 +48,8 @@ class NamingFiles:
                 if current.is_symlink():
                     raise NamingError("symlink", "命名操作不允许符号链接")
             path, relative = self.service.resolve(ref["root_key"], raw, must_exist=exists, allow_empty=False)
-            if mutation:
-                reason = self.service._mutation_protection(path, relative_path=relative)
+            if mutation_snapshot is not None:
+                reason = self.service._mutation_protection(path, relative_path=relative, snapshot=mutation_snapshot)
                 if reason:
                     raise NamingError("protected_resource", reason, status=409)
                 if not os.access(path.parent, os.W_OK | os.X_OK) or not path.parent.stat().st_mode & 0o222:
@@ -134,10 +146,13 @@ class NamingFiles:
 
     def validate_operations(self, operations, *, fingerprints=True):
         sources, targets, conflicts = {}, {}, []
+        if not operations:
+            return conflicts
+        snapshot = self._rename_snapshot()
         for op in operations:
             ref = op["source"]
             try:
-                source = self.path(ref, mutation=True)
+                source = self.path(ref, mutation_snapshot=snapshot)
             except NamingError as exc:
                 if exc.status == 404 or exc.code == "symlink":
                     conflicts.append({"code": "stale_resource", "ref": ref, "message": "源文件不存在或路径已变化"})
@@ -184,7 +199,7 @@ class NamingFiles:
             for sibling in target.parent.iterdir():
                 if sibling.name.casefold() == target.name.casefold() and sibling not in source_paths:
                     conflicts.append({"code": "target_exists", "ref": ref, "message": "目标已存在（包含大小写冲突）"})
-            if self.service._target_protection(target):
+            if self.service._mutation_protection(target, relative_path=op["target_relative_path"], snapshot=snapshot):
                 conflicts.append({"code": "protected_target", "ref": ref, "message": "目标被活动任务保护"})
         return conflicts
 
@@ -194,10 +209,13 @@ class NamingFiles:
         Linux renameat2(RENAME_NOREPLACE) is deliberately required. The legacy
         portable existence-check/rename fallback cannot guarantee no overwrite.
         """
-        source = self.path(source_ref, mutation=True)
+        snapshot = self._rename_snapshot()
+        source = self.path(source_ref, mutation_snapshot=snapshot)
         target = self.path({**source_ref, "relative_path": target_relative}, exists=False)
         if source.parent != target.parent:
             raise NamingError("not_in_place", "仅允许同目录改名")
+        if self.service._mutation_protection(target, relative_path=target_relative, snapshot=snapshot):
+            raise NamingError("protected_target", "目标被活动任务保护", status=409)
         root = self.service.root(source_ref["root_key"]).path.resolve()
         descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
