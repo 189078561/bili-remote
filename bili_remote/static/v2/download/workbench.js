@@ -117,7 +117,7 @@
     return `${value} B`;
   }
 
-  function modeLabel(mode) { return mode === "tv" ? "TV" : "Web"; }
+  function modeLabel(mode) { return mode === "tv" ? "云视听小电视" : "Web"; }
   function statusLabel(status) {
     return ({queued: "排队中", downloading: "下载中", merging: "合并中", running: "下载中", completed: "已完成", failed: "失败", auth_required: "需要登录", cancelled: "已取消"})[status] || status || "状态未知";
   }
@@ -264,7 +264,7 @@
       timer: null, refreshInFlight: null, refreshQueued: false, refreshAbort: null, destroyed: false,
       jobCards: new Map(), listeners: [], logScrollY: 0, logReturnFocus: null,
       episodeChoices: new Map(),
-      batchTracks: new Map(), batchErrors: new Map(), batchTarget: null, batchGroup: null,
+      batchTracks: new Map(), batchSources: new Map(), batchErrors: new Map(), batchTarget: null, batchGroup: null,
       batchTimer: null, batchProbe: null, batchPlan: null,
       parseVersion: 0, episodesOpen: false, submitting: false,
       historyVersion: 0,
@@ -319,6 +319,9 @@
       $('[data-summary-quality]').textContent = customized ? `${customized} 集单独设置，其余跟随统一画质` : formatField.selectedOptions[0]?.textContent || '最高可用';
       $('[data-summary-output]').textContent = $('[data-output]').value.trim() || '下载目录';
       if (state.batchPlan) $('[data-summary-quality]').textContent = state.batchPlan.title;
+      const source = state.batchPlan?.mode || state.resolved?.api_mode || modeField.value;
+      $('[data-summary-source]').textContent = state.batchPlan?.mixed ? "片源不同，请分批选择" : modeLabel(source);
+      $('[data-quality-source]').textContent = state.batchPlan?.mixed ? "片源不同" : modeLabel(source);
       form.querySelector('button[type=submit]').disabled = state.submitting || Boolean(state.batchPlan && !state.batchPlan.ready);
       $('[data-submit-summary]').textContent = `已选 ${count} ${state.resolved?.episodes?.length ? '集' : '个视频'}`;
       form.querySelector('button[type=submit]').textContent = state.submitting ? '正在提交…' : `开始下载${count ? ` · ${count} ${state.resolved?.episodes?.length ? '集' : '项'}` : ''}`;
@@ -570,6 +573,10 @@
     }
 
     function fillEpisodeQuality(id, select) {
+      const source = state.batchSources.get(id);
+      select.parentElement?.querySelector("[data-episode-source]")?.replaceChildren(
+        source ? modeLabel(source) : ""
+      );
       const tiers = batchCatalogue([id], null);
       select.replaceChildren(new Option("跟随统一画质", ""), ...tiers.map(tier => {
         const label = batchTrackLabel(tier.track, tier, bitrateRange(tier.rates));
@@ -587,14 +594,16 @@
       const text = make("span", "", [title, episode.badge, episode.duration ? elapsed(episode.duration) : null].filter(Boolean).join(" · "));
       const quality = make("select", "dv2-episode-quality");
       quality.setAttribute("aria-label", `${title} 的画质`);
-      fillEpisodeQuality(id, quality);
       quality.addEventListener("focus", () => loadEpisodeChoices(episode, quality));
       quality.addEventListener("change", () => {
         if (quality.value) state.episodeChoices.set(id, quality.value);
         else state.episodeChoices.delete(id);
         updateBatchQuality();
       });
-      detail.replaceChildren(text, quality);
+      const source = make("small", "dv2-hint");
+      source.dataset.episodeSource = "";
+      detail.replaceChildren(text, source, quality);
+      fillEpisodeQuality(id, quality);
       detail.hidden = false;
     }
 
@@ -613,6 +622,7 @@
         const tracks = (result.formats || []).filter(track => track.locked_selector);
         if (!tracks.length) return;
         state.batchTracks.set(id, tracks);
+        state.batchSources.set(id, result.source_mode || resolved.api_mode || modeField.value);
         state.batchErrors.delete(id);
         fillEpisodeQuality(id, select);
         if (selectedIds().includes(id)) updateBatchQuality();
@@ -741,7 +751,8 @@
         const title = episodeCategory(episode) === "正片" && number ? "第 " + number + " 集" : episode.title || id;
         const row = make("div", "dv2-batch-track");
         const header = make("div", "dv2-batch-track-head");
-        header.append(make("strong", "", title));
+        const source = state.batchSources.get(id);
+        header.append(make("strong", "", source ? `${title} · ${modeLabel(source)}` : title));
         if (reason) header.append(make("small", "dv2-batch-reason", reason));
         if (reason) header.lastElementChild.title = reason;
         header.append(make("span", "dv2-batch-track-size", track ? formatResourceSize(track.size_with_audio) || "体积未知" : "待确认"));
@@ -775,33 +786,51 @@
       clearTimeout(state.batchTimer);
       if (!active) {
         state.batchPlan = null;
+        $("[data-source-note]").textContent = state.resolved?.warning || "";
+        $("[data-source-actions]").hidden = true;
         summary();
         return;
       }
       if (retry) for (const id of ids) state.batchErrors.delete(id);
-      const catalogue = batchCatalogue(ids);
+      const requested = state.resolved.api_mode || modeField.value;
+      const sources = new Set(ids.map(id => state.batchSources.get(id)).filter(Boolean));
+      const mixed = sources.size > 1;
+      const mode = sources.values().next().value || requested;
+      if (mixed || (state.batchPlan && mode !== state.batchPlan.mode)) state.batchTarget = null;
+      const catalogue = mixed ? [] : batchCatalogue(ids);
       const selectedTier = catalogue.find(tier => tier.key === state.batchTarget?.key);
       const rows = batchRows(ids, selectedTier, catalogue);
+      if (mixed) for (const row of rows) {
+        if (state.batchSources.get(row.id) === "web") row.reason = "无 TV 片源，已检测 Web";
+      }
       const total = combinedSize(rows);
       const knownSize = formatResourceSize(total.bytes);
       const override = ids.length === 1 && state.episodeChoices.has(ids[0]) && rows[0].track;
       const displayedTier = override ? catalogue.find(tier => tier.key === trackTier(override)) : selectedTier;
       const title = displayedTier ? batchTrackLabel(displayedTier.track, displayedTier, bitrateRange(displayedTier.rates)) : "最高可用 · 最佳音轨";
       const singleError = multiple ? null : state.batchErrors.get(ids[0]);
-      const useDefaultOnError = singleError && !selectedTier && !state.episodeChoices.has(ids[0]);
-      const ready = Boolean(useDefaultOnError) || rows.every(row => row.track);
-      state.batchPlan = {ready, title, selectors: Object.fromEntries(rows.filter(row => row.track).map(row => [row.id, row.track.locked_selector]))};
+      const useDefaultOnError = singleError && modeField.value === "web"
+        && !selectedTier && !state.episodeChoices.has(ids[0]);
+      const ready = !mixed && (Boolean(useDefaultOnError) || rows.every(row => row.track));
+      state.batchPlan = {ready, title, mode, mixed, selectors: Object.fromEntries(rows.filter(row => row.track).map(row => [row.id, row.track.locked_selector]))};
       const optionText = tier => {
         const size = combinedSize(batchRows(ids, tier, catalogue, {useOverrides: multiple}));
         const estimated = formatResourceSize(size.bytes);
         const label = tier ? batchTrackLabel(tier.track, tier, bitrateRange(tier.rates)) : "最高可用 · 最佳音轨";
         return label + " · " + (size.complete ? estimated : estimated ? "已知 " + estimated : "体积待确认");
       };
-      batchFormat.replaceChildren(new Option(optionText(null), ""), ...catalogue.map(tier => new Option(optionText(tier), tier.key)));
+      batchFormat.replaceChildren(new Option(mixed ? "请先选择同一片源" : optionText(null), ""),
+        ...catalogue.map(tier => new Option(optionText(tier), tier.key)));
       batchFormat.value = displayedTier?.key || "";
       batchFormat.disabled = !catalogue.length;
       state.batchCatalogue = catalogue;
       if (ids[0] === SINGLE_VIDEO) formatHint.textContent = "预计体积包含所选视频轨和音轨。";
+      $("[data-source-note]").textContent = mixed
+        ? "部分剧集没有云视听小电视片源，已检测 Web。选择同一片源后可继续选档。"
+        : sources.has("web") && requested === "tv"
+          ? "所选内容没有云视听小电视片源，已切换到 Web 档位。"
+          : (requested === "tv" && sources.has("tv") ? "" : state.resolved.warning || "");
+      $("[data-source-actions]").hidden = !mixed || ids.some(id => !state.batchSources.has(id) && !state.batchErrors.has(id));
       $("[data-batch-size]").textContent = total.complete ? knownSize : knownSize ? "已知 " + knownSize : "待确认";
       $("[data-batch-totals]").textContent = "已选 " + ids.length + " 集 · 每集按自己的档位和大小算 · " +
         (total.complete ? "本档合计 " + knownSize + " · 每集约 " + formatResourceSize(total.bytes / rows.length)
@@ -813,7 +842,7 @@
       else if (singleError) {
         status = "画质检测失败 · " + singleError + (useDefaultOnError ? "。可重新检测或按最高可用下载。" : "");
       } else if (failed) status = failed + " 集检测失败，可重新检测";
-      else if (!ready) status = multiple ? "有剧集缺档，请调整画质或启用同编码降档。" : "所选档位在当前视频中缺失，请选择可用档位。";
+      else if (!ready && !mixed) status = multiple ? "有剧集缺档，请调整画质或启用同编码降档。" : "所选档位在当前视频中缺失，请选择可用档位。";
       $("[data-batch-status]").textContent = status;
       $("[data-batch-retry]").hidden = !failed;
       if (multiple) renderBatchBreakdown(rows, catalogue);
@@ -840,6 +869,7 @@
           const tracks = (standalone ? result.formats : result.episode_formats?.[id])?.filter(track => track.locked_selector);
           if (tracks?.length) {
             state.batchTracks.set(id, tracks);
+            state.batchSources.set(id, (standalone ? result.source_mode : result.episode_sources?.[id]) || request.api_mode);
             state.batchErrors.delete(id);
             const quality = $(".dv2-episode-quality");
             if (id === state.activeEpisodeId && quality) fillEpisodeQuality(id, quality);
@@ -858,6 +888,7 @@
       state.batchProbe?.abort();
       state.batchProbe = null;
       state.batchTracks.clear();
+      state.batchSources.clear();
       state.batchErrors.clear();
       state.batchTarget = null;
       state.batchGroup = null;
@@ -929,13 +960,12 @@
       $("[data-template]").value = result.episodes?.length ? (options.playlistTemplate || options.outputTemplate || "") : (options.singleTemplate || options.outputTemplate || "");
       resolution.hidden = false;
       const allParts = $(`[data-all-parts]`);
-      allParts.hidden = Boolean(result.episodes?.length) || modeField.value === "tv";
+      allParts.hidden = Boolean(result.episodes?.length) || (result.api_mode || modeField.value) === "tv";
       allParts.querySelector('input').checked = false;
       const saved = state.selectionsBySource.get(sourceKey());
       renderFormats(result.formats);
       renderEpisodes(result, saved);
       updateCount();
-      if (result.warning) formatHint.textContent = result.warning;
       if (fromHistory && !result.naming_items && !result.naming_video) {
         formatHint.textContent += " 命名以提交时识别的信息为准。";
       }
@@ -968,10 +998,11 @@
       if(state.submitting)return;
       state.submitting=true;submitButton.disabled = true;stage("submitting");summary();
       try {
+        const source = state.batchPlan?.mode || resolved.api_mode || modeField.value;
         if (state.resolved.episodes?.length) {
           if (!ids.length) throw new Error("请至少选择一集。");
           if (ids.length > 600) throw new Error("单次最多创建 600 个任务。");
-          const payload = {url, episode_ids: ids, api_mode: state.resolved.api_mode || modeField.value, format_selector: formatField.value, output_template: template || null, output_dir: outputDir, naming};
+          const payload = {url, episode_ids: ids, api_mode: source, format_selector: formatField.value, output_template: template || null, output_dir: outputDir, naming};
           if (state.batchPlan) {
             if (!state.batchPlan?.ready) throw new Error("请确认每集下载档位后再提交。");
             if (Object.keys(state.batchPlan.selectors).length) payload.episode_selectors = state.batchPlan.selectors;
@@ -982,7 +1013,7 @@
         } else {
           if (state.batchPlan && !state.batchPlan.ready) throw new Error("请确认下载档位后再提交。");
           const selector = state.batchPlan?.selectors[SINGLE_VIDEO] || formatField.value;
-          await api("/api/jobs", {method: "POST", body: JSON.stringify({url, api_mode: modeField.value, format_selector: selector, all_parts: allPartsSelected(), output_template: template || null, output_dir: outputDir, naming, title: state.resolved.title || null, uploader: state.resolved.uploader || null})});
+          await api("/api/jobs", {method: "POST", body: JSON.stringify({url, api_mode: source, format_selector: selector, all_parts: allPartsSelected(), output_template: template || null, output_dir: outputDir, naming, title: state.resolved.title || null, uploader: state.resolved.uploader || null})});
         }
         if(current()){stage("submitted");setEpisodesOpen(false);}
         notice.textContent = "任务已加入下载队列，完成后可将实际文件带入发种工作台。";
@@ -1057,7 +1088,9 @@
       entry.actions.replaceChildren();
       const actions = entry.actions;
       if (["queued", "running"].includes(job.status)) addAction(actions, "取消", () => taskAction(job, "cancel"), "is-danger");
-      if (["failed", "cancelled", "auth_required"].includes(job.status)) addAction(actions, "重试", () => taskAction(job, "retry"));
+      if (["failed", "cancelled", "auth_required"].includes(job.status)) {
+        addAction(actions, `重试 · ${modeLabel(job.api_mode)}`, () => taskAction(job, "retry"));
+      }
       addAction(actions, "查看日志", () => showLog(job.id));
       if (job.status === "completed" && options.onOpenFile) addAction(actions, "进入工作台", async () => {
         try { await options.onOpenFile(job); } catch (error) { showError(error.message); }
@@ -1074,7 +1107,11 @@
     }
     async function taskAction(job, action) {
       clearError();
-      try { await api(`/api/jobs/${job.id}/${action}`, {method: "POST"}); await refreshJobs({force:true}); }
+      try {
+        await api(`/api/jobs/${job.id}/${action}`, {method: "POST"});
+        await refreshJobs({force:true});
+        if (action === "retry") notice.textContent = `已按 ${modeLabel(job.api_mode)} 片源重新排队`;
+      }
       catch (error) { showError(error.message); }
     }
     function alertTransition(job) {
@@ -1082,7 +1119,7 @@
       const old = state.previousStatuses.get(key);
       state.previousStatuses.set(key, job.status);
       if (old && old !== job.status && ["completed", "failed", "auth_required"].includes(job.status)) {
-        const message = `任务 #${job.id}：${statusLabel(job.status)}`;
+        const message = `任务 #${job.id} · ${modeLabel(job.api_mode)} · ${statusLabel(job.status)}`;
         notice.textContent = message;
         if (job.status === "completed" && typeof options.onCompleted === "function") options.onCompleted(job);
         if (window.Notification?.permission === "granted") new Notification("B站下载", {body: message});
@@ -1135,6 +1172,10 @@
           const result = await api("/api/jobs?limit=500", {signal: controller.signal});
           if (state.destroyed) return;
           if (!Array.isArray(result)) throw new Error("任务列表响应格式无效");
+          if (notice.dataset.queueError) {
+            delete notice.dataset.queueError;
+            notice.textContent = "队列状态自动更新。";
+          }
           for (const job of result) {
             if (state.seenInitialJobs) alertTransition(job);
             else state.previousStatuses.set(String(job.id), job.status);
@@ -1142,9 +1183,9 @@
           state.seenInitialJobs = true;
           state.jobs = result;
           renderJobs(result);
-          notice.textContent = "队列状态自动更新。";
         } catch (error) {
           if (error.name === "AbortError" || state.destroyed) return;
+          notice.dataset.queueError = "true";
           notice.textContent = `队列读取失败：${error.message}；保留上次结果。`;
           if (!state.jobs.length) showJobsUnavailable(error.message);
         } finally {
@@ -1348,6 +1389,16 @@
     listen($("[data-check-batch]"), "click", () => updateBatchQuality({retry: true}));
     listen($("[data-batch-retry]"), "click", () => updateBatchQuality({retry: true}));
     listen(batchFallback, "change", () => {state.batchGroup = null; updateBatchQuality();});
+    for (const button of root.querySelectorAll("[data-pick-source]")) {
+      listen(button, "click", () => {
+        for (const id of selectedIds()) {
+          if (state.batchSources.get(id) !== button.dataset.pickSource) state.selected.delete(id);
+        }
+        state.batchGroup = null;
+        updateEpisodeTiles();
+        updateCount();
+      });
+    }
     listen(batchFormat, "change", () => {
       state.batchTarget = state.batchCatalogue.find(tier => tier.key === batchFormat.value) || null;
       const ids = selectedIds();

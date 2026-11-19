@@ -43,8 +43,14 @@ class CancelledFailure(RuntimeError):
     pass
 
 
+class TVSourceUnavailable(DownloadFailure):
+    pass
+
+
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
+TV_NO_SOURCE = "云视听小电视未提供视频片源"
+TV_WEB_FALLBACK = f"{TV_NO_SOURCE}，已切换到 Web 片源。"
 TV_CDN_BLOCKED_MESSAGE = (
     "TV 片源 CDN 返回 403 或连接超时：当前服务器 IP 无法访问该片源。"
     "TV 线路不能解除地区限制，请切换到 Web 线路，或更换服务器出口 IP 后重试。"
@@ -187,7 +193,12 @@ class YtDlpRunner:
     async def _resolve(self, url: str, api_mode: str = "web") -> ResolvedMedia:
         url = await canonicalize_bilibili_url(url)
         if api_mode == "tv":
-            return await self._resolve_tv(url)
+            try:
+                return await self._resolve_tv(url)
+            except TVSourceUnavailable:
+                resolved = await self._resolve_web(url)
+                resolved.warning = " ".join(filter(None, [TV_WEB_FALLBACK, resolved.warning]))
+                return resolved
         if api_mode != "web":
             raise DownloadFailure("解析线路无效")
         return await self._resolve_web(url)
@@ -206,13 +217,20 @@ class YtDlpRunner:
     ) -> dict[str, Any]:
         url = await canonicalize_bilibili_url(url)
         if api_mode == "tv":
-            info = await self._tv_download_info(url, {}, probe_cdn=not detailed)
+            try:
+                info = await self._tv_download_info(url, {}, probe_cdn=not detailed)
+            except TVSourceUnavailable:
+                if not detailed:
+                    raise
+                result = await self._episode_formats(url, "web", detailed=True)
+                return {**result, "source_mode": "web", "warning": TV_WEB_FALLBACK}
             return {
                 "title": info.get("title"),
                 "duration": info.get("duration"),
                 "webpage_url": url,
                 "episode_id": info.get("id"),
                 "formats": self._episode_preview_formats(info, detailed),
+                "source_mode": "tv",
             }
         if api_mode != "web":
             raise DownloadFailure("解析线路无效")
@@ -237,6 +255,7 @@ class YtDlpRunner:
             "webpage_url": url,
             "episode_id": payload.get("id"),
             "formats": self._episode_preview_formats(payload, detailed),
+            "source_mode": "web",
         }
 
     def _episode_preview_formats(self, info: dict[str, Any], detailed: bool) -> list[dict[str, Any]]:
@@ -310,7 +329,7 @@ class YtDlpRunner:
 
         async def probe(
             episode: dict[str, Any],
-        ) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
+        ) -> tuple[dict[str, Any], dict[str, Any], str | None]:
             async with semaphore:
                 try:
                     request = self.episode_formats(
@@ -318,18 +337,20 @@ class YtDlpRunner:
                     )
                     result = await asyncio.wait_for(request, timeout=timeout)
                 except TimeoutError:
-                    return episode, [], "解析超时"
+                    return episode, {}, "解析超时"
                 except (DownloadFailure, ValidationError) as exc:
-                    return episode, [], str(exc)
+                    return episode, {}, str(exc)
                 except Exception:
-                    return episode, [], "格式检测失败"
-                formats = result.get("formats") or []
-                if not formats:
-                    return episode, [], "未返回可用格式"
-                return episode, formats, None
+                    return episode, {}, "格式检测失败"
+                if not result.get("formats"):
+                    return episode, {}, "未返回可用格式"
+                return episode, result, None
 
         outcomes = await asyncio.gather(*(probe(episode) for episode in probes))
-        format_sets = [formats for _, formats, error in outcomes if error is None]
+        format_sets = [
+            result["formats"] for _, result, error in outcomes
+            if error is None and result.get("source_mode", api_mode) == api_mode
+        ]
         failed = [
             {"id": str(episode["id"]), "title": episode.get("title"), "error": error}
             for episode, _, error in outcomes
@@ -338,16 +359,22 @@ class YtDlpRunner:
         return {
             "title": str(season.get("title") or "未命名番剧"),
             "selected_count": len(selected),
-            "checked": len(format_sets),
+            "checked": len(outcomes) - len(failed),
             "sampled": len(probes) < len(selected),
             "failed": len(failed),
             "failed_episodes": failed,
             "profiles": self._aggregate_format_profiles(format_sets),
             "api_mode": api_mode,
-            **({"episode_formats": {
-                str(episode["id"]): formats
-                for episode, formats, error in outcomes if error is None
-            }} if detailed else {}),
+            **({
+                "episode_formats": {
+                    str(episode["id"]): result["formats"]
+                    for episode, result, error in outcomes if error is None
+                },
+                "episode_sources": {
+                    str(episode["id"]): result.get("source_mode", api_mode)
+                    for episode, result, error in outcomes if error is None
+                },
+            } if detailed else {}),
         }
 
     async def _resolve_web(self, url: str) -> ResolvedMedia:
@@ -442,15 +469,21 @@ class YtDlpRunner:
                 season, sections = await self._season_bundle(kind, item_id)
                 episodes, main_count = self._build_episodes(season, sections)
                 default_episode_id = item_id if kind == "ep" else None
+                if default_episode_id and not any(ep["id"] == default_episode_id for ep in episodes):
+                    raise DownloadFailure("TV 线路未找到所选剧集")
                 target = self._target_episode(episodes, default_episode_id)
+                if not target["aid"] or not target["cid"]:
+                    raise DownloadFailure("TV 接口缺少剧集播放参数")
                 dash = await self.auth_service.tv_bangumi_playinfo(
                     aid=target["aid"],
                     cid=target["cid"],
                     ep_id=target["id"],
                 )
-                formats = await self._prepare_tv_formats(
-                    self._tv_formats(dash)
-                )
+                if dash.get("video") == []:
+                    formats, warning = [], f"当前剧集{TV_NO_SOURCE}，选集后将检测 Web 档位。"
+                else:
+                    formats = await self._prepare_tv_formats(self._tv_formats(dash))
+                    warning = None if formats else TV_CDN_BLOCKED_MESSAGE
                 return ResolvedMedia(
                     title=str(season.get("title") or "未命名番剧"),
                     uploader="",
@@ -462,7 +495,7 @@ class YtDlpRunner:
                     episodes=episodes,
                     default_episode_id=default_episode_id,
                     api_mode="tv",
-                    warning=None if formats else TV_CDN_BLOCKED_MESSAGE,
+                    warning=warning,
                 )
             video_id = self._video_id(url)
             if not video_id:
@@ -477,6 +510,8 @@ class YtDlpRunner:
             dash = await self.auth_service.tv_video_playinfo(
                 aid=view.get("aid"), cid=page.get("cid") or view.get("cid")
             )
+            if dash.get("video") == []:
+                raise TVSourceUnavailable(TV_NO_SOURCE)
             formats = await self._prepare_tv_formats(
                 self._tv_formats(dash)
             )
@@ -517,6 +552,13 @@ class YtDlpRunner:
             for episode in episodes:
                 if str(episode.get("ep_id") or episode.get("id") or "") == item_id:
                     return season, episode
+            if season.get("season_id"):
+                sections = await self.auth_service.season_sections(season["season_id"])
+                for group in [sections.get("main_section") or {}, *(sections.get("section") or [])]:
+                    for episode in group.get("episodes") or []:
+                        if str(episode.get("ep_id") or episode.get("id") or "") == item_id:
+                            return season, episode
+            raise DownloadFailure("未找到所选剧集")
         if not episodes:
             raise DownloadFailure("没有可下载的剧集")
         return season, episodes[0]
@@ -588,6 +630,8 @@ class YtDlpRunner:
                 duration = int(view.get("duration") or 0) or None
                 webpage_url = url
                 item_identifier = video_id
+            if dash.get("video") == []:
+                raise TVSourceUnavailable(TV_NO_SOURCE)
             formats = self._tv_formats(dash)
             if probe_cdn:
                 locked = exact_tracks(job.get("format_selector") or "")
@@ -703,11 +747,12 @@ class YtDlpRunner:
             web_dash = await self.auth_service.web_playinfo(
                 bvid=bvid, aid=aid, cid=cid
             )
+        locked = exact_tracks(selector)
         self._merge_line_candidates(
-            formats, web_dash, candidate_key="_cdn_candidates"
+            formats, web_dash, candidate_key="_cdn_candidates", same_path=bool(locked)
         )
 
-        if self.settings.line_compare_enabled and self._has_tv_token():
+        if not locked and self.settings.line_compare_enabled and self._has_tv_token():
             try:
                 if is_bangumi and aid and cid and ep_id:
                     tv_dash = await self.auth_service.tv_bangumi_playinfo(
@@ -727,7 +772,7 @@ class YtDlpRunner:
                 pass
 
         # An exact video+audio request needs no warm-up on unselected tracks.
-        ids = set(exact_tracks(selector) or selector.split("+"))
+        ids = set(locked or selector.split("+"))
         selected = [item for item in formats if item.get("format_id") in ids]
         await self._rank_cdn_candidates(
             selected if ids == {item["format_id"] for item in selected} else formats,
@@ -1204,10 +1249,14 @@ class YtDlpRunner:
         other_dash: dict[str, Any],
         *,
         candidate_key: str,
+        same_path: bool = False,
     ) -> None:
         source = cls._stream_candidate_map(other_dash)
         for item in formats:
             candidates = source.get(cls._format_stream_key(item)) or []
+            if same_path:
+                path = urlsplit(item.get("url") or "").path
+                candidates = [url for url in candidates if path and urlsplit(url).path == path]
             if not candidates and not str(item.get("format_id") or "").startswith("tv"):
                 continue
             current = item.get(candidate_key)
@@ -1262,9 +1311,8 @@ class YtDlpRunner:
                 or info.get("description")
                 or ""
             )
-            dynamic_range = (
-                YtDlpRunner._dynamic_range_label(note) if note else "SDR"
-            )
+            dynamic_range = {125: "HDR10", 126: "DV"}.get(quality)
+            dynamic_range = dynamic_range or YtDlpRunner._dynamic_range_label(note)
             if dynamic_range == "any":
                 dynamic_range = "SDR"
             format_info = {
@@ -1475,35 +1523,6 @@ class YtDlpRunner:
         ]
 
     @staticmethod
-    def _tv_fallback_selectors(info: dict[str, Any]) -> list[str]:
-        formats = list(info.get("formats") or [])
-        videos = sorted(
-            (
-                item
-                for item in formats
-                if str(item.get("vcodec") or "none") != "none"
-            ),
-            key=lambda item: (item.get("height") or 0, item.get("tbr") or 0),
-            reverse=True,
-        )
-        audio = max(
-            (
-                item
-                for item in formats
-                if str(item.get("acodec") or "none") != "none"
-            ),
-            key=lambda item: item.get("tbr") or 0,
-            default=None,
-        )
-        audio_id = str((audio or {}).get("format_id") or "ba")
-        selectors: list[str] = []
-        for video in videos:
-            selector = f"{video['format_id']}+{audio_id}"
-            if selector not in selectors:
-                selectors.append(selector)
-        return selectors[:8]
-
-    @staticmethod
     def _should_fallback(message: str) -> bool:
         return YtDlpRunner._is_cdn_failure(message) or (
             "requested format is not available" in message.lower()
@@ -1687,10 +1706,8 @@ class YtDlpRunner:
                 self._remove_file(cookie_path)
             raise CancelledFailure("任务已取消")
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        if exact_tracks(job["format_selector"]):
+        if api_mode == "tv" or exact_tracks(job["format_selector"]):
             fallback_selectors = []
-        elif api_mode == "tv" and info_payload:
-            fallback_selectors = self._tv_fallback_selectors(info_payload)
         else:
             fallback_selectors = self._fallback_selectors(
                 job["format_selector"]

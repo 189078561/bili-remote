@@ -153,6 +153,8 @@
 .dv2-batch-fallback small {color:var(--dv2-muted);}
 .dv2-batch-state {display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--dv2-muted);}
 .dv2-batch-state:not(:has([data-batch-status]:empty)) {margin-top:8px;}
+.dv2 [data-source-note]:empty {display:none;}
+.dv2-source-actions:not([hidden]) {display:flex;flex-wrap:wrap;gap:8px;margin-block:8px;}
 .dv2-batch-breakdown {border-top:1px solid var(--dv2-line);padding-top:10px;margin-top:12px;}
 .dv2-batch-breakdown > summary {font-weight:600;cursor:pointer;}
 .dv2-batch-groups {display:flex;flex-wrap:wrap;gap:5px;margin:8px 0;}

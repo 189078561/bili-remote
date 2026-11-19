@@ -16,7 +16,14 @@
             <div class="dv2-section-heading" data-episode-heading hidden>
               <button type="button" class="dv2-episode-toggle" data-episode-toggle aria-expanded="false" aria-controls="dv2-episodes"><strong>解析列表</strong><span data-selected-count>已选 0 集</span></button>
             </div>
-            <div class="dv2-quality-section"><div class="dv2-quality-setting"><label data-single-quality>统一画质<select data-format><option value="bv*+ba/b">最高可用 · 最佳音轨</option></select></label><label data-batch-quality hidden>统一画质<select data-batch-format></select></label></div><p class="dv2-hint" data-format-hint>画质信息来自解析结果。</p><p class="dv2-batch-totals" data-batch-totals aria-live="polite" hidden></p></div>
+            <div class="dv2-quality-section">
+              <div class="dv2-quality-setting"><label data-single-quality>统一画质<select data-format><option value="bv*+ba/b">最高可用 · 最佳音轨</option></select></label><label data-batch-quality hidden>统一画质<select data-batch-format></select></label></div>
+              <p class="dv2-hint" aria-live="polite">片源 <strong data-quality-source></strong></p>
+              <p class="dv2-hint" data-source-note aria-live="polite"></p>
+              <div class="dv2-source-actions" data-source-actions hidden><button type="button" data-pick-source="tv">仅选云视听小电视</button><button type="button" data-pick-source="web">仅选 Web</button></div>
+              <p class="dv2-hint" data-format-hint>画质信息来自解析结果。</p>
+              <p class="dv2-batch-totals" data-batch-totals aria-live="polite" hidden></p>
+            </div>
             <section class="dv2-episodes" id="dv2-episodes" data-episodes hidden>
               <div class="dv2-picker-toolbar">
                 <div class="dv2-categories" data-episode-categories role="group" aria-label="内容分类"></div>
@@ -46,7 +53,7 @@
               <p class="dv2-hint">扩展名以完工后的实际容器为准。遇到同名文件时保留原文件，并为本次下载追加区分标记。</p>
             </section>
           </div>
-          <aside class="dv2-selection-summary"><h3>本次选择</h3><dl><dt>内容</dt><dd data-summary-count>—</dd><dt>画质</dt><dd data-summary-quality>最高可用</dd><dt>保存到</dt><dd data-summary-output>下载目录</dd></dl>
+          <aside class="dv2-selection-summary"><h3>本次选择</h3><dl><dt>内容</dt><dd data-summary-count>—</dd><dt>片源</dt><dd data-summary-source>—</dd><dt>画质</dt><dd data-summary-quality>最高可用</dd><dt>保存到</dt><dd data-summary-output>下载目录</dd></dl>
             <section class="dv2-batch-review" data-batch-review hidden>
               <div class="dv2-batch-estimate"><span>预计体积</span><strong data-batch-size></strong></div>
               <label class="dv2-checkbox dv2-batch-fallback"><input type="checkbox" data-batch-fallback><span>缺档自动降一档 <small>限同编码</small></span></label>

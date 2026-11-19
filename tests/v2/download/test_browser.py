@@ -259,6 +259,79 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         playwright.stop()
 
 
+def test_tv_selection_separates_web_fallback_and_shows_retry_source(live_server):
+    base, _ = live_server
+    playwright, browser, page, errors = browser_session(base)
+    submissions = []
+    retries = []
+
+    def route_api(route):
+        path = route.request.url.split("?")[0].removeprefix(base)
+        if path == "/api/resolve":
+            route.fulfill(json={
+                "title": "合成番剧", "api_mode": "tv", "default_episode_id": "41",
+                "episodes": [
+                    {"id": "41", "title": "第 1 集", "group": "正片", "group_index": 1},
+                    {"id": "42", "title": "第 2 集", "group": "正片", "group_index": 2},
+                ],
+            })
+        elif path == "/api/episodes/formats/batch":
+            tracks = {
+                "41": {"format_id": "tv125-hevc", "dynamic_range": "HDR10",
+                       "vcodec": "hev1", "locked_selector": "(tv125-hevc+tva30280)"},
+                "42": {"format_id": "100198", "dynamic_range": "SDR",
+                       "vcodec": "avc1", "locked_selector": "(100198+30280)"},
+            }
+            ids = route.request.post_data_json["episode_ids"]
+            route.fulfill(json={
+                "episode_formats": {key: [{**tracks[key], "height": 2160, "tbr": 8000}] for key in ids},
+                "episode_sources": {key: "tv" if key == "41" else "web" for key in ids},
+            })
+        elif path == "/api/jobs":
+            route.fulfill(json=[{
+                "id": 99, "title": "TV 任务", "api_mode": "tv",
+                "status": "queued" if retries else "failed",
+            }])
+        elif path == "/api/jobs/batch":
+            submissions.append(route.request.post_data_json)
+            route.fulfill(json={"ids": [100], "count": 1})
+        elif path == "/api/jobs/99/retry":
+            retries.append(path)
+            route.fulfill(json={"ok": True})
+        else:
+            route.continue_()
+
+    try:
+        page.route("**/api/**", route_api)
+        page.locator("[data-view=download]").click()
+        page.locator("[data-mode]").select_option("tv")
+        page.locator("#dv2-url").fill("https://www.bilibili.com/bangumi/play/ep41")
+        page.get_by_role("button", name="解析链接").click()
+        expect(page.locator("[data-batch-format]")).to_contain_text("HDR10")
+        expect(page.locator("[data-quality-source]")).to_have_text("云视听小电视")
+        page.get_by_role("button", name="全选", exact=True).click()
+        expect(page.locator("[data-batch-format] option")).to_have_text(["请先选择同一片源"])
+        submit = page.locator("[data-download-form] button[type=submit]")
+        expect(submit).to_be_disabled()
+        page.get_by_role("button", name="仅选 Web").click()
+        expect(page.locator("[data-source-note]")).to_contain_text("已切换到 Web")
+        expect(page.locator("[data-batch-format]")).to_contain_text("H.264")
+        expect(page.locator("[data-batch-format]")).not_to_contain_text("HDR10")
+        submit.click()
+        assert submissions[0]["api_mode"] == "web"
+        assert submissions[0]["episode_selectors"] == {"42": "(100198+30280)"}
+
+        page.get_by_text("下载历史", exact=True).click()
+        retry = page.get_by_role("button", name="重试 · 云视听小电视")
+        retry.click()
+        expect(page.locator("[data-notice]")).to_contain_text("按 云视听小电视 片源重新排队")
+        assert retries == ["/api/jobs/99/retry"]
+        assert not errors
+    finally:
+        browser.close()
+        playwright.stop()
+
+
 def test_changed_link_cannot_restore_old_parse_result(live_server):
     """Offline upstream responses; verifies client race protection, not B站 access."""
     base,_=live_server
