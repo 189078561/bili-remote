@@ -106,6 +106,55 @@ def v2_fixture(page, requests, identity=None):
     page.route('**/api/v2/**', respond)
 
 
+@pytest.mark.parametrize("matched", [True, False], ids=["tmdb", "filename"])
+def test_release_title_uses_available_work_name(live_server, matched):
+    from bili_remote.v2.workbench.release_title import ReleaseTitleBuilder
+
+    base_url, _ = live_server
+    playwright, browser, page, errors = browser_session(base_url)
+    try:
+        v2_fixture(page, [])
+        resolved = context()
+        resolved["selected_title"] = {"source": "default"}
+        if matched:
+            resolved["identity"].update(tmdb_id="106449", confirmed=True)
+            resolved["metadata"].update(
+                title_zh={"value": "凡人修仙传"},
+                title_en={"value": "A Record of a Mortal's Journey to Immortality"},
+                year={"value": 2020},
+            )
+        else:
+            resolved["identity"] = None
+            path = "Media/凡人修仙传.A.Record.of.a.Mortal’s.Journey.to.Immortality.2020.S01E177.2160p.WEB-DL.H264.AAC-HDVWEB.mp4"
+            resolved["resources"][0]["relative_path"] = path
+            resolved["files"][0]["ref"]["relative_path"] = path
+        resolved["episode"]["episode"]["value"] = 177
+        resolved["files"][0]["probe"]["resolution"]["value"] = "2160p"
+        resolved["files"][0]["probe"]["video_codec"]["value"] = "H264"
+        resolved["effective_rules"]["naming_rule"].update(source="WEB-DL", group="HDVWEB")
+
+        def render_title(route):
+            payload = route.request.post_data_json
+            route.fulfill(json=ReleaseTitleBuilder().build(payload["context"], payload["rule"]))
+
+        page.route("**/api/v2/release-title/render", render_title)
+        mount(page)
+        page.evaluate("ctx => wb.select(ctx.resources, {context: ctx})", resolved)
+        if matched:
+            expect(page.locator('[data-wb="title-zh"]')).to_have_value("凡人修仙传")
+            expect(page.locator('[data-wb="title-en"]')).to_have_value("A Record of a Mortal's Journey to Immortality")
+        else:
+            expect(page.locator('[data-lock="release_title"]')).to_contain_text("作品名取自文件名")
+        expect(page.locator('[data-edit="release_title"]')).to_have_value(
+            "凡人修仙传.A.Record.of.a.Mortals.Journey.to.Immortality.2020.S01E177.2160p.WEB-DL.H264.AAC-HDVWEB"
+        )
+        expect(page.locator('[data-edit="subtitle"]')).to_have_value("合成副标题")
+        assert errors == []
+    finally:
+        browser.close()
+        playwright.stop()
+
+
 def test_contract_edit_copy_formats_responsive_and_no_draft(live_server):
     base_url, _ = live_server
     playwright, browser, page, errors = browser_session(base_url)
@@ -329,7 +378,7 @@ def test_slow_responses_and_rename_confirmation(live_server):
         v2_fixture(page, requests)
         mount(page)
         page.evaluate("wb.select([{root_key:'downloads',relative_path:'Media/episode01.mp4',kind:'video',fingerprint:'fixture'}])")
-        expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
+        expect(page.locator('[data-wb="output"]')).to_contain_text('Generated title')
         page.route('**/api/v2/release-title/render', lambda route: held.append(route))
         page.evaluate("void wb.generate('release_title')")
         show_panel(page, None)
@@ -864,7 +913,7 @@ def test_old_resource_resolve_title_and_composition_cannot_overwrite_new_edits(l
         v2_fixture(page, requests)
         mount(page)
         page.evaluate("wb.select([{root_key:'downloads',relative_path:'A.mp4',kind:'file',fingerprint:'A'}])")
-        expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
+        expect(page.locator('[data-wb="output"]')).to_contain_text('Generated title')
         revision = page.evaluate('wb.context.revision')
         def hold_old_resource(route):
             payload = route.request.post_data_json

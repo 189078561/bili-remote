@@ -1,7 +1,16 @@
 """Independent PT main-title builder, from structured values, never a filename."""
 from string import Formatter
 from ..naming.errors import NamingError
+from ..naming.recognition import search_hint
 from ..naming.templates import FIELD_MAP, effective_season, normalize_codec_value, normalize_naming_text, value, season_common_probe
+
+
+def _field_value(item):
+    # The render API omits null values when serializing FieldValue records.
+    if isinstance(item, dict) and "source" in item:
+        return item.get("value", item.get("VALUE"))
+    return value(item)
+
 
 class ReleaseTitleBuilder:
     def build(self, context, rule=None):
@@ -20,11 +29,11 @@ class ReleaseTitleBuilder:
         candidate=next((t['text'] for t in context.get('titles',[]) if t['id']==rule.get('title_candidate_id')),None)
         if rule.get('title_candidate_id') and candidate is None:
             raise NamingError('invalid_title','主标题名称候选不存在')
-        values={'Title':candidate or value(context.get('selected_title')),
-            'Year':value(context.get('metadata',{}).get('year')),
-            'Season':effective_season(episode, naming), 'Episode':None if season else value(episode.get('episode')),
-            'Source':value(naming.get('source')), 'Group':value(naming.get('group'))}
-        values.update({field:value(probe.get(key)) for field,key in FIELD_MAP.items()})
+        values={'Title':candidate or _field_value(context.get('selected_title')),
+            'Year':_field_value(context.get('metadata',{}).get('year')),
+            'Season':_field_value(effective_season(episode, naming)), 'Episode':None if season else _field_value(episode.get('episode')),
+            'Source':_field_value(naming.get('source')), 'Group':_field_value(naming.get('group'))}
+        values.update({field:_field_value(probe.get(key)) for field,key in FIELD_MAP.items()})
         overrides=rule.get('overrides') or {}
         if not isinstance(overrides,dict) or set(overrides)-set(values):
             raise NamingError('invalid_release_title_rule','主标题覆盖字段无效')
@@ -35,6 +44,16 @@ class ReleaseTitleBuilder:
                 values[key]=value(item)
             elif isinstance(item,(str,int)) and not isinstance(item,bool): values[key]=item
             else: raise NamingError('invalid_release_title_rule','覆盖值无效')
+        if not values['Title'] and 'Title' not in overrides:
+            refs = [file['ref'] for file in files if file.get('ref')] or context.get('resources', [])
+            hints = [search_hint([ref], []) for ref in refs]
+            names = {name for name, _ in hints}
+            if len(names) == 1 and '' not in names:
+                values['Title'] = names.pop()
+                warnings.append({'code': 'filename_title', 'field': 'Title', 'message': '作品名取自文件名，可直接编辑主标题'})
+                years = {year for _, year in hints}
+                if values['Year'] is None and 'Year' not in overrides and len(years) == 1:
+                    values['Year'] = years.pop()
         if naming.get('episode_numbering') == 'continuous':
             values['Season'] = None
         for key, minimum in (('Season', 0), ('Episode', 1)):

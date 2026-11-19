@@ -968,6 +968,8 @@
       const titleOverrides = Object.fromEntries([["year", "Year"], ["resolution", "Resolution"], ["video-codec", "VideoCodec"], ["audio-codec", "AudioCodec"]]
         .filter(([control]) => this.nameEdits?.has(control) && this.el(control).value.trim())
         .map(([control, field]) => [field, this.el(control).value.trim()]));
+      const selectedTitle = this.el("selected-title").value.trim();
+      if (selectedTitle) titleOverrides.Title = selectedTitle;
       const result = name === "release_title" ? await this.api.title(this.context, {...titleRule, ...(Object.keys(titleOverrides).length ? {overrides: titleOverrides} : {})}) : await this.api.subtitle(this.context, this.readRule("subtitle-rule", this.context.effective_rules?.subtitle_rule || {}));
       if (!current() || this.context?.revision !== revision || result.context_revision !== revision || this.fields[name] !== edit || fieldVersion !== (this.fieldVersions[name] || 0) || (!wasDirty && this.dirty.has(name))) return;
       this.dirty.delete(name); this.setField(name, result.text); this.editVersion++; this.scheduleCompose();
