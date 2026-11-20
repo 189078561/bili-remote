@@ -164,7 +164,7 @@ def test_collage_preview_and_persisted_settings(live_server):
         page.set_viewport_size({"width": 390, "height": 844})
         expect(preview).to_be_visible()
         page.locator('.app-tabs [data-view="publish"]').click()
-        expect(page.locator(".wb-screenshot-presets")).to_be_visible()
+        expect(page.locator('[data-wb="screenshot-presets-toggle"]')).to_be_visible()
         expect(preview).not_to_be_visible()
         assert not errors
     finally:

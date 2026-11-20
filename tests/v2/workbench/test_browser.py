@@ -579,6 +579,7 @@ def test_module03_signed_in_main_page_inline_media_and_layout(live_server):
         output.click()
         expect(output).to_have_attribute('aria-expanded', 'true')
         expect(host.locator('[data-wb=trackers], [data-wb=image-mode]')).to_have_count(0)
+        host.locator('[data-wb=screenshot-presets-toggle]').click()
         host.locator('[data-tool-settings]').click()
         expect(page.locator('#settings-view')).to_be_visible()
         page.locator('.app-tabs [data-view=publish]').click()
@@ -1430,9 +1431,24 @@ def test_screenshot_preset_applies_saved_square_design(live_server):
         page.locator('[data-workbench] .file-row[data-path="Media"]').dblclick()
         page.locator('[data-workbench] .file-row[data-path="Media/episode01.mp4"] .file-check').check()
         page.get_by_role("button", name="使用所选资源", exact=True).click()
-        page.locator(".wb-screenshot-presets summary").click()
-        page.locator('[data-wb="screenshot-preset"]').select_option("vertical")
-        page.locator('[data-wb="screenshot-trim"]').select_option("full")
+        toggle = page.locator('[data-wb="screenshot-presets-toggle"]')
+        presets = page.locator('[data-wb="screenshot-presets"]')
+        screenshots = page.get_by_role("button", name="生成截图", exact=True)
+        assert abs(toggle.bounding_box()["y"] - screenshots.bounding_box()["y"]) < 8
+        expect(presets).not_to_be_visible()
+        toggle.click()
+        expect(presets.get_by_role("group", name="截图布局").get_by_role("button")).to_have_text(
+            ["独立单图", "1 列 × 4 行", "5 列 × 4 行"]
+        )
+        expect(presets.get_by_role("group", name="跳过首尾").get_by_role("button")).to_have_text(
+            ["电影", "剧集", "动画", "全片"]
+        )
+        presets.get_by_role("button", name="1 列 × 4 行").click()
+        presets.get_by_role("button", name="全片").click()
+        expect(toggle).to_have_text("截图预设 · 1 列 × 4 行")
+        expect(presets.get_by_role("button", name="全片")).to_have_attribute("aria-pressed", "true")
+        toggle.click()
+        expect(presets).not_to_be_visible()
         with page.expect_request(lambda request: request.method == "POST" and request.url.endswith("/api/files/screenshots")) as pending:
             page.locator('[data-action="screenshots"]').click()
         sent = pending.value.post_data_json
@@ -1446,6 +1462,18 @@ def test_screenshot_preset_applies_saved_square_design(live_server):
         path = page.evaluate("V2Workbench.images[0].path")
         with Image.open(settings.images_root / path) as image:
             assert image.size == (254, 1136)
+
+        toggle.click()
+        presets.get_by_role("button", name="独立单图").click()
+        expect(toggle).to_have_text("截图预设 · 独立单图")
+        expect(presets.get_by_role("button", name="1 列 × 4 行")).to_have_attribute("aria-pressed", "false")
+        page.set_viewport_size({"width": 390, "height": 844})
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        with page.expect_request(lambda request: request.method == "POST" and request.url.endswith("/api/files/screenshots")) as pending:
+            screenshots.click()
+        assert pending.value.post_data_json["output_mode"] == "single"
+        assert pending.value.post_data_json["total"] == 4
+        expect(page.locator('[data-wb="images"] img')).to_have_count(4, timeout=15000)
         assert not errors
     finally:
         browser.close()

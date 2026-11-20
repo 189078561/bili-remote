@@ -259,8 +259,22 @@
     }
     listen() {
       const opts = {signal: this.abort.signal};
-      this.el("screenshot-preset").addEventListener("change", event => {
-        this.el("screenshot-count-field").hidden = event.target.value !== "single";
+      const presetsToggle = this.el("screenshot-presets-toggle");
+      const presets = this.el("screenshot-presets");
+      presetsToggle.addEventListener("click", () => {
+        const open = presets.hidden;
+        presets.hidden = !open;
+        presetsToggle.setAttribute("aria-expanded", String(open));
+      }, opts);
+      presets.addEventListener("click", event => {
+        const choice = event.target.closest("[data-screenshot-layout], [data-screenshot-trim]");
+        if (!choice) return;
+        const layout = choice.hasAttribute("data-screenshot-layout");
+        const row = layout ? "[data-screenshot-layout]" : "[data-screenshot-trim]";
+        for (const button of presets.querySelectorAll(row)) {
+          button.setAttribute("aria-pressed", String(button === choice));
+        }
+        if (layout) this.el("screenshot-preset-summary").textContent = "截图预设 · " + choice.textContent.trim();
       }, opts);
       for (const dialog of [this.el("image-dialog"), this.el("task-log-dialog")]) {
         let onBackdrop = false;
@@ -1145,25 +1159,22 @@
       return {epoch, scope: signature(canonical)};
     }
     async screenshots() {
+      const presets = this.el("screenshot-presets");
+      const preset = presets.querySelector('[data-screenshot-layout][aria-pressed="true"]')?.dataset.screenshotLayout;
+      const trim = presets.querySelector('[data-screenshot-trim][aria-pressed="true"]')?.dataset.screenshotTrim;
       const scope = await this.toolScope();
       if (!scope) return;
       const {values} = await this.api.request("/api/settings");
       if (this.epoch !== scope.epoch || this.destroyed) return;
-      const preset = this.el("screenshot-preset").value;
-      const trim = this.el("screenshot-trim").value;
-      const count = this.el("screenshot-count");
       const payload = {sources: this.sources(), output_mode: values?.screenshot_output_mode || "single"};
+      const fixedTimestamps = values?.screenshot_default_sampling === "timestamps";
       if (preset === "single") {
         payload.output_mode = "single";
-        if (count.value) {
-          if (!count.reportValidity()) return;
-          payload.total = count.valueAsNumber;
-          if (values?.screenshot_default_sampling === "timestamps") payload.sampling_mode = "random";
-        }
       } else if (preset === "vertical" || preset === "sheet") {
         Object.assign(payload, {output_mode: "collage", columns: preset === "vertical" ? 1 : 5, rows: 4});
-        if (values?.screenshot_default_sampling === "timestamps") payload.sampling_mode = "random";
       }
+      if (preset && fixedTimestamps) payload.sampling_mode = "random";
+      if (payload.output_mode === "single" && (preset || !fixedTimestamps)) payload.total = 4;
       if (trim === "full") {
         Object.assign(payload, {content_type: "custom", skip_start_seconds: 0, skip_end_seconds: 0});
       } else if (trim) {

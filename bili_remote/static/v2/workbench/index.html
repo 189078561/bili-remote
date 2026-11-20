@@ -34,29 +34,38 @@
       <section class="wb-tool-launcher" id="wb-operations" aria-labelledby="wb-ops-heading">
         <h2 id="wb-ops-heading">操作</h2>
         <p data-wb="tool-help" class="wb-note">请先选择工作媒体。</p>
-        <div class="wb-tool-buttons">
-          <button type="button" data-action="torrent" disabled><span data-button-label>制作种子</span></button>
-          <button type="button" data-action="report" disabled><span data-button-label>生成 MediaInfo</span></button>
-          <button type="button" data-action="bdinfo" disabled><span data-button-label>生成 BDInfo</span></button>
-          <button type="button" data-action="screenshots" disabled><span data-button-label>生成截图</span></button>
-          <button type="button" data-action="upload" disabled><span data-button-label>生成图床链接</span></button>
-        </div>
-        <details class="wb-screenshot-presets">
-          <summary>截图预设</summary>
-          <div class="wb-preset-options">
-            <label>截图布局<select data-wb="screenshot-preset">
-              <option value="">使用设置</option><option value="single">独立单图</option>
-              <option value="vertical">1 列 × 4 行</option><option value="sheet">5 列 × 4 行</option>
-            </select></label>
-            <label data-wb="screenshot-count-field" hidden>截图张数<input type="number" data-wb="screenshot-count" min="1" max="120" placeholder="沿用设置"></label>
-            <label>跳过片头片尾<select data-wb="screenshot-trim">
-              <option value="">使用设置</option><option value="movie">电影 · 90 / 120 秒</option>
-              <option value="series">剧集 · 90 / 180 秒</option><option value="anime">动画 · 90 / 90 秒</option>
-              <option value="full">全片</option>
-            </select></label>
-            <a href="/settings?group=collage" data-tool-settings class="wb-tool-settings">截图设置</a>
+        <div class="wb-tool-toolbar">
+          <div class="wb-tool-buttons">
+            <button type="button" data-action="torrent" disabled><span data-button-label>制作种子</span></button>
+            <button type="button" data-action="report" disabled><span data-button-label>生成 MediaInfo</span></button>
+            <button type="button" data-action="bdinfo" disabled><span data-button-label>生成 BDInfo</span></button>
+            <button type="button" data-action="screenshots" disabled><span data-button-label>生成截图</span></button>
+            <button type="button" data-action="upload" disabled><span data-button-label>生成图床链接</span></button>
           </div>
-        </details>
+          <button type="button" class="wb-screenshot-toggle" data-wb="screenshot-presets-toggle" aria-expanded="false" aria-controls="wb-screenshot-presets">
+            <span data-wb="screenshot-preset-summary">截图预设</span>
+          </button>
+        </div>
+        <div class="wb-screenshot-presets" id="wb-screenshot-presets" data-wb="screenshot-presets" hidden>
+          <div class="wb-preset-row" role="group" aria-labelledby="wb-screenshot-layout-label">
+            <span id="wb-screenshot-layout-label">截图布局</span>
+            <div class="wb-preset-buttons">
+              <button type="button" data-screenshot-layout="single" aria-pressed="false">独立单图</button>
+              <button type="button" data-screenshot-layout="vertical" aria-pressed="false">1 列 × 4 行</button>
+              <button type="button" data-screenshot-layout="sheet" aria-pressed="false">5 列 × 4 行</button>
+            </div>
+          </div>
+          <div class="wb-preset-row" role="group" aria-labelledby="wb-screenshot-trim-label">
+            <span id="wb-screenshot-trim-label">跳过首尾</span>
+            <div class="wb-preset-buttons">
+              <button type="button" data-screenshot-trim="movie" aria-pressed="false">电影</button>
+              <button type="button" data-screenshot-trim="series" aria-pressed="false">剧集</button>
+              <button type="button" data-screenshot-trim="anime" aria-pressed="false">动画</button>
+              <button type="button" data-screenshot-trim="full" aria-pressed="false">全片</button>
+              <a href="/settings?group=collage" data-tool-settings class="wb-tool-settings">截图设置</a>
+            </div>
+          </div>
+        </div>
       </section>
       <section class="wb-output-summary" id="wb-tool-output" aria-label="输出">
         <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="output" aria-controls="wb-collapse-output" aria-expanded="true"><svg class="ws-icon wb-chevron" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><strong>输出</strong><small data-wb="output-status"></small></button></div>
