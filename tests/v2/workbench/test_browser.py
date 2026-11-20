@@ -1273,7 +1273,8 @@ def test_independent_introduction_late_result_requires_review_and_copies_full_te
     playwright, browser, page, errors = browser_session(base_url)
     try:
         mount(page)
-        show_panel(page, None)
+        toggle = page.locator("[data-collapse=overview]")
+        expect(toggle).to_have_attribute("aria-expanded", "false")
         pending = []
         page.route('**/api/v2/publishing/introduction', lambda route: pending.append(route))
         def search(route):
@@ -1285,7 +1286,9 @@ def test_independent_introduction_late_result_requires_review_and_copies_full_te
         page.route('**/api/v2/publishing/introduction/options', search)
         page.locator('[data-wb=intro-query]').fill('慕兰之战')
         page.locator('[data-wb=intro-fetch]').click()
+        expect(toggle).to_have_attribute("aria-expanded", "false")
         page.get_by_role('button', name=re.compile('年番4／慕兰之战')).click()
+        expect(toggle).to_have_attribute("aria-expanded", "true")
         editor = page.locator('[data-edit=overview]')
         editor.fill('用户粘贴的旧资料')
         intro = '◎片　　名　年番4／慕兰之战\n◎年　　代　2026\n◎主　　演　演员甲\n　　　　　演员乙\n\n◎简　　介\n\n　　当季剧情。'
@@ -1305,24 +1308,38 @@ def test_independent_introduction_late_result_requires_review_and_copies_full_te
 
 
 def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server):
-    base_url, _ = live_server
+    base_url, app = live_server
     playwright, browser, page, errors = browser_session(base_url)
     requests = []
     try:
         from bili_remote.v2.workbench.publishing import PublishingService
+        from bili_remote.v2.metadata.providers import ProviderError
 
         v2_fixture(page, requests, {"media_type": "anime", "tmdb_id": "8", "confirmed": True})
         cover = "https://image.tmdb.org/t/p/w92/fixture.jpg"
-        intro = "◎译　　名　慕兰之战\n◎片　　名　凡人修仙传 年番4\n◎年　　代　2026\n◎编　　剧　篇章编剧\n\n◎简　　介\n\n　　篇章剧情"
+        reference = "926001"
         failed_reference = "12345"
+        intro = (
+            "◎译　　名　篇章别名 / Chapter Alias\n◎片　　名　独立篇章\n◎年　　代　2026\n"
+            "◎语　　言　汉语普通话\n"
+            f"◎豆瓣链接　https://movie.douban.com/subject/{reference}/\n"
+            "◎导　　演　导演甲\n◎编　　剧　篇章编剧\n◎主　　演　演员甲\n　　　　　演员乙"
+            "\n\n◎简　　介\n\n　　篇章剧情"
+        )
+
+        class PTGen:
+            async def get(self, params):
+                if params["url"].endswith(f"/{failed_reference}/"):
+                    raise ProviderError("upstream_http_401", "synthetic 401")
+                assert params == {"url": f"https://movie.douban.com/subject/{reference}/", "format": "bbcode"}
+                return {"data": {"site": "douban", "id": reference, "format": intro}}
+
+        app.state.services.v2.resolver.providers["ptgen"] = PTGen()
 
         def introduction(route):
             payload = route.request.post_data_json
             requests.append(("publishing/introduction", payload))
-            if payload["reference"] == failed_reference:
-                route.fulfill(status=502, json={"detail": "PT-Gen 鉴权失败"})
-            else:
-                route.fulfill(json={"text": intro, "label": "PT-Gen · 豆瓣 37457082", "warnings": []})
+            route.fulfill(response=route.fetch())
 
         def preview(route):
             payload = route.request.post_data_json
@@ -1342,7 +1359,8 @@ def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server)
         page.route("**/api/v2/publishing/preview", preview)
         mount(page)
         page.evaluate("wb.select([{root_key:'downloads',relative_path:'Media/episode01.mp4',kind:'video',fingerprint:'fixture'}])")
-        show_panel(page)
+        toggle = page.locator("[data-collapse=overview]")
+        expect(toggle).to_have_attribute("aria-expanded", "false")
         expect(page.locator("[data-wb=intro-source]")).to_have_count(0)
         expect(page.locator("[data-wb=validation]")).to_contain_text("简介正文尚未生成")
         editor = page.locator("[data-edit=overview]")
@@ -1350,14 +1368,17 @@ def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server)
         expect(page.locator("[data-wb=output]")).not_to_contain_text("2020")
         assert not [payload for name, payload in requests if name == "publishing/introduction"]
         expect(page.locator("[data-wb=validation]")).to_contain_text("暂无封面")
+        query = page.locator("[data-wb=intro-query]")
+        fetch = page.locator("[data-wb=intro-fetch]")
+        expect(fetch).to_be_visible()
+        query.fill(f"https://movie.douban.com/subject/{reference}/")
+        fetch.click()
+        expect(toggle).to_have_attribute("aria-expanded", "true")
+        expect(editor).to_have_value(intro)
+        expect(page.locator("[data-wb=output]")).to_have_text(intro)
         page.locator("[data-wb=query]").fill("凡人修仙传")
         page.locator("[data-action=search]").click()
         page.locator("[data-wb=candidates] button").click()
-        expect(page.locator("[data-wb=output]")).to_have_text(f"[img]{cover}[/img]")
-        query = page.locator("[data-wb=intro-query]")
-        fetch = page.locator("[data-wb=intro-fetch]")
-        query.fill("https://movie.douban.com/subject/37457082/")
-        fetch.click()
         expect(editor).to_have_value(intro)
         expect(page.locator("[data-wb=output]")).to_have_text(f"[img]{cover}[/img]\n\n{intro}")
         query.fill(failed_reference)
@@ -1377,7 +1398,7 @@ def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server)
             page.locator("[data-copy=content]").click()
             assert page.evaluate("window.copied") == page.locator("[data-wb=output]").text_content() == expected
         assert [payload for name, payload in requests if name == "publishing/introduction"] == [
-            {"source": "ptgen", "reference": "https://movie.douban.com/subject/37457082/"},
+            {"source": "ptgen", "reference": f"https://movie.douban.com/subject/{reference}/"},
             {"source": "ptgen", "reference": failed_reference},
         ]
         assert not errors, errors

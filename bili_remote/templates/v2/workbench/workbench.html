@@ -98,22 +98,22 @@
       </section>
       <section class="wb-publishing" id="wb-panel-content" aria-label="发种简介">
         <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="overview" aria-controls="wb-collapse-overview" aria-expanded="false"><svg class="ws-icon wb-chevron" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><strong>发种简介</strong></button></div>
-        <div id="wb-collapse-overview" class="wb-collapse" inert aria-hidden="true"><div class="wb-collapse-inner">
         <div class="wb-introduction-source">
           <div class="wb-inline wb-introduction-controls">
             <label>豆瓣条目<input data-wb="intro-query" maxlength="200" placeholder="豆瓣 ID、条目链接或作品名"></label>
             <button type="button" data-wb="intro-fetch">获取豆瓣简介</button>
           </div>
           <p class="wb-note" data-wb="intro-applied" hidden></p>
-          <p class="wb-note" data-wb="intro-status" role="status">通过 PT-Gen 读取豆瓣资料。剧集请填写要发布的篇章条目，也可直接粘贴完整简介。</p>
+          <p class="wb-note" data-wb="intro-status" role="status"></p>
           <div class="wb-candidates" data-wb="intro-options"></div>
+        </div>
+        <div id="wb-collapse-overview" class="wb-collapse" inert aria-hidden="true"><div class="wb-collapse-inner">
           <div data-wb="intro-review" hidden>
             <p class="wb-note">已保留现有内容。核对下方资料后，可选择替换。</p>
             <pre data-wb="intro-proposal" tabindex="0" aria-label="待替换资料"></pre>
             <button type="button" class="wb-primary" data-wb="intro-accept">用这份资料替换</button>
             <button type="button" data-wb="intro-dismiss">保留当前简介</button>
           </div>
-        </div>
         <div class="wb-field"><div class="wb-field-bar"><label for="wb-overview">完整简介资料</label><span data-lock="overview" class="wb-note"></span><button type="button" data-copy="overview" disabled>复制完整简介</button></div><div class="wb-format-tools" aria-label="简介格式"><button type="button" data-format="b" aria-label="加粗">B</button><button type="button" data-format="i" aria-label="斜体">I</button><button type="button" data-format="url">链接</button><button type="button" data-format="img">图片</button><span>BBCode</span></div><textarea id="wb-overview" data-edit="overview" rows="12" placeholder="可直接粘贴 PT-Gen 资料并编辑，支持 BBCode"></textarea></div>
 
         </div></div>

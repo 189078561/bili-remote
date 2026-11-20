@@ -918,6 +918,7 @@
       }
     }
     async loadIntroduction(reference) {
+      this.setCollapse("overview", true);
       const ticket = ++this.introVersion, epoch = this.epoch, version = this.fieldVersions.overview || 0;
       const current = () => ticket === this.introVersion && epoch === this.epoch && !this.destroyed;
       const status = this.el("intro-status");

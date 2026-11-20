@@ -326,7 +326,8 @@ body:has(.br-workbench :is(.wb-image-dialog,.wb-task-log-dialog)[open]) {overflo
  .wb-tool-settings {margin-inline-start:0;}
 }
 
-.wb-introduction-source {display:grid;gap:8px;padding:10px 0;}
+.wb-introduction-source {display:grid;padding:10px 0;}
+.wb-introduction-source > :not(:first-child):not(:empty) {margin-top:8px;}
 .wb-introduction-controls {align-items:end;}
 .wb-introduction-controls > label {flex:1 1 200px;}
 .wb-introduction-controls select,.wb-introduction-controls input {display:block;margin-top:4px;}
