@@ -1,9 +1,11 @@
+import json
 from io import BytesIO
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 
 from bili_remote.web import create_app
+from test_browser_modules import live_server  # noqa: F401
 
 
 EPISODE = {
@@ -139,3 +141,108 @@ def test_retry_saved_tv_push_removes_web_referer(settings, monkeypatch, tmp_path
            "_assistant_playback": secret.encrypt_json(json.dumps(saved))}
     asyncio.run(runner.download(job, tmp_path, tmp_path / "job.log", AsyncMock()))
     assert not list(settings.runtime_dir.glob("browser-info-*.json"))
+
+
+def test_assistant_handoff_reuses_native_picker_and_locked_tracks(live_server):
+    from playwright.sync_api import expect
+    from test_browser_modules import browser_session
+
+    base, app = live_server
+    playwright, browser, page, errors = browser_session(base)
+    try:
+        upload = page.evaluate("""async catalogue => {
+            const headers = {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": document.querySelector('meta[name="csrf-token"]').content
+            };
+            const response = await fetch("/api/parse-assistant/imports", {
+                method: "POST", headers, body: JSON.stringify(catalogue)
+            });
+            return await response.json();
+        }""", {
+            "title": "测试多 P", "source": "tv", "active_episode": 1,
+            "episodes": [
+                {**EPISODE, "url": f"https://www.bilibili.com/video/BV1abc123456?p={number}",
+                 "number": number, "title": f"片段 {number}",
+                 "video": [{**EPISODE["video"][0], "quality": 120,
+                            "width": 3840, "height": 1616, "fps": 25.000133940530404}]}
+                for number in (1, 2, 3)
+            ],
+        })
+        path = f"/api/parse-assistant/imports/{upload['id']}/jobs"
+        probes, posted = [], []
+        page.route("**/api/episodes/formats**", lambda route: (probes.append(route.request.url), route.abort()))
+        page.route(f"**{path}", lambda route: (
+            posted.append(route.request.post_data_json), route.fulfill(json={"ids": [7]})
+        ))
+        page.goto(f"{base}/?assistant_import={upload['id']}")
+        expect(page.locator("[data-resolution]")).to_be_visible()
+        expect(page.locator("[data-summary-source]")).to_have_text("云视听小电视")
+        expect(page.locator("[data-batch-format] option").first).to_contain_text("2160p · 25 fps")
+        expect(page.locator("[data-episode-list] button")).to_have_count(3)
+        expect(page.get_by_role("button", name="2 · 片段 2")).to_have_attribute("aria-pressed", "true")
+        page.locator("[data-naming-name]").fill("山间来信")
+        page.locator("[data-naming-number]").fill("7")
+        expect(page.locator("[data-naming-preview]")).to_contain_text("山间来信.P07.mp4")
+        page.locator("[data-download-form] button[type=submit]").click()
+        expect(page.locator("[data-notice]")).to_contain_text("已加入下载队列")
+        assert posted[0]["choices"] == [{"episode": 1, "video": 0, "audio": 0}]
+        assert posted[0]["naming"]["episode_numbers"] == {"1": 7}
+        expect(page.locator("[data-download-form] button[type=submit]")).to_be_disabled()
+        assert not probes
+        assert not errors
+        assert not app.state.services.database.list_jobs()
+    finally:
+        browser.close()
+        playwright.stop()
+
+
+def test_assistant_popup_keeps_source_switch_and_settings(live_server):
+    from playwright.sync_api import expect
+    from test_browser_modules import browser_session
+
+    base, _ = live_server
+    playwright, browser, page, errors = browser_session(base)
+    try:
+        page.add_init_script("""(() => {
+            const url = PROJECT_URL;
+            const stored = {projects: [{url, name: '测试项目'}], target: url, order: 'desc', rows: 4};
+            window.chrome = {
+                storage: {local: {
+                    get: async keys => Array.isArray(keys) ? {} : {...keys, ...stored},
+                    set: async values => Object.assign(stored, values)
+                }},
+                tabs: {query: async () => [{id: 1, url: 'https://www.bilibili.com/video/BV1abc123456'}]},
+                scripting: {executeScript: async ({args}) => {
+                    if (args[1].includes('/view')) return [{result: {body: {code: 0, data: {
+                        title: '合成视频', bvid: 'BV1abc123456', aid: 1, pages: [{page: 1, cid: 10, duration: 60}]
+                    }}}}];
+                    return [{result: {body: {code: 0, data: {
+                        dash: {
+                            video: [{baseUrl: 'https://edge.bilivideo.com/v.m4s', id: 120,
+                                     codecs: 'avc1.640028', width: 3840, height: 1616,
+                                     frameRate: '250001/10000', bandwidth: 800000}],
+                            audio: [{baseUrl: 'https://edge.bilivideo.com/a.m4s', id: 30280,
+                                     codecs: 'mp4a.40.2', bandwidth: 120000}]
+                        }
+                    }}}}];
+                }}
+            };
+        })()""".replace("PROJECT_URL", json.dumps(base)))
+        page.set_viewport_size({"width": 320, "height": 610})
+        page.goto(f"{base}/static/v2/download/assistant/popup.html")
+        expect(page.get_by_role("button", name="Web 端")).to_be_enabled()
+        expect(page.get_by_label("统一画质").locator("option").first).to_contain_text("2160p · 25 fps")
+        page.get_by_role("button", name="设置", exact=True).click()
+        expect(page.get_by_label("项目名称")).to_have_value("测试项目")
+        expect(page.get_by_label("列表可见行数")).to_have_value("4")
+        page.get_by_role("button", name="返回选集").click()
+        page.get_by_role("button", name="TV 端").click()
+        expect(page.get_by_role("button", name="TV 端")).to_have_attribute("aria-pressed", "true")
+        expect(page.get_by_role("button", name="生成 TV 登录二维码")).to_be_visible()
+        expect(page.get_by_label("统一画质")).not_to_contain_text("2160p")
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        assert not errors
+    finally:
+        browser.close()
+        playwright.stop()

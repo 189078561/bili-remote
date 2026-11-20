@@ -9,7 +9,7 @@ export function el(tag, text, attrs = {}) {
   return node;
 }
 
-function tracksFor(episode, preferredAudio) {
+export function tracksFor(episode, preferredAudio) {
   const toOption = (track, video, audio, sound) => {
     const tbr = track.bandwidth / 1000;
     const sizeOf = item => item.size || (item.bandwidth > 0 && episode.duration ? item.bandwidth * episode.duration / 8 : null);
@@ -17,7 +17,7 @@ function tracksFor(episode, preferredAudio) {
     const total = ownSize && sound ? (sizeOf(sound) ? ownSize + sizeOf(sound) : null) : ownSize;
     return {
       format_id: track.format_id || String(track.quality),
-      height: track.height, fps: track.fps,
+      height: track.height, width: track.width, quality: track.quality, fps: track.fps,
       vcodec: video === null ? "none" : track.codec,
       acodec: video === null ? track.codec : "none",
       dynamic_range: video === null ? null : track.dynamic_range || ({125: "HDR10", 126: "DV"}[track.quality] || "SDR"),
@@ -117,7 +117,7 @@ export function mountPicker(root, episodes, {order = "asc", rows = 3, onSelect, 
     })));
     grid.replaceChildren(...range().map(i => {
       const ep = episodes[i];
-      const item = button(String(ep.number || i + 1), () => {
+      const item = button(new URL(ep.url).searchParams.has("p") ? "P" + (ep.number || i + 1) : String(ep.number || i + 1), () => {
         if (selected.has(i)) deselect(i);
         else {choose(i);details.open = true;}
         reflect();
@@ -249,7 +249,7 @@ export function mountPicker(root, episodes, {order = "asc", rows = 3, onSelect, 
             row.append(audio);
           }
           if (track) row.append(el("small", batchTrackLabel(track, catalogue.find(item => item.key === trackTier(track)),
-            bitrateRange([track.tbr])), {class: "br-muted"}));
+            bitrateRange([track.tbr])) + (track.width && track.height ? ` · ${track.width} × ${track.height}` : ""), {class: "br-muted"}));
         }
         formatList.append(row);
       }

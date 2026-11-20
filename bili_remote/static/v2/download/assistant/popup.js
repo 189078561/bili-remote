@@ -88,7 +88,10 @@ function updateButtons(choices = app.picker?.choices() || []) {
   $("[data-settings]").disabled = app.busy;
   const retry = $("[data-retry]");
   retry.hidden = !app.picker?.selected().some(pick => app.catalogue?.episodes[pick.episode].error);
-  $("[data-source]").disabled = app.busy || !app.catalogue;
+  for (const button of document.querySelectorAll("[data-source]")) {
+    button.disabled = app.busy || !app.catalogue;
+    button.setAttribute("aria-pressed", String(button.dataset.source === app.mode));
+  }
   retry.disabled = app.busy;
   const download = $("[data-download]");
   download.disabled = !ready || !choices.length || !choices.every(pick => {
@@ -139,12 +142,15 @@ function reloadSource() {
 const refreshTvLogin = await mountLocalTv($("[data-local-tv]"), () => {
   if (app.mode === "tv") reloadSource();
 });
-$("[data-source]").onchange = event => {
-  app.mode = event.target.value;
-  $("[data-local-tv]").hidden = app.mode !== "tv";
-  status("");
-  reloadSource();
-};
+for (const button of document.querySelectorAll("[data-source]")) {
+  button.onclick = () => {
+    if (button.dataset.source === app.mode) return;
+    app.mode = button.dataset.source;
+    $("[data-local-tv]").hidden = app.mode !== "tv";
+    status("");
+    reloadSource();
+  };
+}
 $("[data-target]").onchange = async event => {
   app.target = event.target.value;
   await persist();
@@ -155,7 +161,12 @@ $("[data-settings]").onclick = () => {
   const opening = $("[data-preferences]").hidden;
   $("[data-main]").hidden = opening;
   $("[data-preferences]").hidden = !opening;
-  $("[data-settings]").textContent = opening ? "返回选集" : "设置";
+  const gear = $("[data-settings]");
+  const label = opening ? "返回选集" : "设置";
+  gear.setAttribute("aria-label", label);
+  gear.title = label;
+  gear.setAttribute("aria-expanded", String(opening));
+  gear.firstElementChild.textContent = opening ? "←" : "⚙";
   status("");
   if (opening) edit(app.target);
 };
@@ -218,8 +229,9 @@ async function submit(sendAll) {
     const {title, episodes, movie = false} = app.catalogue;
     const source = app.mode;
     const picks = app.picker.choices();
-    if (source === "tv" || movie || (!sendAll && picks.some(pick => pick.video === null))) {
-      const features = (await jsonRequest(target.url, "/api/parse-assistant")).features || [];
+    let features = [];
+    if (sendAll || source === "tv" || movie || (!sendAll && picks.some(pick => pick.video === null))) {
+      features = (await jsonRequest(target.url, "/api/parse-assistant")).features || [];
       const required = [
         source === "tv" && "local-tv",
         movie && "movie-title",
@@ -235,8 +247,15 @@ async function submit(sendAll) {
       }));
       const missing = episodes.filter(ep => !ep.audio?.length).length;
       if (missing === episodes.length) throw new Error(episodes[0].error || "正片暂无可提交的档位。");
-      const result = await post(target, "/api/parse-assistant/imports", {title, source, movie, episodes: episodes.map(publicEpisode)});
+      const result = await post(target, "/api/parse-assistant/imports", {title, source, movie, active_episode: app.catalogue.active >= 0 ? app.catalogue.active : null, episodes: episodes.map(publicEpisode)});
       status("已向「" + target.name + "」推送 " + result.count + " 项。" + (missing ? missing + " 项暂无完整档位。" : ""));
+      if (features.includes("native-import")) {
+        try {
+          await chrome.tabs.create({url: target.url + "/?assistant_import=" + encodeURIComponent(result.id)});
+        } catch {
+          status("列表已推送，请在项目的解析助手面板中打开。");
+        }
+      }
     } else {
       const result = await post(target, "/api/parse-assistant/jobs", {
         catalogue: {title, source, movie, episodes: picks.map(pick => publicEpisode(episodes[pick.episode]))},

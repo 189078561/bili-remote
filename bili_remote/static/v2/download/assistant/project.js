@@ -1,71 +1,69 @@
-import {hasTrack, mountPicker, sourceName} from "./picker.js";
+import {sourceName, tracksFor} from "./picker.js";
 
-export function mountAssistant(root, api, refreshJobs) {
-  const find = selector => root.querySelector(selector);
-  const pickerHost = find("[data-assistant-picker]");
-  const list = find("[data-assistant-lists]");
-  const status = find("[data-assistant-status]");
-  const submit = find("[data-assistant-download]");
-  const refreshButton = find("[data-assistant-refresh]");
-  let picker;
-  let queued;
-  let revision = 0;
-  let submitting = false;
-  function syncButton(picks = picker?.choices() || []) {
-    submit.disabled = submitting || !picks.length || !picks.every(pick =>
-      hasTrack(pickerEpisodes[pick.episode], pick));
-    submit.textContent = "开始下载" + (picks.length ? " · " + picks.length + " 项" : "");
-  }
-  let pickerEpisodes = [];
-  async function openList() {
-    const token = ++revision;
-    const id = list.value;
-    picker = null;pickerEpisodes = [];
-    pickerHost.replaceChildren();
-    syncButton();
-    if (!id) return;
+export function importResolution(key, data) {
+  const source = data.source === "tv" ? "tv" : "web";
+  const active = data.episodes[data.active_episode ?? 0] ? data.active_episode ?? 0 : 0;
+  const episodes = data.episodes.map((episode, index) => {
+    const part = new URL(episode.url).searchParams.has("p");
+    return {
+      ...episode, id: String(index), group: "正片", part,
+      display_episode_number: episode.number, group_index: index + 1,
+    };
+  });
+  return {
+    assistant: {key, queued: new Set((data.queued || []).map(pick => JSON.stringify(pick))), tracksFor},
+    title: data.title, api_mode: source, source_url: episodes[active].url,
+    episodes, default_episode_id: String(active), playlist_count: episodes.length,
+    duration: episodes.length === 1 ? episodes[0].duration : null,
+    naming_items: data.naming_items || {},
+  };
+}
+
+export function mountAssistant(root, api, openImport, initialKey) {
+  const list = root.querySelector("[data-assistant-lists]");
+  const status = root.querySelector("[data-assistant-status]");
+  const use = root.querySelector("[data-assistant-use]");
+  const refreshButton = root.querySelector("[data-assistant-refresh]");
+
+  async function open(key) {
+    if (!key || use.disabled) return;
+    use.disabled = true;
     try {
-      const data = await api("/api/parse-assistant/imports/" + encodeURIComponent(id));
-      if (token !== revision) return;
-      pickerEpisodes = data.episodes;
-      queued = data.queued;
-      picker = mountPicker(pickerHost, data.episodes, {onChange: syncButton, queued});
-      status.textContent = data.title + " · " + sourceName(data.source);
+      status.textContent = "";
+      await openImport(key);
     } catch (error) {
-      if (token === revision) status.textContent = error.message;
+      status.textContent = error.message;
+      root.open = true;
+    } finally {
+      use.disabled = !list.value;
     }
   }
+
   async function refresh() {
-    if (submitting || refreshButton.disabled) return;
+    if (refreshButton.disabled) return;
     refreshButton.disabled = true;
     try {
       const previous = list.value;
-      const result = await api("/api/parse-assistant");
-      list.replaceChildren(...result.imports.map(item => new Option(item.title + " · " + sourceName(item.source) + " · " + item.count + " 项", item.id)));
-      if (!result.imports.length) list.add(new Option("等待扩展推送正片列表", ""));
-      if (result.imports.some(i => i.id === previous)) list.value = previous;
-      if (!picker || list.value !== previous) await openList();
-    } catch (error) { status.textContent = error.message; }
-    finally { refreshButton.disabled = false; }
+      const {imports} = await api("/api/parse-assistant");
+      list.replaceChildren(...imports.map(item => new Option(
+        item.title + " · " + sourceName(item.source) + " · " + item.count + " 项", item.id
+      )));
+      if (!imports.length) list.add(new Option("等待扩展推送正片列表", ""));
+      list.value = imports.some(item => item.id === previous) ? previous : imports[0]?.id || "";
+      use.disabled = !list.value;
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      refreshButton.disabled = false;
+    }
   }
-  list.onchange = openList;
+
+  list.onchange = () => { use.disabled = !list.value; };
   refreshButton.onclick = refresh;
-  root.ontoggle = () => {if (root.open) refresh();};
-  submit.onclick = async () => {
-    if (!picker || submitting) return;
-    const choices = picker.choices();
-    submitting = true;list.disabled = true;
-    syncButton();
-    try {
-      const result = await api("/api/parse-assistant/imports/" + encodeURIComponent(list.value) + "/jobs", {
-        method: "POST", body: JSON.stringify({choices}),
-      });
-      queued.push(...choices.map(({episode, video, audio}) => [episode, video, audio]));
-      picker.refresh();
-      status.textContent = "已加入 " + result.ids.length + " 个下载任务。";
-      await refreshJobs({force: true});
-    } catch (error) { status.textContent = error.message; }
-    finally { submitting = false;list.disabled = false;syncButton(); }
-  };
-  if (root.open) refresh();
+  root.ontoggle = () => { if (root.open) void refresh(); };
+  use.onclick = () => open(list.value);
+  if (initialKey) {
+    use.disabled = false;
+    void open(initialKey);
+  } else if (root.open) void refresh();
 }

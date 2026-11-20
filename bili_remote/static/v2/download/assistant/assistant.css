@@ -45,3 +45,19 @@
 .br-format small {display:block;}
 .br-format select {display:block;width:100%;}
 .br-extension [data-local-tv] img {width:min(180px,100%);height:auto;}
+
+.br-extension * {box-sizing:border-box;}
+.br-extension main, .br-extension section, .br-extension [data-picker] {min-width:0;}
+.br-extension main, .br-extension section {grid-template-columns:minmax(0,1fr);}
+.br-extension [data-title] {font-size:16px;overflow-wrap:anywhere;}
+.br-extension .br-settings {display:grid;place-items:center;min-width:32px;min-height:32px;padding:0;font-size:18px;line-height:1;}
+.br-extension .br-source-row, .br-extension .br-source {display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.br-extension .br-source-row {justify-content:space-between;font-size:12px;}
+.br-extension .br-source {padding:3px;background:var(--br-tint);border-radius:7px;}
+.br-extension .br-source button {background:transparent;border-color:transparent;}
+.br-extension .br-source [aria-pressed="true"] {background:var(--br-bg);border-color:var(--br-accent);color:var(--br-accent);}
+.br-extension .br-picker .br-action {justify-content:flex-start;}
+.br-extension .br-picker .br-action>small {margin-inline-start:auto;}
+.br-extension .br-picker .br-action label:not(.br-fallback) {flex:1 1 100%;}
+.br-extension .br-picker select {width:100%;}
+.br-extension [data-preferences] input, .br-extension [data-preferences] select {width:100%;}

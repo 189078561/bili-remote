@@ -122,10 +122,14 @@ def _publish(source, siblings, stage, root, plan, extension, job_id, position):
     sidecars = list(associated_files(source, siblings))
     identifier = safe_identifier(plan.get("identifier"))
     alternatives = (None, identifier, f"job{job_id}-{position}") if identifier else (None, f"job{job_id}-{position}")
-    if plan.get("movie"):
+    preserve_name = plan.get("preserve_source_name")
+    if preserve_name or plan.get("movie"):
         alternatives = (None, *range(2, 1001))
     for suffix in dict.fromkeys(alternatives):
-        name = initial_filename(plan, extension, collision=suffix)
+        if preserve_name:
+            name = source.name if suffix is None else f"{source.stem} ({suffix}){source.suffix}"
+        else:
+            name = initial_filename(plan, extension, collision=suffix)
         stem = Path(name).stem
         bindings = [(source, name), *((auxiliary, stem + trailing) for auxiliary, trailing in sidecars)]
         try:

@@ -25,14 +25,27 @@
     return value < 100_000 ? "<0.1 MB" : `${(value / 1_000_000).toFixed(1)} MB`;
   }
 
+  function displayResolution(track) {
+    if (!track.height) return "仅音频";
+    const nominal = {6: 240, 16: 360, 32: 480, 64: 720, 74: 720,
+      80: 1080, 112: 1080, 116: 1080, 120: 2160, 127: 4320}[track.quality];
+    if (nominal) return nominal + "p";
+    return track.width ? track.width + " × " + track.height : track.height + " 像素高";
+  }
+
+  function frameRate(track) {
+    const fps = Math.round(Number(track.fps));
+    return fps > 0 ? fps + (track.quality ? " fps" : "fps") : null;
+  }
+
   function trackFamily(track) {
     const codec = track.vcodec && track.vcodec !== "none" ? track.vcodec : track.acodec;
     const name = codecName(codec);
-    return JSON.stringify([name === "未知编码" ? codec : name, track.dynamic_range || "", Number(track.fps) || 0]);
+    return JSON.stringify([name === "未知编码" ? codec : name, track.dynamic_range || "", Math.round(Number(track.fps)) || 0]);
   }
 
   function trackTier(track) {
-    return JSON.stringify([track.format_id, Number(track.height) || 0, trackFamily(track)]);
+    return JSON.stringify([track.format_id, track.quality || Number(track.height) || 0, trackFamily(track)]);
   }
 
   function bitrateRange(values) {
@@ -58,8 +71,8 @@
   function batchTrackLabel(track, tier, rate) {
     const video = track.height && track.vcodec !== "none";
     return [
-      video ? track.height + "P" : "仅音频",
-      video && track.fps ? track.fps + "fps" : null,
+      video ? (track.quality ? displayResolution(track) : track.height + "P") : "仅音频",
+      video ? frameRate(track) : null,
       codecName(video ? track.vcodec : track.acodec), tier?.label,
       video ? track.dynamic_range : null, rate
     ].filter(Boolean).join(" · ");
@@ -81,7 +94,7 @@
     );
     for (const tier of ordered) {
       const track = tier.track;
-      const group = ordered.filter(other => other.track.height === track.height && trackFamily(other.track) === trackFamily(track));
+      const group = ordered.filter(other => (other.track.quality || other.track.height) === (track.quality || track.height) && trackFamily(other.track) === trackFamily(track));
       if (group.length > 1) {
         const rank = group.indexOf(tier);
         tier.label = rank === 0 ? "高码" : rank === 1 ? "标准" : "档位 " + (rank + 1);
@@ -98,5 +111,5 @@
     ) || candidates[0];
   }
 
-  globalThis.BiliDownloadQuality = Object.freeze({codecName, formatBitrate, formatResourceSize, trackFamily, trackTier, bitrateRange, combinedSize, batchTrackLabel, tierCatalogue, preferredTier});
+  globalThis.BiliDownloadQuality = Object.freeze({displayResolution, frameRate, codecName, formatBitrate, formatResourceSize, trackFamily, trackTier, bitrateRange, combinedSize, batchTrackLabel, tierCatalogue, preferredTier});
 })();

@@ -14,6 +14,7 @@ from fastapi import Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from ...bili import BiliTvClient
+from ...validation import ValidationError as TemplateError, render_episode_template, validate_output_template
 from .naming import NameOptions, download_plan, episode_display_title, episode_facts, url_facts
 
 MAX_BODY = 12 * 1024 * 1024
@@ -90,6 +91,7 @@ class Episode(BaseModel):
 class Catalogue(BaseModel):
     source: Literal["web", "tv"] = "web"
     movie: bool = False
+    active_episode: int | None = Field(default=None, ge=0, lt=600)
     title: str = Field(min_length=1, max_length=300)
     episodes: list[Episode] = Field(min_length=1, max_length=600)
 
@@ -108,6 +110,9 @@ class Pick(BaseModel):
 
 class Picks(BaseModel):
     choices: list[Pick] = Field(min_length=1, max_length=600)
+    output_dir: str | None = Field(default=None, max_length=1024)
+    output_template: str | None = Field(default=None, max_length=1024)
+    naming: NameOptions = Field(default_factory=NameOptions)
 
 
 class Direct(Picks):
@@ -119,6 +124,8 @@ def presentation(catalogue, queued):
         "title": catalogue.title,
         "source": catalogue.source,
         "movie": catalogue.movie,
+        "active_episode": catalogue.active_episode,
+        "naming_items": {key: facts.model_dump() for key, facts in catalogue_facts(catalogue).items()},
         "episodes": [
             {
                 **ep.model_dump(exclude={"video", "audio"}),
@@ -161,17 +168,30 @@ def playback_info(title, display_title, ep, video, audio, source):
     }
 
 
-def build_jobs(services, catalogue, payload, *, create_log_path, submitted=()):
-    # Validate the full selection before committing the batch.
-    jobs = []
-    keys = []
-    seen = set()
+def catalogue_facts(catalogue):
     titles = [{
         "id": str(i), "title": ep.title, "display_episode_number": ep.number,
         "group": "正片",
         "movie": catalogue.movie,
     } for i, ep in enumerate(catalogue.episodes)]
     names = episode_facts(titles)
+    for i, episode in enumerate(catalogue.episodes):
+        facts = names[str(i)]
+        source = url_facts(episode.url)
+        facts.identifier = source.identifier
+        if source.number_kind == "part":
+            facts.number, facts.number_kind = source.number, "part"
+    return names
+
+
+
+def build_jobs(services, catalogue, payload, *, create_log_path, submitted=()):
+    # Validate the full selection before committing the batch.
+    jobs = []
+    keys = []
+    seen = set()
+    names = catalogue_facts(catalogue)
+    output_dir = services.files.resolve_new_job_output(payload.output_dir)
     for pick in payload.choices:
         if pick.episode in seen:
             raise HTTPException(422, "同一集只能选择一个版本")
@@ -194,17 +214,32 @@ def build_jobs(services, catalogue, payload, *, create_log_path, submitted=()):
         display_title = episode_display_title(catalogue.title, ep.title, ep.number, movie=catalogue.movie,
                                              part=source_facts.number_kind == "part")
         info = playback_info(catalogue.title, display_title, ep, video, audio, catalogue.source)
-        facts = names[str(pick.episode)]
-        facts.identifier = source_facts.identifier
-        if source_facts.number_kind == "part":
-            facts.number, facts.number_kind = source_facts.number, "part"
-        plan = download_plan(catalogue.title, facts, NameOptions())
+        episode_id = str(pick.episode)
+        facts = names[episode_id]
+        options = payload.naming
+        if facts.number_kind == "part":
+            options = options.model_copy(update={"number_kind": "part", "number": options.episode_numbers.get(episode_id)})
+            plan = download_plan(catalogue.title, facts, options)
+        else:
+            plan = download_plan(catalogue.title, facts, options, episode_id=episode_id)
+        template = "%(id)s.%(ext)s"
+        if options.mode == "source":
+            try:
+                template = validate_output_template(payload.output_template or "%(title)s.%(ext)s")
+                if len(catalogue.episodes) > 1:
+                    template = render_episode_template(
+                        template, season_title=catalogue.title, index=ep.number or pick.episode + 1,
+                        title=display_title, episode_id=source_facts.identifier,
+                    )
+            except TemplateError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            plan["preserve_source_name"] = True
         plan["display_title"] = display_title
         plan["assistant_playback"] = services.secrets.encrypt_json(json.dumps({"expires": expires, "info": info}))
         jobs.append({
             "source_url": ep.url, "kind": "manual", "api_mode": catalogue.source,
-            "title": display_title, "output_template": "%(id)s.%(ext)s",
-            "output_dir": services.files.resolve_new_job_output(None),
+            "title": display_title, "output_template": template,
+            "output_dir": output_dir,
             "format_selector": "(brvideo+braudio)" if video else "(braudio)", "all_parts": False,
             "log_path": str(create_log_path(services.settings)), "naming_plan": plan,
         })
@@ -248,7 +283,7 @@ def register(app, *, get_session, require_csrf, get_services, create_log_path):
     @app.get("/api/parse-assistant")
     async def state(_: object = Depends(get_session)):
         prune()
-        return {"version": 1, "features": ["local-tv", "audio-only", "movie-title"], "imports": [
+        return {"version": 1, "features": ["local-tv", "audio-only", "movie-title", "native-import"], "imports": [
             {"id": key, "title": catalogue.title, "count": len(catalogue.episodes), "source": catalogue.source}
             for key, (catalogue, _, _) in reversed(imports.items())
         ]}
