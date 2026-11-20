@@ -103,7 +103,11 @@ export function mountPicker(root, episodes, {order = "asc", rows = 3, onSelect, 
       const ep = episodes[pick.episode];
       return !ep.video?.[pick.video] || !ep.audio?.[pick.audio];
     }).length;
-    summary.textContent = "已选 " + selected.size + " 项" + (pending ? " · " + pending + " 项待确认档位" : "");
+    const failed = [...selected.keys()].filter(i => episodes[i].error).length;
+    if (failed) details.open = true;
+    summary.textContent = "已选 " + selected.size + " 项" +
+      (pending > failed ? " · " + (pending - failed) + " 项正在读取档位" : "") +
+      (failed ? " · " + failed + " 项未取得档位" : "");
     drawUnified();
     if (details.open) drawFormats();
     onChange?.(choices());

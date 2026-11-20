@@ -1,10 +1,10 @@
-import {readTab, loadTracks} from "./bilibili.js";
+import {readTab, loadTracks, tabRequest} from "./bilibili.js";
 import {mountPicker} from "./picker.js";
 
 const $ = selector => document.querySelector(selector);
 const app = {
   ...await chrome.storage.local.get({projects: [], target: "", order: "asc", rows: 3}),
-  catalogue: null, picker: null, busy: false,
+  catalogue: null, picker: null, request: null, busy: false,
 };
 const submitted = new Map();
 const requests = new Map();
@@ -17,10 +17,12 @@ function requestTrack(index) {
   const request = new Promise(resolve => {
     requestsQueue.push(async () => {
       try {
-        await loadTracks(episode);
-        episode.error = (!episode.video.length || !episode.audio.length) ? "无完整可选档位" : "";
+        episode.error = "";
+        await loadTracks(episode, app.request);
       } catch (error) {
         episode.error = error.message;
+        episode.video = [];
+        episode.audio = [];
       } finally {
         inFlight--;
         resolve();
@@ -80,6 +82,9 @@ function updateButtons(choices = app.picker?.choices() || []) {
   $("[data-send]").disabled = !ready;
   $("[data-target]").disabled = app.busy || !app.projects.length;
   $("[data-settings]").disabled = app.busy;
+  const retry = $("[data-retry]");
+  retry.hidden = !choices.some(pick => app.catalogue?.episodes[pick.episode].error);
+  retry.disabled = app.busy;
   const download = $("[data-download]");
   download.disabled = !ready || !choices.length || !choices.every(pick => {
     const episode = app.catalogue.episodes[pick.episode];
@@ -195,8 +200,9 @@ async function submit(sendAll) {
         await requestTrack(i);
         status("正在读取正片档位 " + ++finished + " / " + episodes.length);
       }));
-      const result = await post(target, "/api/parse-assistant/imports", {title, episodes: episodes.map(publicEpisode)});
       const missing = episodes.filter(ep => !ep.video?.length || !ep.audio?.length).length;
+      if (missing === episodes.length) throw new Error(episodes[0].error || "正片暂无可提交的档位。");
+      const result = await post(target, "/api/parse-assistant/imports", {title, episodes: episodes.map(publicEpisode)});
       status("已向「" + target.name + "」推送 " + result.count + " 项。" + (missing ? missing + " 项暂无完整档位。" : ""));
     } else {
       const picks = app.picker.choices();
@@ -213,11 +219,28 @@ async function submit(sendAll) {
 }
 $("[data-send]").onclick = () => submit(true);
 $("[data-download]").onclick = () => submit(false);
+$("[data-retry]").onclick = async () => {
+  const retry = app.picker.choices().filter(pick => app.catalogue.episodes[pick.episode].error);
+  app.busy = true;
+  status("正在重新获取档位…");
+  updateButtons();
+  try {
+    await Promise.all(retry.map(({episode}) => {
+      requests.delete(episode);
+      return requestTrack(episode);
+    }));
+    status(app.catalogue.episodes[retry[0].episode].error || "档位已重新读取。");
+  } finally {
+    app.busy = false;
+    app.picker.refresh();
+  }
+};
 
 showProjects();
 try {
   const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
-  app.catalogue = await readTab(tab?.url || "");
+  app.request = tabRequest(tab);
+  app.catalogue = await readTab(tab.url, app.request);
   if (app.catalogue.activePart) app.catalogue.active = app.catalogue.episodes.findIndex(ep => ep.number === app.catalogue.activePart);
   if (!app.catalogue.episodes.length) throw new Error("页面没有可解析的正片。");
   if (app.catalogue.episodes.length > 600) throw new Error("当前列表超过 600 项，请打开具体分季。");
