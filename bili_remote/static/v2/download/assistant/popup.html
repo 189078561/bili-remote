@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>解析助手</title><link rel="stylesheet" href="assistant.css">
+<body class="br-extension">
+<header><strong>解析助手</strong><button data-settings type="button">设置</button></header>
+<main>
+  <section data-main>
+    <label>目标项目<select data-target></select></label>
+    <p class="br-muted" data-address></p>
+    <div class="br-action"><strong data-title>正在识别标签页…</strong><button data-send type="button" disabled>推送解析列表到项目</button></div>
+    <div data-picker></div>
+    <button data-download type="button" class="br-primary" disabled>推送下载</button>
+  </section>
+  <section data-preferences hidden>
+    <h2>扩展设置</h2>
+    <div class="br-action"><label>已保存的项目<select data-manage></select></label><button data-add type="button">添加项目</button></div>
+    <label>项目名称<input data-name maxlength="60" placeholder="例：家庭 VPS"></label>
+    <label>项目网页地址<input data-url type="url" autocomplete="off" placeholder="https://bili.example.com"></label>
+    <button data-save type="button" class="br-primary">连接并设为目标</button>
+    <a data-login hidden target="_blank" rel="noopener noreferrer">打开项目登录</a>
+    <h3>选集偏好</h3>
+    <div class="br-action"><label>默认集数排序<select data-order><option value="asc">正序</option><option value="desc">倒序</option></select></label><label>列表可见行数<select data-rows><option value="2">2 行</option><option value="3">3 行</option><option value="4">4 行</option><option value="5">5 行</option></select></label></div>
+  </section>
+  <p data-status class="br-muted" role="status"></p>
+</main>
+<script type="module" src="popup.js"></script>
+</body></html>

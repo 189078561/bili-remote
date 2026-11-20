@@ -736,6 +736,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="CSRF 校验失败")
         return session
 
+    from .v2.download.browser_assistant import register as register_browser_assistant
+    register_browser_assistant(
+        app, get_session=get_session, require_csrf=require_csrf,
+        get_services=get_services, create_log_path=create_job_log_path,
+    )
+
     def client_key(request: Request) -> str:
         real_ip = request.headers.get("X-Real-IP", "").strip()
         return real_ip or (request.client.host if request.client else "unknown")

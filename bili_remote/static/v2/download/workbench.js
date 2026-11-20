@@ -1462,6 +1462,13 @@
     });
 
     stage("idle");summary();$("[data-parse]").disabled=false;root.dataset.mounted="true";refreshAccount(); refreshJobs(); refreshHistory();
+    const assistant = $("[data-parse-assistant]");
+    if (assistant) {
+      const version = document.querySelector('script[src*="/v2/download/workbench.js"]')?.src.split("?")[1];
+      import("/static/v2/download/assistant/project.js" + (version ? "?" + version : ""))
+        .then(module => { if (!state.destroyed) module.mountAssistant(assistant, api, refreshJobs); })
+        .catch(() => { assistant.querySelector("[data-assistant-status]").textContent = "解析助手面板未能加载，请刷新页面。"; });
+    }
     return {
       state,
       parse,

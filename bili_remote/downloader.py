@@ -1587,7 +1587,22 @@ class YtDlpRunner:
         info_path: Path | None = None
         info_payload: dict[str, Any] | None = None
         cdn_warning: str | None = None
-        if api_mode == "tv":
+        local_browser = "_assistant_playback" in job
+        if local_browser:
+            from time import time
+
+            try:
+                encoded = job["_assistant_playback"]
+                playback = json.loads(self.auth_service.secret_box.decrypt_json(encoded))
+                if playback["expires"] <= time():
+                    raise DownloadFailure("本机解析地址已过期，请从解析助手重新推送")
+                info_payload = playback["info"]
+            except (ValueError, KeyError, TypeError) as exc:
+                raise DownloadFailure("本机解析资料不可用，请从解析助手重新推送") from exc
+            info_path = self.settings.runtime_dir / f"browser-info-{secrets.token_hex(12)}.json"
+            with open(info_path, "x", opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
+                json.dump(info_payload, output, ensure_ascii=False)
+        elif api_mode == "tv":
             info_payload = await self._tv_download_info(job["source_url"], job)
             info_path = (
                 self.settings.runtime_dir
@@ -1770,7 +1785,7 @@ class YtDlpRunner:
                 ):
                     new_source = self._advance_cdn_info(info_payload, failed_urls)
                     reason = "已切换到同轨备用节点"
-                    if (not new_source and not renewal_attempted
+                    if (not local_browser and not new_source and not renewal_attempted
                             and (self._http_statuses(previous_error) & {403, 410}
                                  or self._node_error(previous_error))):
                         renewal_attempted = True
@@ -1888,6 +1903,8 @@ class YtDlpRunner:
                                 break
                             line = raw.decode("utf-8", errors="replace").rstrip()
                             clean_line = redact_sensitive(line)
+                            if local_browser:
+                                clean_line = re.sub(r"https?://\S+", "[播放地址]", clean_line)
                             log_file.write(clean_line + "\n")
                             log_file.flush()
                             if line.startswith("__PROGRESS__"):
@@ -2372,6 +2389,8 @@ class DownloadManager:
 
         naming = self.database.get_download_naming(job["id"])
         if naming:
+            if "assistant_playback" in naming["plan"]:
+                job = {**job, "_assistant_playback": naming["plan"]["assistant_playback"]}
             stage = staging_directory(output_root, job["id"])
             result = await self.runner.download(job, stage, log_path, update)
             paths = getattr(self.runner, "completion_paths", {}).get(job["id"], []) or ([result] if result else [])

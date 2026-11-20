@@ -3,6 +3,22 @@
     <h1>B站下载</h1>
     <details class="dv2-account"><summary><span class="dv2-dot" data-account-dot></span><span data-account-status>读取账号状态…</span></summary><div class="dv2-login-actions"><button type="button" data-login-web>Web 登录</button><button type="button" data-logout-web hidden>断开 Web</button><button type="button" data-login-tv>TV 登录</button><button type="button" data-logout-tv hidden>断开 TV</button></div></details>
   </header>
+  <details class="dv2-history br-assistant" data-parse-assistant>
+    <summary>解析助手 · 本机 Web</summary>
+    <div class="br-action">
+      <a href="/api/parse-assistant/package" download>下载 Chrome / Edge 安装包</a>
+      <button type="button" data-assistant-refresh>刷新解析列表</button>
+    </div>
+    <details>
+      <summary>安装到浏览器</summary>
+      <p>解压安装包。在 Chrome 打开 <code>chrome://extensions</code>，在 Edge 打开 <code>edge://extensions</code>。开启开发人员模式，点击「加载已解压的扩展程序」，选择包含 <code>manifest.json</code> 的文件夹。</p>
+      <p>登录本项目后，在扩展「设置 → 添加项目」填写当前项目的网页地址。</p>
+    </details>
+    <label>收到的正片列表<select data-assistant-lists><option value="">等待扩展推送正片列表</option></select></label>
+    <p data-assistant-status role="status"></p>
+    <div data-assistant-picker></div>
+    <button type="button" class="br-primary" data-assistant-download disabled>开始下载</button>
+  </details>
   <div class="dv2-layout">
     <section class="dv2-create">
       <form data-download-form>
