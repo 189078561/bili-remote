@@ -236,6 +236,7 @@
     const group = schema.groups.find(item => item.key === activeGroup) || schema.groups[0];
     if (!group) return;
     activeGroup = group.key;
+    screenshotPreview?.destroy();
     els.content.replaceChildren();
     const heading = element("div", "settings-group-heading");
     heading.append(element("p", "eyebrow", "SETTINGS"), element("h2", null, group.title));

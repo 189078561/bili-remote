@@ -129,21 +129,65 @@
    if (canvasWidth > 20000 || canvasHeight > 40000 || canvasWidth * canvasHeight > 150000000) {
      throw Error("预计成图过大，请减少行列或缩略图宽度。");
    }
-   const scale = Math.min(1, 1800 / canvasWidth, 2400 / canvasHeight);
-   canvas.width = Math.ceil(canvasWidth * scale);
-   canvas.height = Math.ceil(canvasHeight * scale);
    canvas.style.setProperty("--canvas-width", canvasWidth + "px");
-   ctx.scale(scale, scale);
-   ctx.fillStyle = "#fff";
-   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-   if (headerHeight) {
-     ctx.fillStyle = "#263229";
-     ctx.font = fontStyle;
-     ctx.textBaseline = "middle";
-     const top = (headerHeight - lines.length * lineHeight) / 2;
-     lines.forEach((line, index) => ctx.fillText(line, 8, top + (index + .5) * lineHeight));
-     ctx.textBaseline = "alphabetic";
+   canvas.style.setProperty("--canvas-ratio", canvasWidth / canvasHeight);
+   let paintedWidth = 0;
+   let paintedHeight = 0;
+
+   function paint() {
+     const displayWidth = canvas.getBoundingClientRect().width;
+     if (!displayWidth) return;
+     // Match the displayed pixels, with limits for unusually large compositions.
+     const scale = Math.min(displayWidth * window.devicePixelRatio / canvasWidth,
+       8192 / Math.max(canvasWidth, canvasHeight),
+       Math.sqrt(8_000_000 / (canvasWidth * canvasHeight)));
+     const pixelWidth = Math.max(1, Math.floor(canvasWidth * scale));
+     const pixelHeight = Math.max(1, Math.floor(canvasHeight * scale));
+     if (pixelWidth === paintedWidth && pixelHeight === paintedHeight) return;
+     paintedWidth = canvas.width = pixelWidth;
+     paintedHeight = canvas.height = pixelHeight;
+     ctx.setTransform(pixelWidth / canvasWidth, 0, 0, pixelHeight / canvasHeight, 0, 0);
+     ctx.imageSmoothingQuality = "high";
+     ctx.fillStyle = "#fff";
+     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+     if (headerHeight) {
+       ctx.fillStyle = "#263229";
+       ctx.font = fontStyle;
+       ctx.textBaseline = "middle";
+       const top = (headerHeight - lines.length * lineHeight) / 2;
+       lines.forEach((line, index) => ctx.fillText(line, 8, top + (index + .5) * lineHeight));
+       ctx.textBaseline = "alphabetic";
+     }
+     const cover = !single && fit === "cover";
+     const zoom = (cover ? Math.max : Math.min)(width / scenery.width, height / scenery.height);
+     const artWidth = scenery.width * zoom;
+     const artHeight = scenery.height * zoom;
+     for (let index = 0; index < (single ? 1 : count); index++) {
+       const x = gap + (styled ? 3 : 0) + (index % columns) * cellWidth;
+       const y = headerHeight + gap + (styled ? 3 : 0) + Math.floor(index / columns) * cellHeight;
+       ctx.save();
+       if (styled) {
+         ctx.shadowColor = "#17291e60";
+         ctx.shadowBlur = ctx.shadowOffsetX = ctx.shadowOffsetY = 3 * scale;
+       }
+       ctx.fillStyle = "#000";
+       ctx.fillRect(x, y, width, height + timestampBar);
+       ctx.restore();
+       ctx.save();
+       ctx.beginPath();
+       ctx.rect(x, y, width, height);
+       ctx.clip();
+       ctx.drawImage(scenery, x + (width - artWidth) / 2, y + (height - artHeight) / 2, artWidth, artHeight);
+       ctx.restore();
+       if (styled) {
+         ctx.fillStyle = "#fff";
+         ctx.font = "18px sans-serif";
+         ctx.textAlign = "center";
+         ctx.fillText(fmt(Math.floor(times[single ? frame : index])), x + width / 2, y + height + 21);
+       }
+     }
    }
+
    detail.style.font = fontStyle;
    detail.style.lineHeight = lineHeight + "px";
    detail.replaceChildren(...lines.map(text => {
@@ -152,37 +196,9 @@
      return line;
    }));
 
-   const cover = !single && fit === "cover";
-   const zoom = (cover ? Math.max : Math.min)(width / scenery.width, height / scenery.height);
-   const artWidth = scenery.width * zoom;
-   const artHeight = scenery.height * zoom;
-   for (let index = 0; index < (single ? 1 : count); index++) {
-     const x = gap + (styled ? 3 : 0) + (index % columns) * cellWidth;
-     const y = headerHeight + gap + (styled ? 3 : 0) + Math.floor(index / columns) * cellHeight;
-     ctx.save();
-     if (styled) {
-       ctx.shadowColor = "#17291e60";
-       ctx.shadowBlur = ctx.shadowOffsetX = ctx.shadowOffsetY = 3 * scale;
-     }
-     ctx.fillStyle = "#000";
-     ctx.fillRect(x, y, width, height + timestampBar);
-     ctx.restore();
-     ctx.save();
-     ctx.beginPath();
-     ctx.rect(x, y, width, height);
-     ctx.clip();
-     ctx.drawImage(scenery, x + (width - artWidth) / 2, y + (height - artHeight) / 2, artWidth, artHeight);
-     ctx.restore();
-     if (styled) {
-       ctx.fillStyle = "#fff";
-       ctx.font = "18px sans-serif";
-       ctx.textAlign = "center";
-       ctx.fillText(fmt(Math.floor(times[single ? frame : index])), x + width / 2, y + height + 21);
-     }
-   }
    return {
      width, height, canvasWidth, canvasHeight, count, rows, headerHeight,
-     infoRows: lines.length, heightLimited: headerHeight > targetHeight
+     infoRows: lines.length, heightLimited: headerHeight > targetHeight, paint
    };
  }
 
@@ -247,12 +263,18 @@
    controls.append(tabs);
    const q = selector => view.querySelector(selector);
    const figure = q("figure");
+   const canvas = q("canvas");
    const sampleText = q(".screenshot-info-sample");
    const pager = q(".screenshot-preview-nav");
    const sizes = q(".screenshot-preview-size");
    const zoom = q("[data-zoom]");
    const measure = q("[data-measure]");
    let frame = 0;
+   let layout = null;
+   const repaint = () => layout?.paint();
+   const observer = new ResizeObserver(repaint);
+   observer.observe(canvas);
+   window.addEventListener("resize", repaint);
 
    function select(tab) {
      if (tab === "information" && getValues().screenshot_output_mode !== "collage") tab = "layout";
@@ -287,18 +309,19 @@
      const infoButton = buttons.find(item => item.key === "information");
      if (infoButton) infoButton.button.disabled = options.single;
      if (options.single && selectedTab === "information") select("layout");
-     let layout;
      try {
        const times = sampleTimes(options);
        frame = Math.min(frame, times.length - 1);
-       layout = compose(q("canvas"), options, frame, sampleText.querySelector("div"), times);
+       layout = compose(canvas, options, frame, sampleText.querySelector("div"), times);
      } catch (error) {
+       layout = null;
        figure.hidden = sizes.hidden = sampleText.hidden = pager.hidden = measure.hidden = true;
        zoom.disabled = true;
        q("[data-hint]").textContent = error.message;
        return;
      }
      figure.hidden = sizes.hidden = measure.hidden = zoom.disabled = false;
+     repaint();
      sampleText.hidden = !layout.headerHeight;
      pager.hidden = !options.single;
      q("[data-tile]").textContent = (options.single ? "单张画面 " : "单格画面 ") + `${layout.width} × ${layout.height} px`;
@@ -319,11 +342,17 @@
      q("[data-next]").disabled = frame + 1 === layout.count;
    }
 
-   zoom.onclick = () => { zoom.textContent = figure.classList.toggle("is-native") ? "适应预览" : "查看原寸"; };
+   zoom.onclick = () => {
+     zoom.textContent = figure.classList.toggle("is-native") ? "适应预览" : "查看原寸";
+     repaint();
+   };
    q("[data-prev]").onclick = () => { frame--; update(); };
    q("[data-next]").onclick = () => { frame++; update(); };
    select(selectedTab);
-   return {root, update, select};
+   return {root, update, select, destroy() {
+     observer.disconnect();
+     window.removeEventListener("resize", repaint);
+   }};
  }
 
  function fields(value, onChange) {

@@ -1,16 +1,21 @@
+.final-ui .app-main > #settings-view:has(.screenshot-settings),
+#settings-content:has(> .screenshot-settings) {
+  max-width: none;
+}
+#settings-content:has(> .screenshot-settings) {
+  container: screenshot-area / inline-size;
+}
 .screenshot-settings {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: clamp(340px, 32%, 435px) minmax(0, 1fr);
+  align-items: start;
   gap: 22px;
 }
 .screenshot-settings > div,
 .screenshot-settings > .screenshot-preview {
-  flex: 1 1 min(100%, 360px);
   min-inline-size: 0;
 }
 .screenshot-settings > div { container: screenshot-form / inline-size; }
-.screenshot-settings > .screenshot-preview { flex-grow: 1.35; }
 .screenshot-settings [hidden] { display: none !important; }
 .screenshot-settings-tabs { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 12px; }
 .screenshot-settings-tabs [aria-pressed=true] { color: var(--ws-accent, #306b55); font-weight: 600; }
@@ -45,17 +50,25 @@
   display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; margin: 10px 0;
   padding: 8px; border-radius: 6px; background: var(--ws-surface-2, #e9ede8);
 }
-.screenshot-preview-figure canvas { display: block; max-width: 100%; max-height: 370px; object-fit: contain; }
-.screenshot-preview-figure.is-native {
-  display: block; overflow: auto; max-height: 360px;
+.screenshot-preview-figure canvas {
+  display: block;
+  width: min(100%, calc(72svh * var(--canvas-ratio, 1)));
+  height: auto;
+  aspect-ratio: var(--canvas-ratio, 1);
 }
-.screenshot-preview-figure.is-native canvas { max-width: none; max-height: none; width: var(--canvas-width); }
+.screenshot-preview-figure.is-native {
+  display: block; overflow: auto; max-height: 72svh;
+}
+.screenshot-preview-figure.is-native canvas { max-width: none; width: var(--canvas-width); }
 .screenshot-preview-size { margin: 8px 0; }
 .screenshot-preview-nav { margin-top: 6px; }
 .screenshot-info-sample { margin-top: 14px; }
 .screenshot-info-sample > div {
   background: white; color: #263229; padding: 8px;
   overflow-x: auto; white-space: pre; border-radius: 5px;
+}
+@container screenshot-area (width < 740px) {
+  .screenshot-settings { grid-template-columns: minmax(0, 1fr); }
 }
 @container screenshot-form (width < 340px) {
   .settings-content .screenshot-settings .settings-field:not(.settings-switch-field) {

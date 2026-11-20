@@ -179,6 +179,7 @@ def test_screenshot_settings_keep_labels_and_preview_inside_available_width(live
     base_url, _ = live_server
     playwright, browser, page, errors = browser_session(base_url, legacy=False)
     try:
+        page.evaluate('Object.defineProperty(window, "devicePixelRatio", {value: 2})')
         page.locator("#settings-entry").click()
         page.locator('.settings-group-button[data-group="collage"]').click()
         page.locator("#setting-screenshot_output_mode").select_option("collage")
@@ -189,14 +190,24 @@ def test_screenshot_settings_keep_labels_and_preview_inside_available_width(live
         figure = layout.locator(".screenshot-preview-figure")
         canvas = figure.locator("canvas")
         expect(canvas).to_be_visible()
-        for width in (1440, 1097, 768, 390, 320):
+        for width in (2200, 1440, 1097, 768, 390, 320):
             page.set_viewport_size({"width": width, "height": 900})
+            page.wait_for_function("""() => {
+                const canvas = document.querySelector(".screenshot-preview canvas");
+                const width = canvas.getBoundingClientRect().width;
+                return width > 0 && Math.abs(canvas.width - width * devicePixelRatio) < 2;
+            }""")
             measurements = layout.evaluate("""panel => {
                 const copy = panel.querySelector('[data-setting-key="screenshot_output_mode"] .settings-field-copy');
                 const control = panel.querySelector('#setting-screenshot_output_mode');
                 const figure = panel.querySelector('figure');
                 const bounds = panel.getBoundingClientRect();
+                const canvas = panel.querySelector('canvas');
+                const preview = canvas.getBoundingClientRect();
                 return {
+                    previewWidth: preview.width,
+                    previewRatio: preview.width / preview.height,
+                    bitmapRatio: canvas.width / canvas.height,
                     labelWidth: copy.clientWidth,
                     formOverflow: control.getBoundingClientRect().right - bounds.right,
                     figureOverflow: figure.scrollWidth - figure.clientWidth,
@@ -207,11 +218,18 @@ def test_screenshot_settings_keep_labels_and_preview_inside_available_width(live
             assert measurements["formOverflow"] <= 1, (width, measurements)
             assert measurements["figureOverflow"] <= 1, (width, measurements)
             assert measurements["canvasOverflow"] <= 1, (width, measurements)
+            assert abs(measurements["previewRatio"] - measurements["bitmapRatio"]) < 0.06, (width, measurements)
+            if width == 2200:
+                assert measurements["previewWidth"] > 1100, measurements
 
         layout.get_by_role("button", name="查看原寸").click()
         assert figure.evaluate("element => element.scrollWidth > element.clientWidth")
         layout.get_by_role("button", name="适应预览").click()
         assert figure.evaluate("element => element.scrollWidth <= element.clientWidth + 1")
+        # The wider settings shell is scoped to screenshot settings.
+        page.set_viewport_size({"width": 2200, "height": 900})
+        page.locator('.settings-group-button[data-group="general"]').click()
+        assert page.locator("#settings-content").evaluate("element => element.clientWidth") <= 880
         assert not errors
     finally:
         browser.close()
