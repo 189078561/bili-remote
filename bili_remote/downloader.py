@@ -23,6 +23,7 @@ from .bili import (
     BiliAuthService,
     BiliTVAuthError,
     BiliTVRegionError,
+    BiliTvClient,
 )
 from .config import Settings
 from .database import Database, utc_now
@@ -59,10 +60,6 @@ TV_CDN_BLOCKED_MESSAGE = (
 MIN_FORMAT_HEIGHT = 1080
 ARIA2_STABLE_CONNECTIONS = 8
 ARIA2_STABLE_FLOOR_CONNECTIONS = 4
-TV_STREAM_USER_AGENT = (
-    "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36"
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1277,9 +1274,7 @@ class YtDlpRunner:
             int(item.get("quality") or 0): item
             for item in dash.get("support_formats") or []
         }
-        headers = {
-            "User-Agent": TV_STREAM_USER_AGENT,
-        }
+        headers = BiliTvClient.stream_headers
         formats: list[dict[str, Any]] = []
         by_id: dict[str, dict[str, Any]] = {}
         videos = list(dash.get("video") or [])
@@ -1628,6 +1623,10 @@ class YtDlpRunner:
                 if playback["expires"] <= time():
                     raise DownloadFailure("本机解析地址已过期，请从解析助手重新推送")
                 info_payload = playback["info"]
+                if api_mode == "tv":
+                    # Replay saved TV jobs with the same CDN headers as direct TV downloads.
+                    for track in info_payload["formats"]:
+                        track["http_headers"] = BiliTvClient.stream_headers
             except (ValueError, KeyError, TypeError) as exc:
                 raise DownloadFailure("本机解析资料不可用，请从解析助手重新推送") from exc
             info_path = self.settings.runtime_dir / f"browser-info-{secrets.token_hex(12)}.json"

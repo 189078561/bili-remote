@@ -262,6 +262,9 @@ class BiliTvClient:
         "(KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36"
     )
 
+    # TV CDN requests use the TV player user agent without a Web Referer.
+    stream_headers = {"User-Agent": user_agent}
+
     def __init__(self, max_sessions: int = 5) -> None:
         self.max_sessions = max_sessions
         self._sessions: dict[str, PendingTVQR] = {}

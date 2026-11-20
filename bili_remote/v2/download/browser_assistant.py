@@ -13,6 +13,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from fastapi import Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
+from ...bili import BiliTvClient
 from .naming import NameOptions, download_plan, episode_display_title, episode_facts, url_facts
 
 MAX_BODY = 12 * 1024 * 1024
@@ -131,9 +132,7 @@ def presentation(catalogue, queued):
 
 
 def playback_info(title, display_title, ep, video, audio, source):
-    headers = HEADERS if source == "web" else {
-        **HEADERS, "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/134.0.0.0 Mobile Safari/537.36",
-    }
+    headers = BiliTvClient.stream_headers if source == "tv" else HEADERS
     formats = []
     for track_id, track in (("brvideo", video), ("braudio", audio)):
         if track is None:

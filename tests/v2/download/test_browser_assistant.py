@@ -56,6 +56,7 @@ def test_handoff_enforces_auth_and_only_queues_exact_tracks(settings, monkeypatc
 def test_movie_tv_push_uses_movie_title_and_locks_locally_resolved_audio(settings, monkeypatch):
     import json
 
+    from bili_remote.bili import BiliTvClient
     from bili_remote.v2.download.naming import initial_filename
 
     app = create_app(settings)
@@ -80,6 +81,8 @@ def test_movie_tv_push_uses_movie_title_and_locks_locally_resolved_audio(setting
         plan = service.database.get_download_naming(job_id)["plan"]
         playback = json.loads(service.secrets.decrypt_json(plan["assistant_playback"]))
         assert playback["info"]["title"] == "四海"
+        assert playback["info"]["formats"][0]["http_headers"] == BiliTvClient.stream_headers
+        assert "Referer" not in BiliTvClient.stream_headers
         assert [track["url"] for track in playback["info"]["formats"]] == [EPISODE["audio"][0]["url"]]
         assert initial_filename(plan, "m4a") == "四海.m4a"
         assert initial_filename(plan, collision=2) == "四海 (2).mp4"
@@ -92,3 +95,47 @@ def test_movie_tv_push_uses_movie_title_and_locks_locally_resolved_audio(setting
         # Session credentials cannot be carried in a media URL.
         episode = {**EPISODE, "audio": [{**EPISODE["audio"][0], "url": EPISODE["audio"][0]["url"] + "&access_key=redacted"}]}
         assert client.post("/api/parse-assistant/imports", json={**catalogue, "episodes": [episode]}, headers=csrf).status_code == 422
+
+
+def test_retry_saved_tv_push_removes_web_referer(settings, monkeypatch, tmp_path):
+    import asyncio
+    import json
+    import time
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from bili_remote.bili import BiliTvClient
+    from bili_remote.downloader import YtDlpRunner
+    from bili_remote.security import SecretBox
+
+    settings.ensure_directories()
+    secret = SecretBox(settings.app_secret)
+    runner = YtDlpRunner(settings, SimpleNamespace(secret_box=secret))
+    saved = {
+        "expires": time.time() + 60,
+        "info": {
+            "formats": [
+                {"format_id": key, "url": EPISODE[kind][0]["url"],
+                 "http_headers": {"Referer": "https://www.bilibili.com/", "User-Agent": "older UA"}}
+                for key, kind in (("brvideo", "video"), ("braudio", "audio"))
+            ],
+        },
+    }
+
+    async def start(*args, **kwargs):
+        updated = json.loads(Path(args[args.index("--load-info-json") + 1]).read_text())
+        assert len(updated["formats"]) == 2
+        for old, track in zip(saved["info"]["formats"], updated["formats"]):
+            assert track["url"] == old["url"]
+            assert track["format_id"] == old["format_id"]
+            assert track["http_headers"] == BiliTvClient.stream_headers
+            assert "Referer" not in track["http_headers"]
+        return SimpleNamespace(stdout=None, stderr=None, wait=AsyncMock(return_value=0))
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", start)
+    job = {"id": 7, "api_mode": "tv", "source_url": EPISODE["url"],
+           "format_selector": "(brvideo+braudio)", "output_template": "%(id)s.%(ext)s",
+           "_assistant_playback": secret.encrypt_json(json.dumps(saved))}
+    asyncio.run(runner.download(job, tmp_path, tmp_path / "job.log", AsyncMock()))
+    assert not list(settings.runtime_dir.glob("browser-info-*.json"))
