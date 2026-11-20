@@ -99,3 +99,106 @@ def test_uncached_selected_track_validates_one_byte(monkeypatch, status, span, e
 
     monkeypatch.setattr("bili_remote.v2.download.aria2c_range.urlopen", respond)
     assert selected_track_size(track, url) == (6917295620 if verified else None)
+
+
+@pytest.mark.asyncio
+async def test_confirmed_transfer_races_real_ranges_and_closes_losing_requests(monkeypatch, settings):
+    import asyncio
+    from collections import Counter
+
+    settings.tv_cdn_probe_enabled = True
+    runner = YtDlpRunner(settings, None)
+    runner.aria2_executable = "aria2c"
+    slow, fast, wrong = (f"https://{host}.test/video.m4s" for host in ("slow", "fast", "wrong"))
+    size = 24 * 1024**2
+    reads = Counter()
+    closed = Counter()
+
+    async def serve(request):
+        host = request.url.host
+        reads[host] += 1
+        assert request.headers["accept-encoding"] == "identity"
+        assert request.headers["referer"] == "https://www.bilibili.com/"
+        start, end = map(int, request.headers["range"][6:].split("-"))
+        if host == "slow.test":
+            try:
+                await asyncio.Event().wait()
+            finally:
+                closed[host] += 1
+        if host == "wrong.test":
+            return httpx.Response(200, content=b"wrong representation")
+        assert start in (0, 4 * 1024**2)
+        assert end - start + 1 == settings.cdn_probe_sample_bytes // 2
+        return httpx.Response(206, headers={"Content-Range": f"bytes {start}-{end}/{size}"},
+                              content=b"x" * (end - start + 1))
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(serve))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **_: client)
+    track = {"format_id": "30112", "url": slow, "acodec": "none", "filesize": size,
+             "_cdn_candidates": [slow, wrong, fast], "http_headers": {"Referer": "https://www.bilibili.com/"}}
+    await runner._rank_cdn_candidates([track], candidate_key="_cdn_candidates",
+                                      drop_unavailable=False, confirmed=True)
+    assert track["url"] == fast and track["_cdn_range_sizes"] == {fast: size}
+    assert track["_cdn_candidates"] == [fast, slow, wrong]
+    assert reads == {"fast.test": 2, "wrong.test": 2, "slow.test": 2}
+    assert closed == {"slow.test": 2}
+
+
+@pytest.mark.asyncio
+async def test_mirror_race_rejects_unrelated_tracks_bad_lengths_and_weak_range_responses():
+    from bili_remote.v2.download.cdn import race_mirrors
+
+    urls = ["https://a.test/v", "https://a.test/v?dup", "https://b.test/v", "https://c.test/other"]
+    size = 16 * 1024**2
+    seen = []
+
+    def serve(request):
+        seen.append(str(request.url))
+        start, end = map(int, request.headers["range"][6:].split("-"))
+        # One host sends a short body. The other returns a different total.
+        total = size if request.url.host == "a.test" else size + 10
+        length = end - start + (0 if total == size else 1)
+        return httpx.Response(206, headers={"Content-Range": f"bytes {start}-{end}/{total}"},
+                              content=b"x" * length)
+
+    args = dict(expected_size=size, sample_bytes=256, timeout=.5, connections=8)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as client:
+        assert await race_mirrors(client, urls, {}, **args) is None
+        assert seen.count(urls[0]) == seen.count(urls[2]) == 2 and len(seen) == 4
+        seen.clear()
+        for overrides in ({"expected_size": 2048}, {"connections": 2}):
+            assert await race_mirrors(client, urls, {}, **(args | overrides)) is None
+        assert not seen
+
+
+@pytest.mark.asyncio
+async def test_range_race_deadline_releases_connections_before_fallback(settings, monkeypatch):
+    import asyncio
+    from bili_remote.downloader import CDNProbe
+
+    settings.tv_cdn_probe_enabled = True
+    settings.cdn_probe_timeout_seconds = .05
+    runner = YtDlpRunner(settings, None)
+    runner.aria2_executable = "aria2c"
+    urls = ["https://a.test/v", "https://b.test/v"]
+    active = set()
+
+    async def serve(request):
+        key = (request.url.host, request.headers["range"])
+        active.add(key)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            active.remove(key)
+
+    async def previous_probe(client, url, headers):
+        assert not active
+        return CDNProbe(10, 8388608) if url == urls[1] else None
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(serve))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client)
+    runner._probe_tv_url = previous_probe
+    track = {"url": urls[0], "vcodec": "avc", "acodec": "none", "_tv_candidates": urls}
+    result = await runner._prepare_tv_formats([track], confirmed=True)
+    assert result == [track] and track["url"] == urls[1]
+    assert "_cdn_sample" not in track

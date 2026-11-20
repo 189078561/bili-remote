@@ -28,6 +28,7 @@ from .config import Settings
 from .database import Database, utc_now
 from .security import redact_sensitive
 from .validation import ValidationError, canonicalize_bilibili_url
+from .v2.download.cdn import race_mirrors
 from .v2.download.finalize import cleanup_staging, finalize_download, staging_directory
 from .v2.download.naming import displayed_episode_number, positive_number, url_facts
 from .v2.download.quality import exact_tracks, preview_tracks
@@ -639,7 +640,7 @@ class YtDlpRunner:
                     formats = [item for item in formats if item["format_id"] in locked]
                     if {item["format_id"] for item in formats} != set(locked):
                         raise DownloadFailure("预览确认的 TV 格式已不可用，请重新检测画质")
-                formats = await self._prepare_tv_formats(formats)
+                formats = await self._prepare_tv_formats(formats, confirmed=bool(locked))
             if not formats:
                 raise DownloadFailure(TV_CDN_BLOCKED_MESSAGE)
             origin = {"bvid": None, "season_id": None, "ep_id": None, "cid": str(cid), "original_title": None, "episode_index": None}
@@ -774,11 +775,13 @@ class YtDlpRunner:
         # An exact video+audio request needs no warm-up on unselected tracks.
         ids = set(locked or selector.split("+"))
         selected = [item for item in formats if item.get("format_id") in ids]
+        found_selection = ids == {item["format_id"] for item in selected}
         await self._rank_cdn_candidates(
-            selected if ids == {item["format_id"] for item in selected} else formats,
+            selected if found_selection else formats,
             candidate_key="_cdn_candidates",
             drop_unavailable=False,
             max_items=12,
+            confirmed=bool(locked and found_selection),
         )
         origin = {"bvid": payload.get("bvid"), "cid": str(cid) if cid else None,
                   "season_id": str(payload["season_id"]) if payload.get("season_id") else None,
@@ -1363,10 +1366,10 @@ class YtDlpRunner:
         return formats
 
     async def _prepare_tv_formats(
-        self, formats: list[dict[str, Any]]
+        self, formats: list[dict[str, Any]], *, confirmed: bool = False
     ) -> list[dict[str, Any]]:
         return await self._rank_cdn_candidates(
-            formats, candidate_key="_tv_candidates", drop_unavailable=True
+            formats, candidate_key="_tv_candidates", drop_unavailable=True, confirmed=confirmed
         )
 
     async def _rank_cdn_candidates(
@@ -1376,6 +1379,7 @@ class YtDlpRunner:
         candidate_key: str,
         drop_unavailable: bool,
         max_items: int | None = None,
+        confirmed: bool = False,
     ) -> list[dict[str, Any]]:
         if not formats or not self.settings.tv_cdn_probe_enabled:
             return formats
@@ -1397,6 +1401,11 @@ class YtDlpRunner:
                 if item not in selected
                 and str(item.get("acodec") or "none") != "none"
             )
+        parallel_transfer = self.aria2_executable and self.settings.aria2_connections > 1
+        compare_ranges = (
+            confirmed and parallel_transfer and self.settings.cdn_probe_connections >= 4
+            and any(len(item.get(candidate_key) or []) > 1 for item in selected)
+        )
         semaphore = asyncio.Semaphore(self.settings.cdn_probe_connections)
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(self.settings.cdn_probe_timeout_seconds, connect=2.5),
@@ -1419,6 +1428,27 @@ class YtDlpRunner:
                     return True
                 headers = dict(item.get("http_headers") or {})
 
+                prefer_ranges = (
+                    parallel_transfer and "none" in (item.get("vcodec"), item.get("acodec"))
+                    and not item.get("fragments")
+                )
+                if compare_ranges and prefer_ranges and len(deduped) > 1:
+                    sample = await race_mirrors(
+                        client, deduped, headers, expected_size=item.get("filesize"),
+                        sample_bytes=self.settings.cdn_probe_sample_bytes,
+                        timeout=self.settings.cdn_probe_timeout_seconds,
+                        connections=self.settings.cdn_probe_connections,
+                    )
+                    if sample:
+                        item["url"] = sample.url
+                        item[candidate_key] = [sample.url, *(url for url in deduped if url != sample.url)]
+                        item["_cdn_range_sizes"] = {sample.url: sample.size}
+                        item["_cdn_sample"] = (
+                            f"{sample.hosts} 个同轨节点，选用 {urlsplit(sample.url).hostname}，"
+                            f"双分片实测 {sample.speed / 1024**2:.1f} MiB/s"
+                        )
+                        return True
+
                 async def probe(url: str) -> CDNProbe | None:
                     async with semaphore:
                         return await self._probe_tv_url(client, url, headers)
@@ -1437,11 +1467,6 @@ class YtDlpRunner:
                         return False
                     item[candidate_key] = deduped
                     return True
-                prefer_ranges = (
-                    self.aria2_executable and self.settings.aria2_connections > 1
-                    and "none" in (item.get("vcodec"), item.get("acodec"))
-                    and not item.get("fragments")
-                )
                 speeds.sort(key=lambda pair: (bool(prefer_ranges and pair[0] in sizes), pair[1]), reverse=True)
                 ordered = [url for url, _ in speeds]
                 if original and original not in ordered:
@@ -1453,7 +1478,12 @@ class YtDlpRunner:
                 item[candidate_key] = ordered
                 return True
 
-            available = await asyncio.gather(*(choose(item) for item in selected))
+            if compare_ranges:
+                # A confirmed selection has at most one video and one audio track.
+                # Compare them separately to stay within the per-job connection budget.
+                available = [await choose(item) for item in selected]
+            else:
+                available = await asyncio.gather(*(choose(item) for item in selected))
         if not drop_unavailable:
             return formats
         available_ids = {
@@ -1769,6 +1799,9 @@ class YtDlpRunner:
                     log_file.write(
                         f"\n[{utc_now()}] 未检测到 aria2c，使用 yt-dlp 原生下载\n"
                     )
+                for track in (info_payload or {}).get("formats", []):
+                    if track.get("_cdn_sample"):
+                        log_file.write(f"[{utc_now()}] {track['format_id']}：{track['_cdn_sample']}\n")
                 if cdn_warning:
                     log_file.write(f"[{utc_now()}] {cdn_warning}\n")
                 log_file.flush()
