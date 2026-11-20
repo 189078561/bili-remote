@@ -806,15 +806,19 @@ def test_v2_task_artifact_refs_feed_upload_links_and_composition(live_server):
         tasks[0] = {**queued, 'status': 'completed', 'artifact_refs': [artifact], 'finished_at': '2026-11-04T00:00:00Z'}
         show_panel(page, 'images')
         expect(page.locator('[data-wb="upload-links"] a')).to_have_attribute('href', artifact['url'])
+        page.add_style_tag(url="/static/styles.css")
+        checkbox = page.get_by_role("checkbox", name="加入发布正文")
+        expect(checkbox).to_have_css("width", "16px")
+        expect(checkbox).to_have_css("height", "16px")
         page.wait_for_timeout(350)
         compositions = [payload for path, payload in requests if path == 'publishing/preview']
         assert artifact in compositions[-1]['screenshots']
         assert not compositions[-1].get('links')
         with page.expect_request('**/api/v2/publishing/preview') as pending:
-            page.get_by_role("checkbox", name="加入发布正文").uncheck()
+            checkbox.uncheck()
         assert not pending.value.post_data_json["screenshots"]
         with page.expect_request('**/api/v2/publishing/preview') as pending:
-            page.get_by_role("checkbox", name="加入发布正文").check()
+            checkbox.check()
         assert pending.value.post_data_json["screenshots"] == [artifact]
         assert not errors, errors
     finally:
@@ -1307,8 +1311,8 @@ def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server)
     try:
         from bili_remote.v2.workbench.publishing import PublishingService
 
-        v2_fixture(page, requests, {"media_type": "anime", "tmdb_id": "8"})
-        cover = "https://image.tmdb.org/t/p/original/fixture.jpg"
+        v2_fixture(page, requests, {"media_type": "anime", "tmdb_id": "8", "confirmed": True})
+        cover = "https://image.tmdb.org/t/p/w92/fixture.jpg"
         intro = "◎译　　名　慕兰之战\n◎片　　名　凡人修仙传 年番4\n◎年　　代　2026\n◎编　　剧　篇章编剧\n\n◎简　　介\n\n　　篇章剧情"
         failed_reference = "12345"
 
@@ -1325,12 +1329,15 @@ def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server)
             assert payload["overview_is_introduction"] is True
             context = payload["context"]
             context["metadata"]["year"] = {"value": 2020, "source": "tmdb"}
-            context["metadata"]["poster_url"] = {"value": cover, "source": "tmdb"}
             route.fulfill(json=PublishingService().compose(
                 context, payload["release_title"], payload["subtitle"], payload["overview"],
                 format=payload["format"], overview_is_introduction=payload["overview_is_introduction"],
+                introduction_poster=payload["introduction_poster"],
             ))
 
+        page.route("**/api/v2/metadata/search?*", lambda route: route.fulfill(json={"items": [
+            {"title": "凡人修仙传", "id": "8", "provider": "tmdb", "media_type": "anime", "poster_url": cover},
+        ]}))
         page.route("**/api/v2/publishing/introduction", introduction)
         page.route("**/api/v2/publishing/preview", preview)
         mount(page)
@@ -1342,6 +1349,11 @@ def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server)
         expect(editor).to_have_value("")
         expect(page.locator("[data-wb=output]")).not_to_contain_text("2020")
         assert not [payload for name, payload in requests if name == "publishing/introduction"]
+        expect(page.locator("[data-wb=validation]")).to_contain_text("暂无封面")
+        page.locator("[data-wb=query]").fill("凡人修仙传")
+        page.locator("[data-action=search]").click()
+        page.locator("[data-wb=candidates] button").click()
+        expect(page.locator("[data-wb=output]")).to_have_text(f"[img]{cover}[/img]")
         query = page.locator("[data-wb=intro-query]")
         fetch = page.locator("[data-wb=intro-fetch]")
         query.fill("https://movie.douban.com/subject/37457082/")

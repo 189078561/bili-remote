@@ -9,7 +9,7 @@ from ..naming.errors import NamingError
 from .markup import format_description
 
 
-TMDB_POSTER = re.compile(r"https://image\.tmdb\.org/t/p/(?:original|w\d+)/([\w.-]+)")
+TMDB_POSTER_PATH = re.compile(r"/t/p/(?:original|[wh]\d+(?:_[a-z0-9]+)*)/([\w.-]+)")
 INTRO_IMAGES = re.compile(
     r"\[code\][\s\S]*?\[/code\]|"
     r"(\[center\]\s*)?\[img\]([^\[\]\r\n]+)\[/img\](?(1)\s*\[/center\])",
@@ -51,6 +51,16 @@ def field_value(item):
             if key in item:
                 return item.get(key), item
     return item, {}
+
+
+def tmdb_image_id(url):
+    if not safe_url(url):
+        return None
+    parsed = urlsplit(url)
+    if parsed.netloc.lower() != "image.tmdb.org":
+        return None
+    match = TMDB_POSTER_PATH.fullmatch(parsed.path)
+    return match[1] if match else None
 
 
 def plain_text(value):
@@ -106,6 +116,22 @@ class PublishingService:
             )
         return None
 
+    def _publication_poster(self, context, candidate_poster):
+        metadata_poster, field = field_value((context.get("metadata") or {}).get("poster_url"))
+        identity = context.get("identity") or {}
+        tmdb_id = identity.get("tmdb_id")
+        if field.get("source") == "tmdb" and (not tmdb_id or field.get("source_ref") in (None, tmdb_id)):
+            if tmdb_image_id(metadata_poster):
+                return metadata_poster
+        if tmdb_image_id(candidate_poster):
+            return candidate_poster
+        if tmdb_id:
+            for candidate in context.get("identity_candidates") or []:
+                poster = candidate.get("poster_url")
+                if candidate.get("provider") == "tmdb" and str(candidate.get("id")) == tmdb_id and tmdb_image_id(poster):
+                    return poster
+        return None
+
     def _intro_values(self, context):
         metadata = context.get("metadata") or {}
         values = {}
@@ -157,21 +183,20 @@ class PublishingService:
 
     def _edited_introduction(self, overview, poster, output, seen_images):
         # Count the TMDB thumbnail and full-size versions as the same cover.
-        cover_match = TMDB_POSTER.fullmatch(poster or "")
+        cover_id = tmdb_image_id(poster)
 
         def remove_duplicate_cover(match):
             url = (match[2] or "").strip()
             if not safe_url(url):
                 return match[0]
-            poster_match = TMDB_POSTER.fullmatch(url)
             seen_images.add(url)
-            if cover_match and poster_match and poster_match[1] == cover_match[1]:
+            if cover_id and tmdb_image_id(url) == cover_id:
                 return ""
             return match[0]
 
         overview = INTRO_IMAGES.sub(remove_duplicate_cover, overview).strip("\r\n")
         blocks = []
-        if cover_match:
+        if cover_id:
             blocks.append(image_block(poster, output, "主封面"))
             seen_images.add(poster)
         if overview.strip():
@@ -213,8 +238,10 @@ class PublishingService:
 
         blocks, seen_images = [], set()
         if overview_is_introduction:
-            poster = self._tmdb_poster(context, warnings) or introduction_poster
+            poster = self._publication_poster(context, introduction_poster)
             introduction = self._edited_introduction(overview, poster, format, seen_images)
+            if not seen_images:
+                notices.append({"code": "missing_poster", "message": "暂无封面，可匹配 TMDB 作品或在简介中添加封面图片"})
         else:
             introduction, poster = self._introduction(context, overview, format, warnings)
             if poster:

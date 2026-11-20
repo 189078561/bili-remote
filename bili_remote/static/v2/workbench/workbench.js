@@ -222,6 +222,7 @@
       this.toolTasks = new Map(); this.toolErrors = new Map(); this.resultErrors = new Map();
       this.introVersion = 0;
       this.introApplied = null; this.introPending = null;
+      this.matchedPoster = null;
       this.excludedPublishImages = new Set();
       this.buttonLabels = new WeakMap(); this.copyFeedback = new WeakMap(); this.dialogState = new WeakMap(); this.torrentIds = new Set();
       this.listen();
@@ -620,6 +621,7 @@
       this.setCollapse("overview", false);
       this.context = null; this.origins = origins; this.dirty.clear();
       this.introApplied = null;
+      this.matchedPoster = null;
       this.el("intro-applied").hidden = true;
       this.el("intro-query").value = "";
       this.resetIntroductionLookup(); this.renameBatch = null; this.el("rename-list").replaceChildren(); this.editVersion++;
@@ -700,7 +702,7 @@
         } catch(error) { this.notice(error.message, true); }
       }, 320);
     }
-    async resolve(selection = null, manual_overrides = {}, candidateButton = null) {
+    async resolve(selection = null, manual_overrides = {}, candidateButton = null, candidatePoster = null) {
       if (!this.resources.length) throw new Error("请先选择资源");
       if (this.pendingAdjustmentEpoch === this.epoch) { manual_overrides = {...this.overrides(), ...manual_overrides}; this.rememberRules(); }
       this.invalidateRename(); this.invalidateContent(); const current = this.stamp("context");
@@ -725,6 +727,9 @@
       if (!current()) return;
       if (!response.context || !Number.isInteger(response.context.revision)) throw new Error("识别服务未返回有效上下文");
       this.context = response.context;
+      if (selection?.provider === "tmdb" && response.context.identity?.tmdb_id === selection.id && response.context.identity.confirmed && candidatePoster) {
+        this.matchedPoster = {id: selection.id, url: candidatePoster};
+      }
       if (this.localNamingRule?.epoch === this.epoch) this.context.effective_rules = {...this.context.effective_rules, naming_rule:this.localNamingRule.rule, ...(this.localNamingRule.subtitle ? {subtitle_rule:this.localNamingRule.subtitle} : {})};
       this.pendingAdjustmentEpoch = null;
       this.resources = response.context.resources; this.contextChanged();
@@ -867,7 +872,7 @@
         const info=node('span',null,'wb-candidate-copy');info.append(node('strong',candidate.title||candidate.name||candidate.id),node('small',[candidate.original_title,candidate.year,({movie:'电影',series:'剧集',anime:'动画'})[candidate.media_type],candidate.provider?`${candidate.provider.toUpperCase()} #${candidate.id}`:null].filter(Boolean).join(' · ')));button.append(info);
         const poster=safeURL(candidate.poster_url);if(candidate.poster_url&&poster){const image=node('img');image.alt='';image.src=poster;image.referrerPolicy='no-referrer';image.onerror=()=>image.remove();button.prepend(image);}
         button.type = "button"; button.disabled = !this.resources.length;
-        button.onclick = () => this.withButton(button, () => this.resolve({provider: candidate.provider, id: String(candidate.id), media_type: candidate.media_type}, {}, button)); container.append(button);
+        button.onclick = () => this.withButton(button, () => this.resolve({provider: candidate.provider, id: String(candidate.id), media_type: candidate.media_type}, {}, button, candidate.poster_url)); container.append(button);
       });
     }
     clearIntroductionProposal() {
@@ -993,6 +998,7 @@
           context: this.context,
           ...this.fields,
           overview_is_introduction: true,
+          introduction_poster: this.matchedPoster?.id === this.context.identity?.tmdb_id ? this.matchedPoster?.url ?? null : null,
           reports: this.artifacts.filter(item => item.kind === "report"),
           screenshots: this.artifacts.filter(item => ["screenshot", "collage", "upload"].includes(item.kind)
             && /^https?:\/\//i.test(item.url || "") && safeURL(item.url) && !this.excludedPublishImages.has(item.url)),
@@ -1502,14 +1508,14 @@
         link.href = safeURL(url); link.target = "_blank"; link.rel = "noopener noreferrer";
         const copyUrl = node("button", "复制链接"); copyUrl.type = "button"; copyUrl.onclick = () => this.copyValue(url, copyUrl);
         const copyBBCode = node("button", "复制 BBCode"); copyBBCode.type = "button"; copyBBCode.onclick = () => this.copyValue(`[img]${url}[/img]`, copyBBCode);
-        const label = node("label"), publish = node("input");
+        const label = node("label", null, "wb-publish-image"), publish = node("input");
         publish.type = "checkbox"; publish.checked = !this.excludedPublishImages.has(url);
         publish.onchange = () => {
           if (publish.checked) this.excludedPublishImages.delete(url);
           else this.excludedPublishImages.add(url);
           this.scheduleCompose();
         };
-        label.append(publish, " 加入发布正文");
+        label.append(publish, "加入发布正文");
         row.append(preview, link, node("code", `[img]${url}[/img]`), label, copyUrl, copyBBCode); this.el("upload-links").append(row);
       });
       if (this.links.length) for (const [label, text] of [["复制全部链接", this.links.join("\n")], ["复制全部 BBCode", this.links.map(url => `[img]${url}[/img]`).join("\n")]]) {

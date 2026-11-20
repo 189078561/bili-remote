@@ -1,6 +1,32 @@
 from fastapi.testclient import TestClient
 
 from bili_remote.web import create_app
+from bili_remote.v2.workbench.publishing import PublishingService
+
+
+def test_publish_preview_keeps_matching_tmdb_search_poster_when_details_have_none():
+    thumb = "https://image.tmdb.org/t/p/w92/matched.jpg"
+    alt_size = "https://image.tmdb.org/t/p/w600_and_h900_bestv2/matched.jpg?example=1"
+    context = {
+        "revision": 1,
+        "identity": {"tmdb_id": "42"},
+        "metadata": {"poster_url": {"value": None, "source": "tmdb", "source_ref": "42"}},
+        "identity_candidates": [
+            {"provider": "tmdb", "id": "41", "poster_url": "https://image.tmdb.org/t/p/original/old.jpg"},
+            {"provider": "tmdb", "id": "42", "poster_url": thumb},
+        ],
+    }
+    intro = "◎片　　名　已匹配作品"
+    service = PublishingService()
+    result = service.compose(context, "", "", intro, overview_is_introduction=True)
+    assert result["content"] == f"[img]{thumb}[/img]\n\n{intro}"
+    result = service.compose(context, "", "", f"[img]{thumb}[/img]\n\n{intro}",
+                             overview_is_introduction=True, introduction_poster=alt_size)
+    assert result["content"] == f"[img]{alt_size}[/img]\n\n{intro}"
+    context["identity"]["tmdb_id"] = "43"
+    result = service.compose(context, "", "", intro, overview_is_introduction=True)
+    assert result["content"] == intro
+    assert any(notice["code"] == "missing_poster" for notice in result["validation"]["notices"])
 
 
 def test_publish_preview_selected_chapter_reports_and_images(settings):

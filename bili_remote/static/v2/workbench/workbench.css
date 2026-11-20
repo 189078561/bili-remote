@@ -281,6 +281,8 @@ body:has(.br-workbench :is(.wb-image-dialog,.wb-task-log-dialog)[open]) {overflo
 .wb-preview-footer {padding:8px 0;overflow-wrap:anywhere;}
 .wb-upload-link img {max-width:100%;width:100px;max-height:76px;object-fit:contain;}
 .wb-upload-link code {flex-basis:100%;overflow-wrap:anywhere;}
+.br-workbench .wb-publish-image {display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 4px;font-size:12px;cursor:pointer;}
+.wb-publish-image input[type=checkbox] {flex:none;width:16px;height:16px;min-height:16px;margin:0;padding:0;accent-color:var(--ws-accent);cursor:pointer;}
 .wb-tool-progress button {justify-self:start;}
 .wb-inline-details {max-width:100%;min-width:0;overflow-wrap:anywhere;}
 
