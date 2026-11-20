@@ -217,8 +217,8 @@ for (const [key, convert] of [["order", String], ["rows", Number]]) {
 }
 
 function publicEpisode(ep) {
-  const {url, title, number, duration, video, audio} = ep;
-  return {url, title, number, duration, video: video || [], audio: audio || []};
+  const {url, title, number, duration, naming_season_title, video, audio} = ep;
+  return {url, title, number, duration, naming_season_title, video: video || [], audio: audio || []};
 }
 async function submit(sendAll) {
   if (app.busy || !current() || !app.catalogue) return;

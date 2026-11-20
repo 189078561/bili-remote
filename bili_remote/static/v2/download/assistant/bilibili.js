@@ -54,11 +54,14 @@ export async function readTab(href, request) {
       const id = positive(item.id || item.ep_id);
       const row = {...details.get(String(id)), ...item};
       if (!id || !positive(row.cid) || !positive(row.aid)) return [];
+      const label = String(row.title || "").trim().replace(/^[\[【（(]?重[制置]版[\]】）)]?\s*/, "");
+      const seasonEpisode = /^S\d{1,3}E(\d{1,5})(?!\d)/i.exec(label);
+      const episode = /^(?:第\s*)?(\d{1,5})\s*(?:[集话話]|$)/.exec(label);
       return [{
         url: BILI_PAGE + "/bangumi/play/ep" + id,
         title: [row.title, row.long_title].filter(Boolean).join(" ").slice(0, 300) || "EP " + id,
-        number: /^(?:第\s*)?\d{1,5}(?:\s*[集话話])?$/.test(String(row.title).trim())
-          ? positive(String(row.title).match(/\d+/)?.[0]) : null,
+        number: positive((seasonEpisode || episode)?.[1]),
+        naming_season_title: String(show.season_title || "").slice(0, 300) || null,
         duration: positive(Math.round(Number(row.duration) / 1000)),
         params: {ep_id: id, cid: row.cid, avid: row.aid}, pgc: true,
       }];

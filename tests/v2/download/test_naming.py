@@ -222,3 +222,71 @@ def test_movie_classification_applies_only_to_main_feature(settings, tmp_path):
     assert result.name == "四海 (2).mp4"
     assert old.read_bytes() == b"existing movie"
     assert result.read_bytes() == b"new movie"
+
+
+def test_batch_season_preview_and_job_names_use_all_selected_episodes(settings, monkeypatch):
+    from fastapi.testclient import TestClient
+    from bili_remote.downloader import ResolvedMedia
+
+    app = create_app(settings)
+    services = app.state.services
+    monkeypatch.setattr(services.manager, "start", lambda: None)
+    raw = [
+        {"id": number, "title": f"重制版第{number}话", "long_title": "浮生若梦"}
+        for number in range(1, 11)
+    ] + [
+        {"id": 21, "title": "1", "long_title": "故人归来"},
+        {"id": 31, "title": "第三季第3集"},
+        {"id": 40, "title": "", "long_title": ""},
+    ]
+    episodes, _ = services.runner._build_episodes(
+        {"season_title": "第二季"}, {"main_section": {"episodes": raw}}
+    )
+
+    async def resolve(url, mode):
+        return ResolvedMedia("镇魂街 第二季", "", None, url, True, len(episodes), [], episodes, "1", mode)
+
+    monkeypatch.setattr(services.runner, "resolve", resolve)
+    with TestClient(app) as client:
+        login = client.post("/api/auth/login", json={"username": "admin", "password": "test-password"})
+        client.headers["X-CSRF-Token"] = login.json()["csrf"]
+        resolved = client.post("/api/resolve", json={"url": SERIES_URL}).json()
+        facts = resolved["naming_items"]
+        assert facts["40"]["number"] is None
+        assert facts["10"]["number"] == 10
+        assert facts["10"]["remaster"]
+
+        def preview(ids, overrides=None):
+            response = client.post("/api/download/naming/preview", json={
+                "options": {"episode_numbers": overrides or {}},
+                "title": "镇魂街 第二季",
+                "items": [facts[str(number)] for number in ids],
+            })
+            assert response.status_code == 200, response.text
+            return response.json()
+
+        def submit(ids, overrides=None):
+            return client.post("/api/jobs/batch", json={
+                "url": SERIES_URL, "episode_ids": [str(number) for number in ids],
+                "naming": {"title": "镇魂街 第二季", "episode_numbers": overrides or {}},
+            })
+
+        assert preview([10])["items"] == ["镇魂街.E10.mp4"]
+        assert preview([10, 21, 31]) == {
+            "items": ["镇魂街.E10.mp4", "镇魂街.S02E01.mp4", "镇魂街.S03E03.mp4"],
+            "seasons": [2, 3], "mixed_seasons": True,
+        }
+        ids = [*range(2, 11), 21]
+        guessed = preview(ids)
+        assert guessed["items"] == [f"镇魂街.S02E{number:02d}.mp4" for number in range(2, 10)]
+        assert guessed["seasons"] == [2]
+        result = submit(ids)
+        assert result.status_code == 200, result.text
+        plans = [services.database.get_download_naming(job)["plan"] for job in result.json()["ids"]]
+        assert [initial_filename(plan) for plan in plans] == [
+            *guessed["items"], "镇魂街.S02E10.mp4", "镇魂街.S02E01.mp4"
+        ]
+
+        assert preview([1, 21])["conflicts"] == ["镇魂街.S02E01.mp4"]
+        assert submit([1, 21]).status_code == 409
+        assert submit([1, 21], {"1": 11}).status_code == 200

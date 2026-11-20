@@ -67,7 +67,10 @@ from .validation import (
 )
 from .v2.download import project_download_job
 from .v2.download.quality import exact_tracks
-from .v2.download.naming import NameOptions, NamePreviewRequest, download_display_title, download_plan, episode_facts, initial_filename, url_facts, without_video_part
+from .v2.download.naming import (
+    NameOptions, NamePreviewRequest, batch_download_plans, conflicting_filenames, download_display_title,
+    download_plan, episode_facts, initial_filename, url_facts, without_video_part,
+)
 from .workspace import (
     WorkspaceError,
     normalize_relative_path,
@@ -974,13 +977,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         if payload.options.mode == "source":
             return {"items": []}
-        items = []
-        for facts in payload.items:
-            identifier = facts.identifier or ""
-            episode_id = identifier[2:] if identifier.startswith("ep") else None
-            plan = download_plan(payload.title, facts, payload.options, episode_id=episode_id)
-            items.append(initial_filename(plan))
-        return {"items": items}
+        plans, mixed_seasons = batch_download_plans(payload.title, payload.items, payload.options)
+        response = {"items": [initial_filename(plan) for plan in plans[:8]]}
+        if mixed_seasons:
+            response["mixed_seasons"] = True
+        if any(plan.get("season") for plan in plans):
+            response["seasons"] = sorted({plan["season"] for plan in plans if plan.get("season")})
+        conflicts = conflicting_filenames(plans)
+        if conflicts:
+            response["conflicts"] = conflicts
+        return response
 
     @app.post("/api/resolve")
     async def resolve(
@@ -1197,8 +1203,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             selector = validate_format_selector(payload.format_selector)
         jobs = []
-        facts = episode_facts(resolved.episodes)
-        for episode in selected:
+        plans = [None] * len(selected)
+        if payload.naming and payload.naming.mode == "smart":
+            facts = episode_facts(resolved.episodes)
+            plans, _ = batch_download_plans(
+                resolved.title, [facts[str(item["id"])] for item in selected], payload.naming,
+            )
+            if conflicts := conflicting_filenames(plans):
+                raise HTTPException(409, "本批文件名重复，请调整集号：" + "、".join(conflicts[:3]))
+        for episode, plan in zip(selected, plans, strict=True):
             template = render_episode_template(
                 output_template,
                 season_title=resolved.title,
@@ -1216,9 +1229,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "all_parts": False,
                     "output_template": template,
                     "output_dir": output_dir,
-                    "naming_plan": download_plan(resolved.title, facts[str(episode["id"])], payload.naming,
-                                                  episode_id=str(episode["id"]))
-                    if payload.naming and payload.naming.mode == "smart" else None,
+                    "naming_plan": plan,
                     "title": resolved.title if episode.get("movie") else episode.get("title"),
                     "uploader": resolved.uploader,
                     "log_path": str(create_job_log_path(service_container.settings)),
@@ -1340,6 +1351,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "is_playlist": bool(record.get("is_playlist")),
             "formats": formats,
             "episodes": episodes,
+            "naming_items": {key: facts.model_dump() for key, facts in episode_facts(episodes).items()},
             "bili_logged_in": status["logged_in"],
             "tv_logged_in": status["tv_logged_in"],
         }

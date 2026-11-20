@@ -940,10 +940,11 @@ class YtDlpRunner:
                     if duration_ms and float(duration_ms) > 1000
                     else int(float(duration_ms or 0))
                 )
+                label = str(item.get("title") or detail.get("title") or "").strip()
                 title = " ".join(
                     part
                     for part in (
-                        str(item.get("title") or detail.get("title") or "").strip(),
+                        label,
                         str(
                             item.get("long_title")
                             or detail.get("long_title")
@@ -955,7 +956,9 @@ class YtDlpRunner:
                 result.append(
                     {
                         "id": ep_id,
-                        "display_episode_number": displayed_episode_number(item.get("title") or detail.get("title")) if group_title == "正片" else None,
+                        "display_episode_number": displayed_episode_number(label) if group_title == "正片" else None,
+                        "naming_label": label,
+                        "naming_season_title": season.get("season_title"),
                         "chapter_title": str(item.get("long_title") or detail.get("long_title") or ""),
 
                         "index": len(result) + 1,

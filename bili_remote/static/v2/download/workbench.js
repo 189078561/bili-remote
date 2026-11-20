@@ -176,39 +176,6 @@
     return /预告|先导|trailer|teaser/i.test(episode.title || "") ? "预告" : "花絮";
   }
 
-  function savedEpisodeNumber(episode) {
-    if (episode.group !== "正片") return null;
-    let number = episode.display_episode_number;
-    // Older snapshots joined the platform's episode label and chapter as
-    // "1 来世，你可以找我报仇". A null field in newer data is already evaluated.
-    if (!Object.hasOwn(episode, "display_episode_number")) {
-      const title = String(episode.title || "").trim();
-      const match = title.match(/^(?:第\s*(\d{1,5})\s*[集话話]|(\d{1,5})(?=\s|$))/);
-      if (match) number = Number(match[1] || match[2]);
-    }
-    return Number.isInteger(number) && number >= 1 && number <= 99999 ? number : null;
-  }
-
-  function savedEpisodeNamingFacts(episodes) {
-    const counts = new Map();
-    const numbers = episodes.map(savedEpisodeNumber);
-    for (const number of numbers) {
-      if (number !== null) counts.set(number, (counts.get(number) || 0) + 1);
-    }
-    return Object.fromEntries(episodes.map((episode, index) => {
-      const id = String(episode.id);
-      const number = counts.get(numbers[index]) === 1 ? numbers[index] : null;
-      return [id, {
-        identifier: /^\d{1,20}$/.test(id) ? `ep${id}` : null,
-        number_kind: number === null ? null : "episode",
-        number,
-        movie: episode.movie === true,
-        chapter: String(episode.chapter_title || "").slice(0, 300) || null,
-        extra_title: episode.group && episode.group !== "正片" ? String(episode.title || "").trim().slice(0, 300) || null : null
-      }];
-    }));
-  }
-
   function mount(root, options = {}) {
     if (!root) throw new TypeError("download workbench root is required");
     const api = options.api || createApi();
@@ -224,7 +191,7 @@
       historyVersion: 0,
       selected: new Set(), categories: new Map(), category: null, activeEpisodeId: null,
       selectionsBySource: new Map(),
-      namingNumbers: new Map(), namingRequest: 0, namingTimer: null, namingAbort: null
+      namingNumbers: new Map(), namingRequest: 0, namingTimer: null, namingAbort: null, namingConflicts: false
     };
     const form = $("[data-download-form]");
     const urlField = $("#dv2-url");
@@ -279,7 +246,7 @@
       const source = state.batchPlan?.mode || state.resolved?.api_mode || modeField.value;
       $('[data-summary-source]').textContent = state.batchPlan?.mixed ? "片源不同，请分批选择" : modeLabel(source);
       $('[data-quality-source]').textContent = state.batchPlan?.mixed ? "片源不同" : modeLabel(source);
-      form.querySelector('button[type=submit]').disabled = state.submitting || Boolean(state.batchPlan && !state.batchPlan.ready) || Boolean(state.resolved?.assistant && !count);
+      form.querySelector('button[type=submit]').disabled = state.submitting || state.namingConflicts || Boolean(state.batchPlan && !state.batchPlan.ready) || Boolean(state.resolved?.assistant && !count);
       $('[data-submit-summary]').textContent = `已选 ${count} ${state.resolved?.episodes?.length ? episodeUnit() : '个视频'}`;
       form.querySelector('button[type=submit]').textContent = state.submitting ? '正在提交…' : `开始下载${count ? ` · ${count} ${state.resolved?.episodes?.length ? episodeUnit() : '项'}` : ''}`;
     }
@@ -357,17 +324,16 @@
       clearTimeout(state.namingTimer);
       state.namingAbort?.abort();
       const result = state.resolved, version = ++state.namingRequest;
+      state.namingConflicts = false;
+      summary();
       if (!result) return;
       const output = $("[data-naming-preview]");
       const preferences = namingOptions();
       updateNamingHint(result, preferences);
       if (preferences.mode === "source") { output.textContent = "沿用现有来源模板。"; return; }
       const ids = selectedIds();
-      const items = result.episodes?.length ? ids.slice(0, 8).map(id => {
-        const facts = result.naming_items?.[id] || {identifier: `ep${id}`};
-        const edited = result.assistant && preferences.episode_numbers[id];
-        return edited ? {...facts, number: edited, number_kind: facts.number_kind === "part" ? "part" : "episode"} : facts;
-      }) :
+      const items = result.episodes?.length ? ids.map(id =>
+        result.naming_items?.[id] || {identifier: `ep${id}`}) :
         allPartsSelected() && result.naming_parts?.length
           ? result.naming_parts.slice(0, 8).map(part => ({...result.naming_video, number_kind:"part", number:part}))
           : [result.naming_video || {}];
@@ -383,6 +349,17 @@
           const total = ids.length || (allPartsSelected() ? result.naming_parts?.length : 1) || 1;
           if (total > names.length && names.length) names.push(make("small", "dv2-hint", `另有 ${total - names.length} 个文件`));
           output.replaceChildren(...names);
+          if (response.mixed_seasons) {
+            output.append(make("div", "dv2-hint", "本批包含不同季号，季号未知的剧集仅使用集号。"));
+          } else if (response.seasons?.length === 1) {
+            output.append(make("div", "dv2-hint", `本批识别为第 ${response.seasons[0]} 季。`));
+          }
+          if (response.conflicts?.length) {
+            state.namingConflicts = true;
+            const conflicts = response.conflicts.slice(0, 3).join("、");
+            output.append(make("div", "dv2-hint", `本批文件名重复，请调整集号：${conflicts}`));
+            summary();
+          }
           if (!names.length) output.textContent = "暂时无法提供预计文件名，下载仍可继续。";
         } catch(error) {
           if (version === state.namingRequest && result === state.resolved && !controller.signal.aborted && !state.destroyed) {
@@ -898,11 +875,8 @@
         ]))
       });
     }
-    function applyResolved(result, url, {fromHistory = false} = {}) {
+    function applyResolved(result, url) {
       result = {...result, episodes: Array.isArray(result.episodes) ? result.episodes : []};
-      if (fromHistory && result.episodes.length && !result.naming_items) {
-        result.naming_items = savedEpisodeNamingFacts(result.episodes);
-      }
       state.resolved = result;
       resetBatchQuality();
       state.episodeChoices.clear();
@@ -933,9 +907,6 @@
       renderFormats(result.formats);
       renderEpisodes(result, saved);
       updateCount();
-      if (fromHistory && !result.naming_items && !result.naming_video) {
-        formatHint.textContent += " 命名以提交时识别的信息为准。";
-      }
       parseState.textContent = "";
       stage("selecting");
       summary();
@@ -986,14 +957,15 @@
       const naming = namingOptions();
       const outputDir = $("[data-output]").value.trim();
       const submitButton = form.querySelector('button[type="submit"]');
-      if(state.submitting)return;
+      if(state.submitting || state.namingConflicts)return;
       state.submitting=true;submitButton.disabled = true;stage("submitting");summary();
       try {
         const source = state.batchPlan?.mode || resolved.api_mode || modeField.value;
         if (resolved.assistant) {
           if (!state.batchPlan?.ready) throw new Error("请选择可用且尚未提交的档位。");
           const {key, queued} = resolved.assistant;
-          const selectors = ids.map(id => state.batchPlan.selectors[id]).filter(selector => !queued.has(selector));
+          // Already queued rows still contribute naming evidence for the selected batch.
+          const selectors = ids.map(id => state.batchPlan.selectors[id]);
           const choices = selectors.map(selector => {
             const [episode, video, audio] = JSON.parse(selector);
             return {episode, video, audio};
@@ -1269,7 +1241,7 @@
               clearError();
               urlField.value = detail.source_url;
               modeField.value = detail.api_mode === "tv" ? "tv" : "web";
-              applyResolved(detail, detail.source_url, {fromHistory: true});
+              applyResolved(detail, detail.source_url);
               parseState.textContent = "已复用解析记录，可继续选集。";
               const destination = episodeToggle.hidden ? (batchFormat.closest("label").hidden ? formatField : batchFormat) : episodeToggle;
               destination.focus({preventScroll: true});

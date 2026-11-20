@@ -15,7 +15,9 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 from ...bili import BiliTvClient
 from ...validation import ValidationError as TemplateError, render_episode_template, validate_output_template
-from .naming import NameOptions, download_plan, episode_display_title, episode_facts, url_facts
+from .naming import (
+    NameOptions, batch_download_plans, conflicting_filenames, episode_display_title, episode_facts, url_facts,
+)
 
 MAX_BODY = 12 * 1024 * 1024
 MAX_IMPORTS = 24
@@ -69,6 +71,7 @@ class Episode(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     number: int | None = Field(default=None, gt=0, le=99999)
     duration: int | None = Field(default=None, gt=0, le=86400)
+    naming_season_title: str | None = Field(default=None, max_length=300)
     video: list[Track] = Field(default_factory=list, max_length=40)
     audio: list[Track] = Field(default_factory=list, max_length=10)
 
@@ -120,19 +123,21 @@ class Direct(Picks):
 
 
 def presentation(catalogue, queued):
+    names = catalogue_facts(catalogue)
     return {
         "title": catalogue.title,
         "source": catalogue.source,
         "movie": catalogue.movie,
         "active_episode": catalogue.active_episode,
-        "naming_items": {key: facts.model_dump() for key, facts in catalogue_facts(catalogue).items()},
+        "naming_items": {key: facts.model_dump() for key, facts in names.items()},
         "episodes": [
             {
                 **ep.model_dump(exclude={"video", "audio"}),
+                "number": ep.number or names[str(index)].number,
                 "video": [track.model_dump(exclude={"url"}) for track in ep.video],
                 "audio": [track.model_dump(exclude={"url"}) for track in ep.audio],
             }
-            for ep in catalogue.episodes
+            for index, ep in enumerate(catalogue.episodes)
         ],
         "queued": [list(key) for key in queued],
     }
@@ -172,17 +177,18 @@ def catalogue_facts(catalogue):
     titles = [{
         "id": str(i), "title": ep.title, "display_episode_number": ep.number,
         "group": "正片",
-        "movie": catalogue.movie,
+        "movie": catalogue.movie, "naming_season_title": ep.naming_season_title,
     } for i, ep in enumerate(catalogue.episodes)]
     names = episode_facts(titles)
     for i, episode in enumerate(catalogue.episodes):
         facts = names[str(i)]
         source = url_facts(episode.url)
         facts.identifier = source.identifier
-        if source.number_kind == "part":
-            facts.number, facts.number_kind = source.number, "part"
+        if not source.identifier.startswith("ep"):
+            facts.series_episode = False
+            facts.season = None
+            facts.number, facts.number_kind = source.number, source.number_kind
     return names
-
 
 
 def build_jobs(services, catalogue, payload, *, create_log_path, submitted=()):
@@ -191,8 +197,14 @@ def build_jobs(services, catalogue, payload, *, create_log_path, submitted=()):
     keys = []
     seen = set()
     names = catalogue_facts(catalogue)
+    if any(str(pick.episode) not in names for pick in payload.choices):
+        raise HTTPException(422, "所选剧集或档位不可用，请重新解析")
+    options = payload.naming
+    plans, _ = batch_download_plans(
+        catalogue.title, [names[str(pick.episode)] for pick in payload.choices], options,
+    )
     output_dir = services.files.resolve_new_job_output(payload.output_dir)
-    for pick in payload.choices:
+    for pick, plan in zip(payload.choices, plans, strict=True):
         if pick.episode in seen:
             raise HTTPException(422, "同一集只能选择一个版本")
         seen.add(pick.episode)
@@ -211,17 +223,10 @@ def build_jobs(services, catalogue, payload, *, create_log_path, submitted=()):
         if expires <= time.time():
             raise HTTPException(409, f"{ep.title} 的播放地址已过期，请在扩展重新解析")
         source_facts = url_facts(ep.url)
-        display_title = episode_display_title(catalogue.title, ep.title, ep.number, movie=catalogue.movie,
+        number = names[str(pick.episode)].number or ep.number
+        display_title = episode_display_title(catalogue.title, ep.title, number, movie=catalogue.movie,
                                              part=source_facts.number_kind == "part")
         info = playback_info(catalogue.title, display_title, ep, video, audio, catalogue.source)
-        episode_id = str(pick.episode)
-        facts = names[episode_id]
-        options = payload.naming
-        if facts.number_kind == "part":
-            options = options.model_copy(update={"number_kind": "part", "number": options.episode_numbers.get(episode_id)})
-            plan = download_plan(catalogue.title, facts, options)
-        else:
-            plan = download_plan(catalogue.title, facts, options, episode_id=episode_id)
         template = "%(id)s.%(ext)s"
         if options.mode == "source":
             try:
@@ -244,6 +249,9 @@ def build_jobs(services, catalogue, payload, *, create_log_path, submitted=()):
             "log_path": str(create_log_path(services.settings)), "naming_plan": plan,
         })
         keys.append(key)
+    if options.mode == "smart" and jobs:
+        if conflicts := conflicting_filenames(plans):
+            raise HTTPException(409, "本批文件名重复，请调整集号：" + "、".join(conflicts[:3]))
     return jobs, keys
 
 

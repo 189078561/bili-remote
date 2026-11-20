@@ -246,3 +246,33 @@ def test_assistant_popup_keeps_source_switch_and_settings(live_server):
     finally:
         browser.close()
         playwright.stop()
+
+
+def test_assistant_smart_batch_recovers_remaster_numbers_from_older_extension(settings, monkeypatch):
+    from bili_remote.v2.download.naming import initial_filename
+
+    app = create_app(settings)
+    services = app.state.services
+    monkeypatch.setattr(services.manager, "start", lambda: None)
+    catalogue = {"source": "tv", "title": "镇魂街 第二季", "episodes": [
+        {**EPISODE, "number": None, "title": "重置版：第10话 浮生若梦"},
+        {**EPISODE, "url": "https://www.bilibili.com/bangumi/play/ep22", "title": "1 故人归来"},
+    ]}
+    with TestClient(app) as client:
+        login = client.post("/api/auth/login", json={"username": settings.admin_username, "password": settings.admin_password})
+        client.headers["X-CSRF-Token"] = login.json()["csrf"]
+        result = client.post("/api/parse-assistant/imports", json=catalogue)
+        assert result.status_code == 200
+        path = "/api/parse-assistant/imports/" + result.json()["id"]
+        metadata = client.get(path).json()
+        assert metadata["episodes"][0]["number"] == 10
+
+        picks = [{"episode": index, "video": 0, "audio": 0} for index in (0, 1)]
+        preview = client.post("/api/download/naming/preview", json={
+            "title": metadata["title"], "options": {}, "items": list(metadata["naming_items"].values()),
+        }).json()
+        assert preview["items"] == ["镇魂街.S02E10.mp4", "镇魂街.S02E01.mp4"]
+        result = client.post(path + "/jobs", json={"choices": picks})
+        assert result.status_code == 200, result.text
+        plans = [services.database.get_download_naming(job)["plan"] for job in result.json()["ids"]]
+        assert [initial_filename(plan) for plan in plans] == preview["items"]
