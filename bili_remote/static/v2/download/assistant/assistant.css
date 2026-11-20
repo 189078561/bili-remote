@@ -40,3 +40,8 @@
 .br-picker .br-format label {flex:1 1 125px;}
 .br-assistant {display:grid;gap:8px;}
 .br-assistant .br-grid {grid-template-columns:repeat(auto-fit,minmax(48px,1fr));}
+
+.br-action .br-fallback {display:flex;align-items:center;flex:0 0 auto;}
+.br-format small {display:block;}
+.br-format select {display:block;width:100%;}
+.br-extension [data-local-tv] img {width:min(180px,100%);height:auto;}

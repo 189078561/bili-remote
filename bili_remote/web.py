@@ -67,7 +67,7 @@ from .validation import (
 )
 from .v2.download import project_download_job
 from .v2.download.quality import exact_tracks
-from .v2.download.naming import NameOptions, NamePreviewRequest, download_plan, episode_facts, initial_filename, url_facts, without_video_part
+from .v2.download.naming import NameOptions, NamePreviewRequest, download_display_title, download_plan, episode_facts, initial_filename, url_facts, without_video_part
 from .workspace import (
     WorkspaceError,
     normalize_relative_path,
@@ -1096,6 +1096,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ]
         for job in jobs:
             job.pop("log_path", None)
+            if job.get("title") == "正片":
+                naming = service_container.database.get_download_naming(job["id"])
+                if naming:
+                    job["title"] = download_display_title(job, naming["plan"])
         return jobs
 
     @app.post("/api/jobs")
@@ -1215,7 +1219,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "naming_plan": download_plan(resolved.title, facts[str(episode["id"])], payload.naming,
                                                   episode_id=str(episode["id"]))
                     if payload.naming and payload.naming.mode == "smart" else None,
-                    "title": episode.get("title"),
+                    "title": resolved.title if episode.get("movie") else episode.get("title"),
                     "uploader": resolved.uploader,
                     "log_path": str(create_job_log_path(service_container.settings)),
                 }

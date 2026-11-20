@@ -1,4 +1,4 @@
-import {mountPicker} from "./picker.js";
+import {hasTrack, mountPicker, sourceName} from "./picker.js";
 
 export function mountAssistant(root, api, refreshJobs) {
   const find = selector => root.querySelector(selector);
@@ -13,7 +13,7 @@ export function mountAssistant(root, api, refreshJobs) {
   let submitting = false;
   function syncButton(picks = picker?.choices() || []) {
     submit.disabled = submitting || !picks.length || !picks.every(pick =>
-      pickerEpisodes[pick.episode].video[pick.video] && pickerEpisodes[pick.episode].audio[pick.audio]);
+      hasTrack(pickerEpisodes[pick.episode], pick));
     submit.textContent = "开始下载" + (picks.length ? " · " + picks.length + " 项" : "");
   }
   let pickerEpisodes = [];
@@ -30,7 +30,7 @@ export function mountAssistant(root, api, refreshJobs) {
       pickerEpisodes = data.episodes;
       queued = data.queued;
       picker = mountPicker(pickerHost, data.episodes, {onChange: syncButton, queued});
-      status.textContent = data.title + " · 本机 Web";
+      status.textContent = data.title + " · " + sourceName(data.source);
     } catch (error) {
       if (token === revision) status.textContent = error.message;
     }
@@ -41,7 +41,7 @@ export function mountAssistant(root, api, refreshJobs) {
     try {
       const previous = list.value;
       const result = await api("/api/parse-assistant");
-      list.replaceChildren(...result.imports.map(item => new Option(item.title + " · " + item.count + " 项", item.id)));
+      list.replaceChildren(...result.imports.map(item => new Option(item.title + " · " + sourceName(item.source) + " · " + item.count + " 项", item.id)));
       if (!result.imports.length) list.add(new Option("等待扩展推送正片列表", ""));
       if (result.imports.some(i => i.id === previous)) list.value = previous;
       if (!picker || list.value !== previous) await openList();

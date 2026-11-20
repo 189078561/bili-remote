@@ -1,3 +1,7 @@
+import "./quality-format.js";
+
+const {batchTrackLabel, bitrateRange, combinedSize, formatResourceSize, preferredTier, tierCatalogue, trackFamily, trackTier} = globalThis.BiliDownloadQuality;
+
 export function el(tag, text, attrs = {}) {
   const node = document.createElement(tag);
   if (text !== null) node.textContent = text;
@@ -5,37 +9,61 @@ export function el(tag, text, attrs = {}) {
   return node;
 }
 
-function codecLabel(value) {
-  if (/^avc/.test(value)) return "H.264";
-  if (/^(hev|hvc)/.test(value)) return "H.265";
-  if (/^av01/.test(value)) return "AV1";
-  if (/^mp4a/.test(value)) return "AAC";
-  return value.toUpperCase();
+function tracksFor(episode, preferredAudio) {
+  const toOption = (track, video, audio, sound) => {
+    const tbr = track.bandwidth / 1000;
+    const sizeOf = item => item.size || (item.bandwidth > 0 && episode.duration ? item.bandwidth * episode.duration / 8 : null);
+    const ownSize = sizeOf(track);
+    const total = ownSize && sound ? (sizeOf(sound) ? ownSize + sizeOf(sound) : null) : ownSize;
+    return {
+      format_id: track.format_id || String(track.quality),
+      height: track.height, fps: track.fps,
+      vcodec: video === null ? "none" : track.codec,
+      acodec: video === null ? track.codec : "none",
+      dynamic_range: video === null ? null : track.dynamic_range || ({125: "HDR10", 126: "DV"}[track.quality] || "SDR"),
+      tbr, size_with_audio: total,
+      size_estimated: Boolean(total && (!track.size || (sound && !sound.size))),
+      video, audio,
+    };
+  };
+  const audio = episode.audio || [];
+  let best = 0;
+  audio.forEach((track, index) => {
+    if (track.bandwidth > audio[best].bandwidth) best = index;
+  });
+  if (audio[preferredAudio]) best = preferredAudio;
+  return [
+    ...(audio.length ? (episode.video || []).map((track, index) => toOption(track, index, best, audio[best])) : []),
+    ...audio.map((track, index) => toOption(track, null, index)),
+  ];
 }
 
-function formatLabel(track) {
-  const bandwidth = track.bandwidth >= 1e6 ? (track.bandwidth / 1e6).toFixed(2) + " Mbps" : Math.round(track.bandwidth / 1000) + " kbps";
-  return [track.height && track.height + "P", track.fps && track.fps + "fps", codecLabel(track.codec),
-    track.height && ({125: "HDR10", 126: "Dolby Vision"}[track.quality] || ""), bandwidth].filter(Boolean).join(" · ");
+export function hasTrack(episode, pick) {
+  return Boolean(episode?.audio?.[pick.audio] && (pick.video === null || episode.video?.[pick.video]));
 }
 
-function profile(track) {
-  return [track.quality, codecLabel(track.codec), track.height, track.fps && track.fps >= 50].join("/");
+export function sourceName(source) {
+  return source === "tv" ? "本机 TV" : "本机 Web";
 }
 
 export function mountPicker(root, episodes, {order = "asc", rows = 3, onSelect, onChange, active = -1, initial, queued = []} = {}) {
   const pageSize = 50;
   let descending = order === "desc";
   let page = descending ? Math.floor((episodes.length - 1) / pageSize) : 0;
-  const selected = new Map();
+  const selected = new Set();
+  const overrides = new Map(initial?.overrides);
+  const audioOverrides = new Map(initial?.audioOverrides);
+  let targetKey = initial?.targetKey || null;
+  let allowLower = initial?.allowLower || false;
   const grid = el("div", null, {class: "br-grid", "aria-label": "正片选集"});
   const summary = el("small", "", {"aria-live": "polite"});
   const ranges = el("div", null, {class: "br-ranges"});
   const unified = el("div", null, {class: "br-action"});
+  const totals = el("small", "", {class: "br-muted"});
   const toolbar = el("div", null, {class: "br-action"});
   const formatList = el("div", null, {class: "br-formats"});
   const details = el("details", null);
-  details.append(el("summary", "逐集选择视频与音轨"), formatList);
+  details.append(el("summary", "逐集明细"), formatList);
   const box = el("section", null, {class: "br-picker"});
   grid.style.setProperty("--br-rows", rows);
   const button = (text, fn) => {
@@ -52,12 +80,12 @@ export function mountPicker(root, episodes, {order = "asc", rows = 3, onSelect, 
   const desc = button("倒序 ↓", () => sort(true));
   const all = button("全选", () => {
     const indices = range();
-    if (indices.every(i => selected.has(i))) indices.forEach(i => selected.delete(i));
+    if (indices.every(i => selected.has(i))) indices.forEach(deselect);
     else for (const i of indices) if (!selected.has(i)) choose(i);
     reflect();
   });
   toolbar.append(asc, desc, all, summary);
-  box.append(el("strong", "选集与版本"), toolbar, ranges, grid, unified, details);
+  box.append(el("strong", "选集与版本"), toolbar, ranges, grid, unified, totals, details);
   root.replaceChildren(box);
   function range() {
     const first = page * pageSize;
@@ -65,8 +93,13 @@ export function mountPicker(root, episodes, {order = "asc", rows = 3, onSelect, 
     return descending ? ids.reverse() : ids;
   }
   function choose(i) {
-    selected.set(i, {episode: i, video: 0, audio: 0});
+    selected.add(i);
     onSelect?.(i);
+  }
+  function deselect(i) {
+    selected.delete(i);
+    overrides.delete(i);
+    audioOverrides.delete(i);
   }
   function drawGrid() {
     asc.setAttribute("aria-pressed", String(!descending));
@@ -85,7 +118,7 @@ export function mountPicker(root, episodes, {order = "asc", rows = 3, onSelect, 
     grid.replaceChildren(...range().map(i => {
       const ep = episodes[i];
       const item = button(String(ep.number || i + 1), () => {
-        if (selected.has(i)) selected.delete(i);
+        if (selected.has(i)) deselect(i);
         else {choose(i);details.open = true;}
         reflect();
       });
@@ -99,86 +132,145 @@ export function mountPicker(root, episodes, {order = "asc", rows = 3, onSelect, 
   function reflect() {
     for (const item of grid.children) item.setAttribute("aria-pressed", String(selected.has(Number(item.dataset.index))));
     all.textContent = range().every(i => selected.has(i)) ? "取消全选" : "全选";
-    const pending = [...selected.values()].filter(pick => {
-      const ep = episodes[pick.episode];
-      return !ep.video?.[pick.video] || !ep.audio?.[pick.audio];
-    }).length;
-    const failed = [...selected.keys()].filter(i => episodes[i].error).length;
-    if (failed) details.open = true;
+    const entries = [...selected].map(index => ({index, tracks: tracksFor(episodes[index], audioOverrides.get(index))}));
+    const pending = entries.filter(({index, tracks}) => !tracks.length && !episodes[index].error).length;
+    const failed = entries.filter(({index}) => episodes[index].error).length;
+    const catalogue = tierCatalogue(entries.flatMap(entry => entry.tracks));
+    const tier = catalogue.find(item => item.key === targetKey)
+      || preferredTier(catalogue, entries.map(entry => entry.tracks));
+    if (targetKey && !catalogue.some(item => item.key === targetKey) && !pending) targetKey = null;
+
+    function tierRows(target, manual = true) {
+      const lower = allowLower && entries.length > 1 && target?.track.height
+        ? catalogue.slice(catalogue.indexOf(target) + 1)
+          .find(item => item.track.height && trackFamily(item.track) === trackFamily(target.track)) : null;
+      return entries.map(({index, tracks}) => {
+        const key = manual ? overrides.get(index) : null;
+        const exact = tracks.find(track => trackTier(track) === (key || target?.key));
+        const alternate = !key && !exact && lower && tracks.find(track => trackTier(track) === lower.key);
+        return {index, track: exact || alternate || null,
+          reason: episodes[index].error || (alternate ? "缺档降一档" : (key || audioOverrides.has(index)) && exact ? "单集指定" : !exact ? "目标档位缺失" : "")};
+      });
+    }
+    const rows = tierRows(tier);
+    const chosen = rows.filter(row => row.track).map(({index, track}) => ({
+      episode: index, video: track.video, audio: track.audio,
+    }));
+    validChoices = chosen.length === selected.size ? chosen.filter(pick => !queued.some(entry =>
+      entry[0] === pick.episode && entry[1] === pick.video && entry[2] === pick.audio)) : [];
     summary.textContent = "已选 " + selected.size + " 项" +
-      (pending > failed ? " · " + (pending - failed) + " 项正在读取档位" : "") +
-      (failed ? " · " + failed + " 项未取得档位" : "");
-    drawUnified();
-    if (details.open) drawFormats();
-    onChange?.(choices());
-  }
-  function drawUnified() {
-    const picks = [...selected.values()];
-    const focused = unified.contains(document.activeElement) && document.activeElement.dataset.key;
+      (pending ? " · " + pending + " 项正在读取档位" : "") +
+      (failed ? " · " + failed + " 项读取失败" : "");
+    if (failed) details.open = true;
+
+    const focused = document.activeElement?.dataset?.qualityControl;
     unified.replaceChildren();
-    if (!picks.length) return;
-    for (const [key, title] of [["video", "统一画质"], ["audio", "统一音轨"]]) {
-      const tracks = episodes[picks[0].episode][key] || [];
-      const common = new Map();
-      for (const track of tracks) {
-        const id = profile(track);
-        if (picks.every(pick => episodes[pick.episode][key]?.some(item => profile(item) === id))) common.set(id, track);
+    if (entries.length) {
+      const select = el("select", null, {"aria-label": "统一画质", "data-quality-control": "tier"});
+      for (const item of catalogue) {
+        const size = combinedSize(tierRows(item, entries.length > 1));
+        select.add(new Option(batchTrackLabel(item.track, item, bitrateRange(item.rates)) + " · " + sizeLabel(size), item.key));
       }
-      if (!common.size) continue;
-      const select = el("select", null);
-      select.dataset.key = key;
-      select.add(new Option("保持各集选择", ""));
-      for (const [id, track] of common) select.add(new Option(formatLabel(track), id));
-      const first = episodes[picks[0].episode][key][picks[0][key]];
-      if (first && picks.every(pick => {
-        const track = episodes[pick.episode][key][pick[key]];
-        return track && profile(track) === profile(first);
-      })) select.value = profile(first);
+      if (!catalogue.length) select.add(new Option("等待确认档位", ""));
+      const displayed = entries.length === 1 && rows[0].track ? trackTier(rows[0].track) : tier?.key;
+      select.value = displayed || "";
+      select.disabled = !catalogue.length;
       select.onchange = () => {
-        if (!select.value) return;
-        for (const pick of picks) pick[key] = episodes[pick.episode][key].findIndex(track => profile(track) === select.value);
+        targetKey = select.value;
+        if (entries.length === 1) overrides.clear();
         reflect();
       };
-      const label = el("label", title);
-      label.append(select);unified.append(label);
-      if (focused === key) select.focus({preventScroll: true});
-    }
-  }
-
-  function drawFormats() {
-    const scroll = formatList.scrollTop;
-    formatList.replaceChildren(...[...selected].map(([i, pick]) => {
-      const ep = episodes[i];
-      const row = el("div", null, {class: "br-format"});
-      row.append(el("strong", ep.title));
-      const controls = el("div", null, {class: "br-action"});
-      for (const [key, text] of [["video", "视频档位"], ["audio", "音轨"]]) {
-        const tracks = ep[key] || [];
-        if (!tracks.length) continue;
-        const select = el("select", null, {"aria-label": ep.title + text});
-        for (const [index, track] of tracks.entries()) select.add(new Option(formatLabel(track), String(index)));
-        select.value = String(pick[key]);
-        select.onchange = () => {
-          pick[key] = Number(select.value);
-          drawUnified();
-          onChange?.(choices());
-        };
-        const label = el("label", text);
-        label.append(select);controls.append(label);
+      const label = el("label", "统一画质");
+      label.append(select);
+      unified.append(label);
+      if (entries.length > 1) {
+        const fallback = el("input", null, {type: "checkbox", "data-quality-control": "fallback"});
+        fallback.checked = allowLower;
+        fallback.onchange = () => {allowLower = fallback.checked; reflect();};
+        const field = el("label", null, {class: "br-fallback"});
+        field.append(fallback, "缺档自动降一档");
+        unified.append(field);
       }
-      row.append(controls);
-      if (!ep.video?.length || !ep.audio?.length) row.append(el("small", ep.error || "正在确认可用档位…"));
-      return row;
-    }));
+      if (focused) unified.querySelector(`[data-quality-control="${focused}"]`)?.focus({preventScroll: true});
+    }
+    const total = combinedSize(rows);
+    totals.textContent = entries.length ? "本档合计 " + sizeLabel(total) +
+      (entries.length > 1 && total.complete ? " · 每项约 " + formatResourceSize(total.bytes / entries.length) : "") : "";
+    drawFormats(rows, entries, catalogue);
+    onChange?.(validChoices);
+  }
+  function drawFormats(rows, entries, catalogue) {
+    details.hidden = !entries.length;
+    if (!details.open) return;
+    const scroll = formatList.scrollTop;
+    const focus = document.activeElement?.dataset?.episodeQuality;
+    formatList.replaceChildren();
+    for (const [label, subset] of [
+      ["档位不同或待确认", rows.filter(row => row.reason)],
+      ["与统一档位一致", rows.filter(row => !row.reason)],
+    ]) {
+      if (!subset.length) continue;
+      if (entries.length > 1) formatList.append(el("small", label, {class: "br-muted"}));
+      for (const {index, track, reason} of subset) {
+        const ep = episodes[index];
+        const row = el("div", null, {class: "br-format"});
+        row.append(el("strong", ep.title));
+        if (reason) row.append(el("small", reason, {class: "br-muted"}));
+        const tracks = entries.find(entry => entry.index === index).tracks;
+        if (tracks.length) {
+          const select = el("select", null, {"aria-label": ep.title + "档位", "data-episode-quality": index});
+          select.add(new Option("跟随统一画质", ""));
+          for (const entry of tierCatalogue(tracks)) {
+            const tier = catalogue.find(item => item.key === entry.key) || entry;
+            const text = batchTrackLabel(entry.track, tier, bitrateRange(entry.rates));
+            select.add(new Option(text + " · " + sizeLabel(combinedSize([{track: entry.track}])), entry.key));
+          }
+          select.value = overrides.get(index) || "";
+          select.onchange = () => {
+            if (select.value) overrides.set(index, select.value);
+            else overrides.delete(index);
+            reflect();
+          };
+          row.append(select);
+          if (track && track.video !== null && ep.audio.length > 1) {
+            const audio = el("select", null, {"aria-label": ep.title + "音轨", "data-episode-quality": index + "-audio"});
+            audio.add(new Option("自动选音轨", ""));
+            for (const tier of tierCatalogue(tracks.filter(item => item.video === null))) {
+              const item = tier.track;
+              const label = batchTrackLabel(item, tier, bitrateRange(tier.rates));
+              audio.add(new Option(label, String(item.audio)));
+            }
+            audio.value = String(audioOverrides.get(index) ?? "");
+            audio.onchange = () => {
+              if (audio.value === "") audioOverrides.delete(index);
+              else audioOverrides.set(index, Number(audio.value));
+              reflect();
+            };
+            row.append(audio);
+          }
+          if (track) row.append(el("small", batchTrackLabel(track, catalogue.find(item => item.key === trackTier(track)),
+            bitrateRange([track.tbr])), {class: "br-muted"}));
+        }
+        formatList.append(row);
+      }
+    }
+    if (focus !== undefined) formatList.querySelector(`[data-episode-quality="${focus}"]`)?.focus({preventScroll: true});
     formatList.scrollTop = scroll;
   }
-  function choices() {
-    return [...selected.values()].filter(pick => !queued.some(entry =>
-      entry[0] === pick.episode && entry[1] === pick.video && entry[2] === pick.audio));
+  function sizeLabel(total) {
+    const size = formatResourceSize(total.bytes);
+    return total.complete ? (total.estimated ? "约 " : "") + size : size ? "已知 " + size : "体积待确认";
   }
-  details.ontoggle = () => { if (details.open) drawFormats(); };
-  if (initial) initial.forEach(pick => selected.set(pick.episode, pick));
+  let validChoices = [];
+  details.ontoggle = () => { if (details.open) reflect(); };
+  if (initial) initial.episodes.forEach(({episode}) => choose(episode));
   else if (episodes[active]) choose(active);
   drawGrid();
-  return {choices, selected: () => [...selected.values()], refresh: reflect};
+  const selectedEpisodes = () => [...selected].map(episode => ({episode}));
+  return {
+    choices: () => validChoices,
+    selected: selectedEpisodes,
+    snapshot: () => ({episodes: selectedEpisodes(), overrides, audioOverrides, targetKey, allowLower}),
+    refresh: reflect,
+  };
 }

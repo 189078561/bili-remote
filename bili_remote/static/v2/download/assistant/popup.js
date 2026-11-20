@@ -1,12 +1,14 @@
 import {readTab, loadTracks, tabRequest} from "./bilibili.js";
-import {mountPicker} from "./picker.js";
+import {hasTrack, mountPicker} from "./picker.js";
+import {mountLocalTv, tvPlayInfo} from "./tv.js";
 
 const $ = selector => document.querySelector(selector);
 const app = {
   ...await chrome.storage.local.get({projects: [], target: "", order: "asc", rows: 3}),
-  catalogue: null, picker: null, request: null, busy: false,
+  catalogue: null, picker: null, request: null, busy: false, mode: "web",
 };
 const submitted = new Map();
+const destinationKey = () => app.target + "|" + app.mode;
 const requests = new Map();
 const requestsQueue = [];
 let inFlight = 0;
@@ -14,13 +16,15 @@ let inFlight = 0;
 function requestTrack(index) {
   if (requests.has(index)) return requests.get(index);
   const episode = app.catalogue.episodes[index];
+  const tv = app.mode === "tv";
   const request = new Promise(resolve => {
     requestsQueue.push(async () => {
       try {
         episode.error = "";
-        await loadTracks(episode, app.request);
+        await loadTracks(episode, app.request, tv ? tvPlayInfo : null);
       } catch (error) {
         episode.error = error.message;
+        if (tv && /登录/.test(error.message)) await refreshTvLogin();
         episode.video = [];
         episode.audio = [];
       } finally {
@@ -83,12 +87,13 @@ function updateButtons(choices = app.picker?.choices() || []) {
   $("[data-target]").disabled = app.busy || !app.projects.length;
   $("[data-settings]").disabled = app.busy;
   const retry = $("[data-retry]");
-  retry.hidden = !choices.some(pick => app.catalogue?.episodes[pick.episode].error);
+  retry.hidden = !app.picker?.selected().some(pick => app.catalogue?.episodes[pick.episode].error);
+  $("[data-source]").disabled = app.busy || !app.catalogue;
   retry.disabled = app.busy;
   const download = $("[data-download]");
   download.disabled = !ready || !choices.length || !choices.every(pick => {
     const episode = app.catalogue.episodes[pick.episode];
-    return episode.video?.[pick.video] && episode.audio?.[pick.audio];
+    return hasTrack(episode, pick);
   });
   download.textContent = "推送下载" + (choices.length ? " · " + choices.length + " 项" : "");
 }
@@ -112,17 +117,34 @@ function edit(base) {
   $("[data-save]").textContent = project ? "保存名称" : "连接并设为目标";
   $("[data-login]").hidden = true;
 }
-function rebuildPicker() {
+function rebuildPicker(selections = app.picker?.snapshot()) {
   if (!app.catalogue) return;
-  const selections = app.picker?.selected();
-  if (!submitted.has(app.target)) submitted.set(app.target, []);
+  if (!submitted.has(destinationKey())) submitted.set(destinationKey(), []);
   app.picker = mountPicker($("[data-picker]"), app.catalogue.episodes, {
     order: app.order, rows: app.rows, active: app.catalogue.active, initial: selections,
-    queued: submitted.get(app.target),
+    queued: submitted.get(destinationKey()),
     onSelect: index => requestTrack(index).then(() => app.picker?.refresh()),
     onChange: updateButtons,
   });
 }
+function reloadSource() {
+  if (!app.catalogue) return;
+  requests.clear();
+  const selections = app.picker ? {episodes: app.picker.selected()} : undefined;
+  app.catalogue.episodes = app.catalogue.episodes.map(episode => ({
+    ...episode, video: [], audio: [], error: "",
+  }));
+  rebuildPicker(selections);
+}
+const refreshTvLogin = await mountLocalTv($("[data-local-tv]"), () => {
+  if (app.mode === "tv") reloadSource();
+});
+$("[data-source]").onchange = event => {
+  app.mode = event.target.value;
+  $("[data-local-tv]").hidden = app.mode !== "tv";
+  status("");
+  reloadSource();
+};
 $("[data-target]").onchange = async event => {
   app.target = event.target.value;
   await persist();
@@ -193,24 +215,34 @@ async function submit(sendAll) {
   app.busy = true;
   updateButtons();
   try {
-    const {title, episodes} = app.catalogue;
+    const {title, episodes, movie = false} = app.catalogue;
+    const source = app.mode;
+    const picks = app.picker.choices();
+    if (source === "tv" || movie || (!sendAll && picks.some(pick => pick.video === null))) {
+      const features = (await jsonRequest(target.url, "/api/parse-assistant")).features || [];
+      const required = [
+        source === "tv" && "local-tv",
+        movie && "movie-title",
+        (!sendAll && picks.some(pick => pick.video === null)) && "audio-only",
+      ].filter(Boolean);
+      if (required.some(feature => !features.includes(feature))) throw new Error("目标项目版本过旧，请更新后再推送该片源。");
+    }
     if (sendAll) {
       let finished = 0;
       await Promise.all(episodes.map(async (_, i) => {
         await requestTrack(i);
         status("正在读取正片档位 " + ++finished + " / " + episodes.length);
       }));
-      const missing = episodes.filter(ep => !ep.video?.length || !ep.audio?.length).length;
+      const missing = episodes.filter(ep => !ep.audio?.length).length;
       if (missing === episodes.length) throw new Error(episodes[0].error || "正片暂无可提交的档位。");
-      const result = await post(target, "/api/parse-assistant/imports", {title, episodes: episodes.map(publicEpisode)});
+      const result = await post(target, "/api/parse-assistant/imports", {title, source, movie, episodes: episodes.map(publicEpisode)});
       status("已向「" + target.name + "」推送 " + result.count + " 项。" + (missing ? missing + " 项暂无完整档位。" : ""));
     } else {
-      const picks = app.picker.choices();
       const result = await post(target, "/api/parse-assistant/jobs", {
-        catalogue: {title, episodes: picks.map(pick => publicEpisode(episodes[pick.episode]))},
+        catalogue: {title, source, movie, episodes: picks.map(pick => publicEpisode(episodes[pick.episode]))},
         choices: picks.map((pick, episode) => ({...pick, episode})),
       });
-      submitted.get(target.url).push(...picks.map(({episode, video, audio}) => [episode, video, audio]));
+      submitted.get(destinationKey()).push(...picks.map(({episode, video, audio}) => [episode, video, audio]));
       app.picker.refresh();
       status("「" + target.name + "」已接收 " + result.ids.length + " 个下载任务。");
     }
@@ -220,7 +252,7 @@ async function submit(sendAll) {
 $("[data-send]").onclick = () => submit(true);
 $("[data-download]").onclick = () => submit(false);
 $("[data-retry]").onclick = async () => {
-  const retry = app.picker.choices().filter(pick => app.catalogue.episodes[pick.episode].error);
+  const retry = app.picker.selected().filter(pick => app.catalogue.episodes[pick.episode].error);
   app.busy = true;
   status("正在重新获取档位…");
   updateButtons();

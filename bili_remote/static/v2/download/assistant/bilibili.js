@@ -64,35 +64,43 @@ export async function readTab(href, request) {
       }];
     });
     if (!episodes.length) throw new Error("当前页面没有可解析的正片。");
-    return {title: show.title.slice(0, 300), episodes, active: episodes.findIndex(ep => ep.params.ep_id === Number(season[2]))};
+    return {title: show.title.slice(0, 300), movie: Number(show.type ?? show.season_type) === 2, episodes, active: episodes.findIndex(ep => ep.params.ep_id === Number(season[2]))};
   }
   const id = /^\/video\/(BV[A-Za-z0-9]{6,20}|av\d{1,20})\/?$/.exec(url.pathname)?.[1];
   if (!id) throw new Error("请打开 B 站视频或番剧正片页面。");
   const key = id.startsWith("BV") ? "bvid" : "aid";
   const show = await request("/x/web-interface/view", {[key]: key === "aid" ? id.slice(2) : id});
   return {
-    title: show.title.slice(0, 300), activePart: positive(url.searchParams.get("p")) || 1,
+    title: show.title.slice(0, 300), active: 0, activePart: (show.pages || []).length > 1 ? positive(url.searchParams.get("p")) || 1 : null,
     episodes: (show.pages || []).flatMap(part => {
       const index = positive(part.page);
       if (!index || !positive(part.cid) || /^(?:【|\[)?(?:花絮|预告|先导预告|片花|预告片)(?:】|\]|[：:·\s]|$)/.test(String(part.part).trim())) return [];
       return [{
-        url: BILI_PAGE + "/video/" + id + "?p=" + index,
+        url: BILI_PAGE + "/video/" + id + ((show.pages || []).length > 1 ? "?p=" + index : ""),
         title: String(part.part || show.title).slice(0, 300),
-        number: index, duration: positive(part.duration), params: {bvid: show.bvid, cid: part.cid},
+        number: (show.pages || []).length > 1 ? index : null, duration: positive(part.duration),
+        params: {bvid: show.bvid, aid: show.aid, cid: part.cid},
       }];
     }),
   };
 }
 
-function track(raw, isVideo) {
+function track(raw, isVideo, tv) {
   if (marked(raw.has_drm) || marked(raw.is_drm) || marked(raw.drm) || (raw.drm && typeof raw.drm === "object")) return null;
-  const url = [raw.baseUrl, raw.base_url, ...(raw.backupUrl || raw.backup_url || [])].find(value =>
+  const url = [raw.baseUrl, raw.base_url, ...[raw.backupUrl || raw.backup_url || []].flat()].find(value =>
     typeof value === "string" && /^https:\/\/[a-z0-9][a-z0-9.-]*\.bilivideo\.(?:com|cn|net)\/[A-Za-z0-9_/-]+\.(?:m4s|mp4)(?:\?[^#\s]*)?$/.test(value));
   const codec = raw.codecs || "";
+  const id = String(raw.id);
+  const streamId = /-(\d+)\.m4s(?:\?|$)/.exec(url || "")?.[1];
+  const formatId = !isVideo ? id : tv ? "tv" + id + "-" + (/^avc/.test(codec) ? "avc" : /^av01/.test(codec) ? "av1" : "hevc")
+    : (streamId || id);
+  const dynamicRange = isVideo ? ({125: "HDR10", 126: "DV"}[raw.id] || "SDR") : null;
   if (!url || !positive(raw.id) || !(isVideo ? /^(avc[13]|hev1|hvc1|av01)(\.|$)/ : /^(mp4a|ec-3|ac-3|flac|fLaC|opus)(\.|$)/).test(codec)) return null;
   const [frames, seconds = 1] = String(raw.frameRate || raw.frame_rate || 0).split("/");
   const fps = Number(frames) / Number(seconds);
-  return {url, codec, quality: +raw.id, bandwidth: positive(raw.bandwidth) || 0,
+  if ([...new URL(url).searchParams.keys()].some(key =>
+    ["access_key", "access_token", "refresh_token", "sessdata"].includes(key.toLowerCase()))) return null;
+  return {url, codec, format_id: formatId, dynamic_range: dynamicRange, quality: +raw.id, bandwidth: positive(raw.bandwidth) || 0,
     width: isVideo ? positive(raw.width) || 0 : 0, height: isVideo ? positive(raw.height) || 0 : 0,
     fps: isVideo && fps > 0 && fps <= 300 ? fps : null, size: positive(raw.size)};
 }
@@ -101,15 +109,17 @@ function marked(value) {
   return value === true || value === 1 || value === "1" || value === "true";
 }
 
-export async function loadTracks(ep, request) {
-  if (ep.video?.length && ep.audio?.length) return;
-  const result = await request(ep.pgc ? "/pgc/player/web/playurl" : "/x/player/playurl", {
-    ...ep.params, qn: 127, fnval: 4048, fnver: 0, fourk: 1, platform: "pc",
-  });
+export async function loadTracks(ep, request, tvRequest) {
+  if (ep.audio?.length) return;
+  const {aid, ...webParams} = ep.params;
+  const result = tvRequest ? await tvRequest(ep) : await request(
+    ep.pgc ? "/pgc/player/web/playurl" : "/x/player/playurl",
+    {...webParams, qn: 127, fnval: 4048, fnver: 0, fourk: 1, platform: "pc"},
+  );
   const data = result.video_info || result;
   const dash = data.dash;
   const streamDuration = Number(dash?.duration) || 0;
-  if ([result, data].some(info => marked(info.is_drm) || marked(info.drm) || (info.drm && typeof info.drm === "object"))) {
+  if ([result, data].some(info => marked(info.has_drm) || marked(info.is_drm) || marked(info.drm) || (info.drm && typeof info.drm === "object"))) {
     throw new Error("B 站返回了受保护的流媒体。");
   }
   const clipSeconds = (Array.isArray(data.durl) ? data.durl : []).reduce((total, clip) => total + (Number(clip.length) || 0) / 1000, 0);
@@ -123,9 +133,8 @@ export async function loadTracks(ep, request) {
     if (Array.isArray(data.durl) && data.durl.length) throw new Error("B 站返回了单文件播放格式，解析助手目前需要 DASH 视频和音轨。");
     throw new Error("B 站未给当前页面会话返回 DASH 档位，请确认本页可播放正片。");
   }
-  ep.video = (dash.video || []).map(row => track(row, true)).filter(row => row?.height).slice(0, 40);
-  ep.audio = (dash.audio || []).map(row => track(row, false)).filter(Boolean).slice(0, 10);
-  if (!ep.video.length || !ep.audio.length) {
-    throw new Error("DASH 片源缺少可用的" + (!ep.video.length && !ep.audio.length ? "视频和音轨" : !ep.video.length ? "视频轨" : "音轨") + "。");
-  }
+  ep.video = (dash.video || []).map(row => track(row, true, Boolean(tvRequest))).filter(row => row?.height).slice(0, 40);
+  ep.audio = [...(dash.audio || []), ...[dash.dolby?.audio || []].flat(), ...[dash.flac?.audio || []].flat()]
+    .map(row => track(row, false, Boolean(tvRequest))).filter(Boolean).slice(0, 10);
+  if (!ep.audio.length) throw new Error("当前片源未返回可下载的音轨。");
 }

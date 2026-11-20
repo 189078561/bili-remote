@@ -37,6 +37,7 @@ class NameFacts(BaseModel):
     number: int | None = Field(default=None, ge=1, le=99999)
     chapter: str | None = Field(default=None, max_length=300)
     extra_title: str | None = Field(default=None, max_length=300)
+    movie: bool = False
 
 
 class NamePreviewRequest(BaseModel):
@@ -76,6 +77,34 @@ def without_video_part(url):
     return parsed._replace(query=urlencode([(k, v) for k, v in parse_qsl(parsed.query) if k != "p"])).geturl()
 
 
+def is_movie_season(season):
+    # Bilibili's PGC season type 2 is a movie.
+    return str(season.get("type") or season.get("season_type") or "") == "2"
+
+
+def episode_display_title(title, episode_title, number=None, *, movie=False, part=False):
+    title = str(title or "").strip()
+    detail = str(episode_title or "").strip()
+    if movie:
+        return (title or detail)[:300]
+    if detail in {"正片", title}:
+        detail = ""
+    if number:
+        numbered = re.match(rf"^(?:第\s*)?0*{number}(?:\s*[集话話]|(?=\s|$))\s*", detail)
+        if numbered:
+            detail = detail[numbered.end():].strip()
+    episode_label = (f"P{number}" if part else f"第{number}集") if number else ""
+    return " · ".join(filter(None, (title, episode_label, detail)))[:300]
+
+
+def download_display_title(job, plan):
+    if plan.get("display_title"):
+        return plan["display_title"]
+    if plan.get("assistant_playback") and job.get("title") == "正片":
+        return plan.get("title") or job["title"]
+    return job.get("title")
+
+
 def episode_facts(episodes):
     # Use the platform's displayed number, never list/group position or chapter digits.
     counts = Counter(item.get("display_episode_number") for item in episodes if item.get("group") == "正片")
@@ -90,7 +119,7 @@ def episode_facts(episodes):
         result[key] = NameFacts(identifier=safe_identifier("ep" + key), number=number,
                                 number_kind="episode" if number else None,
                                 chapter=str(item.get("chapter_title") or "")[:300] or None,
-                                extra_title=extra_title or None)
+                                extra_title=extra_title or None, movie=item.get("movie") is True)
     return result
 
 
@@ -114,6 +143,9 @@ def download_plan(title, facts, options, *, episode_id=None, all_parts=False):
         "number": number,
         "all_parts": all_parts,
     }
+    if facts.movie:
+        plan["movie"] = True
+        plan["display_title"] = str(title or plan["title"]).strip()[:300]
     if episode_id is not None and not number and facts.extra_title:
         plan["extra_title"] = facts.extra_title
     return plan
@@ -131,7 +163,9 @@ def initial_filename(plan, extension="mp4", *, collision=None):
     number = positive_number(plan.get("number"))
     kind = plan.get("number_kind")
     identifier = safe_identifier(plan.get("identifier"))
-    if number and kind in {"episode", "part"}:
+    if plan.get("movie"):
+        label = None
+    elif number and kind in {"episode", "part"}:
         label = ("E" if kind == "episode" else "P") + str(number).zfill(2)
     elif extra_title:
         label = None
@@ -139,6 +173,9 @@ def initial_filename(plan, extension="mp4", *, collision=None):
         label = "Bili" + identifier if identifier and identifier.lower().startswith("ep") else identifier
     if safe_identifier(collision) and collision.lower().startswith("ep"):
         collision = "Bili" + collision
+    if plan.get("movie") and isinstance(collision, int):
+        title += f" ({collision})"
+        collision = None
     suffix = ".".join(dict.fromkeys(part for part in (label, collision) if part))
     name = ".".join(part for part in (title, suffix, extension) if part)
     return validate_filename(name)

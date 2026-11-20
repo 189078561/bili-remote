@@ -195,3 +195,30 @@ def test_naming_options_are_previewed_and_persisted_by_existing_apis(settings, m
         assert initial_filename(single_plan) == "测试.P05.mp4"
         legacy = client.post("/api/jobs", json={"url": VIDEO_URL})
         assert not services.database.get_download_naming(legacy.json()["id"])
+
+
+def test_movie_classification_applies_only_to_main_feature(settings, tmp_path):
+    from bili_remote.downloader import YtDlpRunner
+    from bili_remote.v2.download.finalize import _publish
+    from bili_remote.v2.download.naming import NameOptions, download_plan, episode_facts
+
+    runner = YtDlpRunner(settings, None)
+    groups = {
+        "main_section": {"episodes": [{"id": 21, "title": "正片"}]},
+        "section": [{"title": "预告", "episodes": [{"id": 22, "title": "首支预告"}]}],
+    }
+    episodes, _ = runner._build_episodes({"type": 2}, groups)
+    facts = episode_facts(episodes)
+    assert facts["21"].movie and not facts["22"].movie
+
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    track = stage / "ep21.mp4"
+    track.write_bytes(b"new movie")
+    old = tmp_path / "四海.mp4"
+    old.write_bytes(b"existing movie")
+    plan = download_plan("四海", facts["21"], NameOptions(), episode_id="21")
+    result, _ = _publish(track, [], stage, tmp_path, plan, "mp4", 1, 1)
+    assert result.name == "四海 (2).mp4"
+    assert old.read_bytes() == b"existing movie"
+    assert result.read_bytes() == b"new movie"

@@ -30,7 +30,7 @@ from .security import redact_sensitive
 from .validation import ValidationError, canonicalize_bilibili_url
 from .v2.download.cdn import race_mirrors
 from .v2.download.finalize import cleanup_staging, finalize_download, staging_directory
-from .v2.download.naming import displayed_episode_number, positive_number, url_facts
+from .v2.download.naming import displayed_episode_number, download_display_title, is_movie_season, positive_number, url_facts
 from .v2.download.quality import exact_tracks, preview_tracks
 
 
@@ -963,6 +963,7 @@ class YtDlpRunner:
 
                         "index": len(result) + 1,
                         "group": group_title,
+                        "movie": group_title == "正片" and is_movie_season(season),
                         "group_index": group_index,
                         "title": title or f"第{len(result) + 1}话",
                         "duration": duration or None,
@@ -2014,6 +2015,8 @@ class YtDlpRunner:
                     break
 
             combined = "\n".join(attempt_messages)
+            if local_browser and 403 in self._http_statuses(combined):
+                raise DownloadFailure("VPS 无法读取本机推送的播放地址（HTTP 403），请在解析助手重新解析并推送同一片源。")
             if api_mode == "tv" and (
                 "HTTP Error 403" in combined
                 or "403: Forbidden" in combined
@@ -2407,9 +2410,15 @@ class DownloadManager:
             "eta",
         }
 
+        naming = self.database.get_download_naming(job["id"])
+        plan = naming["plan"] if naming else {}
+        fixed_title = download_display_title(job, plan) if plan.get("assistant_playback") or plan.get("movie") else None
+
         async def update(values: dict[str, Any]) -> None:
             nonlocal last_progress_write
             clean = {key: value for key, value in values.items() if value is not None}
+            if fixed_title and "title" in clean:
+                clean["title"] = fixed_title
             if not clean:
                 return
             if set(clean) <= progress_fields:
@@ -2420,10 +2429,12 @@ class DownloadManager:
                 last_progress_write = now
             self.database.update_job(job["id"], **clean)
 
-        naming = self.database.get_download_naming(job["id"])
+        if fixed_title and fixed_title != job.get("title"):
+            await update({"title": fixed_title})
+            job = {**job, "title": fixed_title}
         if naming:
-            if "assistant_playback" in naming["plan"]:
-                job = {**job, "_assistant_playback": naming["plan"]["assistant_playback"]}
+            if "assistant_playback" in plan:
+                job = {**job, "_assistant_playback": plan["assistant_playback"]}
             stage = staging_directory(output_root, job["id"])
             result = await self.runner.download(job, stage, log_path, update)
             paths = getattr(self.runner, "completion_paths", {}).get(job["id"], []) or ([result] if result else [])

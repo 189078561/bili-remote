@@ -50,15 +50,18 @@ def preview_tracks(formats: list[dict[str, Any]], duration: Any) -> list[dict[st
     for item in tracks:
         parts = [item["format_id"]]
         bytes_count = track_size(item)
+        estimated = not _positive(item.get("filesize"))
         if item.get("acodec") in (None, "", "none"):
             if item.get("vcodec") in (None, "", "none") or best_audio is None:
                 continue
             parts.append(best_audio["format_id"])
             audio_bytes = track_size(best_audio)
+            estimated = estimated or not _positive(best_audio.get("filesize"))
             bytes_count = bytes_count + audio_bytes if bytes_count and audio_bytes else None
         public.append({
             **item,
             "locked_selector": f"({'+'.join(map(str, parts))})",
             "size_with_audio": round(bytes_count) if bytes_count else None,
+            "size_estimated": bool(bytes_count and estimated),
         })
     return public

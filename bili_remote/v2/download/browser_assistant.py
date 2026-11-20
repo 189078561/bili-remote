@@ -6,13 +6,14 @@ import re
 import secrets
 import time
 from pathlib import Path
+from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from .naming import NameOptions, download_plan, episode_facts, url_facts
+from .naming import NameOptions, download_plan, episode_display_title, episode_facts, url_facts
 
 MAX_BODY = 12 * 1024 * 1024
 MAX_IMPORTS = 24
@@ -22,7 +23,10 @@ CDN = re.compile(r"[a-z0-9][a-z0-9.-]*\.bilivideo\.(?:com|cn|net)")
 TRACK_PATH = re.compile(r"/[A-Za-z0-9_/-]+\.(?:m4s|mp4)")
 HEADERS = {"Referer": "https://www.bilibili.com/", "User-Agent": "Mozilla/5.0"}
 EXTENSION_DIR = Path(__file__).resolve().parents[2] / "static/v2/download/assistant"
-EXTENSION_FILES = ("manifest.json", "popup.html", "popup.js", "bilibili.js", "picker.js", "assistant.css")
+EXTENSION_FILES = (
+    "manifest.json", "popup.html", "popup.js", "bilibili.js", "picker.js", "assistant.css",
+    "quality-format.js", "tv.js", "md5.min.js", "md5.LICENSE.txt", "qrcode.mjs", "qrcode.LICENSE.txt",
+)
 
 
 def stream_deadline(value: str) -> int | None:
@@ -33,6 +37,8 @@ def stream_deadline(value: str) -> int | None:
 
 class Track(BaseModel):
     url: str = Field(max_length=2048)
+    format_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.-]{1,64}$")
+    dynamic_range: Literal["SDR", "HDR10", "DV", "HLG", "HDR10+"] | None = None
     quality: int = Field(ge=1, le=99999)
     codec: str = Field(pattern=r"^(?:avc[13]|hev1|hvc1|av01|mp4a|ec-3|ac-3|fLaC|flac|opus)(?:\.[A-Za-z0-9.]{1,48})?$")
     bandwidth: int = Field(ge=0, le=200_000_000)
@@ -50,6 +56,9 @@ class Track(BaseModel):
         if (parsed.scheme != "https" or not CDN.fullmatch(parsed.netloc)
                 or not TRACK_PATH.fullmatch(parsed.path) or parsed.fragment):
             raise ValueError("播放地址不是受支持的 B站 CDN 轨道")
+        if any(key.lower() in {"access_key", "access_token", "refresh_token", "sessdata"}
+               for key in parse_qs(parsed.query, keep_blank_values=True)):
+            raise ValueError("播放地址不得携带登录凭据")
         return value
 
 
@@ -78,6 +87,8 @@ class Episode(BaseModel):
 
 
 class Catalogue(BaseModel):
+    source: Literal["web", "tv"] = "web"
+    movie: bool = False
     title: str = Field(min_length=1, max_length=300)
     episodes: list[Episode] = Field(min_length=1, max_length=600)
 
@@ -90,7 +101,7 @@ class Catalogue(BaseModel):
 
 class Pick(BaseModel):
     episode: int = Field(ge=0, lt=600)
-    video: int = Field(ge=0, lt=40)
+    video: int | None = Field(ge=0, lt=40)
     audio: int = Field(ge=0, lt=10)
 
 
@@ -105,6 +116,8 @@ class Direct(Picks):
 def presentation(catalogue, queued):
     return {
         "title": catalogue.title,
+        "source": catalogue.source,
+        "movie": catalogue.movie,
         "episodes": [
             {
                 **ep.model_dump(exclude={"video", "audio"}),
@@ -117,9 +130,14 @@ def presentation(catalogue, queued):
     }
 
 
-def playback_info(title, ep, video, audio):
+def playback_info(title, display_title, ep, video, audio, source):
+    headers = HEADERS if source == "web" else {
+        **HEADERS, "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/134.0.0.0 Mobile Safari/537.36",
+    }
     formats = []
     for track_id, track in (("brvideo", video), ("braudio", audio)):
+        if track is None:
+            continue
         is_video = track_id == "brvideo"
         formats.append({
             "format_id": track_id, "url": track.url,
@@ -128,11 +146,12 @@ def playback_info(title, ep, video, audio):
             "acodec": "none" if is_video else track.codec,
             "width": track.width or None, "height": track.height or None,
             "fps": track.fps, "tbr": track.bandwidth / 1000,
-            "filesize": track.size, "http_headers": HEADERS,
+            "filesize": track.size, "http_headers": headers,
+            "dynamic_range": track.dynamic_range or ({125: "HDR10", 126: "DV"}.get(track.quality, "SDR") if is_video else None),
         })
     facts = url_facts(ep.url)
     return {
-        "id": facts.identifier, "title": ep.title, "series": title,
+        "id": facts.identifier, "title": display_title, "series": title,
         "webpage_url": ep.url, "duration": ep.duration, "formats": formats,
         "_v2_origin": {
             "bvid": facts.identifier if facts.identifier.startswith("BV") else None,
@@ -151,6 +170,7 @@ def build_jobs(services, catalogue, payload, *, create_log_path, submitted=()):
     titles = [{
         "id": str(i), "title": ep.title, "display_episode_number": ep.number,
         "group": "正片",
+        "movie": catalogue.movie,
     } for i, ep in enumerate(catalogue.episodes)]
     names = episode_facts(titles)
     for pick in payload.choices:
@@ -162,26 +182,31 @@ def build_jobs(services, catalogue, payload, *, create_log_path, submitted=()):
             continue
         try:
             ep = catalogue.episodes[pick.episode]
-            video, audio = ep.video[pick.video], ep.audio[pick.audio]
+            video = ep.video[pick.video] if pick.video is not None else None
+            audio = ep.audio[pick.audio]
         except IndexError as exc:
             raise HTTPException(422, "所选剧集或档位不可用，请重新解析") from exc
-        deadlines = [d for d in (stream_deadline(video.url), stream_deadline(audio.url)) if d is not None]
+        deadlines = [deadline for track in (video, audio) if track
+                     if (deadline := stream_deadline(track.url)) is not None]
         expires = min([int(time.time()) + IMPORT_TTL, *deadlines])
         if expires <= time.time():
             raise HTTPException(409, f"{ep.title} 的播放地址已过期，请在扩展重新解析")
-        info = playback_info(catalogue.title, ep, video, audio)
-        facts = names[str(pick.episode)]
         source_facts = url_facts(ep.url)
+        display_title = episode_display_title(catalogue.title, ep.title, ep.number, movie=catalogue.movie,
+                                             part=source_facts.number_kind == "part")
+        info = playback_info(catalogue.title, display_title, ep, video, audio, catalogue.source)
+        facts = names[str(pick.episode)]
         facts.identifier = source_facts.identifier
         if source_facts.number_kind == "part":
             facts.number, facts.number_kind = source_facts.number, "part"
         plan = download_plan(catalogue.title, facts, NameOptions())
+        plan["display_title"] = display_title
         plan["assistant_playback"] = services.secrets.encrypt_json(json.dumps({"expires": expires, "info": info}))
         jobs.append({
-            "source_url": ep.url, "kind": "manual", "api_mode": "web",
-            "title": ep.title, "output_template": "%(id)s.%(ext)s",
+            "source_url": ep.url, "kind": "manual", "api_mode": catalogue.source,
+            "title": display_title, "output_template": "%(id)s.%(ext)s",
             "output_dir": services.files.resolve_new_job_output(None),
-            "format_selector": "(brvideo+braudio)", "all_parts": False,
+            "format_selector": "(brvideo+braudio)" if video else "(braudio)", "all_parts": False,
             "log_path": str(create_log_path(services.settings)), "naming_plan": plan,
         })
         keys.append(key)
@@ -224,8 +249,8 @@ def register(app, *, get_session, require_csrf, get_services, create_log_path):
     @app.get("/api/parse-assistant")
     async def state(_: object = Depends(get_session)):
         prune()
-        return {"version": 1, "imports": [
-            {"id": key, "title": catalogue.title, "count": len(catalogue.episodes)}
+        return {"version": 1, "features": ["local-tv", "audio-only", "movie-title"], "imports": [
+            {"id": key, "title": catalogue.title, "count": len(catalogue.episodes), "source": catalogue.source}
             for key, (catalogue, _, _) in reversed(imports.items())
         ]}
 

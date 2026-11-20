@@ -7,6 +7,12 @@
     <label>目标项目<select data-target></select></label>
     <p class="br-muted" data-address></p>
     <div class="br-action"><strong data-title>正在识别标签页…</strong><button data-send type="button" disabled>推送解析列表到项目</button></div>
+    <label>片源<select data-source disabled><option value="web">本机 Web</option><option value="tv">本机 TV</option></select></label>
+    <section data-local-tv hidden>
+      <button type="button">生成 TV 登录二维码</button>
+      <img alt="哔哩哔哩 TV 登录二维码" hidden>
+      <small class="br-muted" role="status"></small>
+    </section>
     <div data-picker></div>
     <button data-retry type="button" hidden>重新获取所选档位</button>
     <button data-download type="button" class="br-primary" disabled>推送下载</button>

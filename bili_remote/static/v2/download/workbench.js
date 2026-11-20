@@ -1,6 +1,7 @@
 (() => {
   "use strict";
 
+  const {codecName, formatBitrate, formatResourceSize, trackFamily, trackTier, bitrateRange, combinedSize, batchTrackLabel, tierCatalogue, preferredTier} = globalThis.BiliDownloadQuality;
   const EPISODES_PER_PAGE = 50;
   const CATEGORIES = ["正片", "花絮", "预告"];
   const HISTORY_STATUSES = new Set(["completed", "failed", "cancelled", "auth_required"]);
@@ -29,30 +30,6 @@
     };
   }
 
-  function codecName(value) {
-    const text = String(value || "").toLowerCase();
-    if (text.includes("avc") || text === "h264") return "H.264";
-    if (text.includes("hev") || text.includes("hvc") || text === "h265") return "H.265";
-    if (text.includes("av01") || text === "av1") return "AV1";
-    if (text.includes("mp4a")) return "AAC";
-    if (text.includes("opus")) return "Opus";
-    if (text.includes("ac-3") || text.includes("ec-3")) return "Dolby";
-    return "未知编码";
-  }
-
-  function formatBitrate(kbps) {
-    const value = Number(kbps);
-    if (!Number.isFinite(value) || value <= 0) return null;
-    return value >= 1000 ? `${(value / 1000).toFixed(2)} Mbps` : `${Math.round(value)} kbps`;
-  }
-
-  function formatResourceSize(bytes) {
-    const value = Number(bytes);
-    if (!Number.isFinite(value) || value <= 0) return null;
-    if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)} GB`;
-    return value < 100_000 ? "<0.1 MB" : `${(value / 1_000_000).toFixed(1)} MB`;
-  }
-
   function formatLabel(item) {
     const bits = [
       item.height ? `${item.height}P` : "仅音频",
@@ -71,35 +48,6 @@
     if (className) node.className = className;
     if (text !== undefined) node.textContent = String(text);
     return node;
-  }
-
-  function trackFamily(track) {
-    const codec = track.vcodec && track.vcodec !== "none" ? track.vcodec : track.acodec;
-    const name = codecName(codec);
-    return JSON.stringify([name === "未知编码" ? codec : name, track.dynamic_range || "", Number(track.fps) || 0]);
-  }
-
-  function trackTier(track) {
-    return JSON.stringify([track.format_id, Number(track.height) || 0, trackFamily(track)]);
-  }
-
-  function bitrateRange(values) {
-    const rates = values.map(Number).filter(rate => Number.isFinite(rate) && rate > 0);
-    if (!rates.length) return "码率未知";
-    const low = Math.min(...rates), high = Math.max(...rates);
-    const label = low === high ? formatBitrate(low) :
-      low >= 1000 ? (low / 1000).toFixed(2) + "–" + formatBitrate(high) :
-      high < 1000 ? Math.round(low) + "–" + formatBitrate(high) :
-      formatBitrate(low) + "–" + formatBitrate(high);
-    return label + (rates.length < values.length ? "（部分未知）" : "");
-  }
-
-  function combinedSize(rows) {
-    const known = rows.filter(row => Number(row.track?.size_with_audio) > 0);
-    return {
-      bytes: known.reduce((sum, row) => sum + Number(row.track.size_with_audio), 0),
-      complete: known.length === rows.length && rows.length > 0
-    };
   }
 
   function elapsed(seconds) {
@@ -249,6 +197,7 @@
         identifier: /^\d{1,20}$/.test(id) ? `ep${id}` : null,
         number_kind: number === null ? null : "episode",
         number,
+        movie: episode.movie === true,
         chapter: String(episode.chapter_title || "").slice(0, 300) || null,
         extra_title: episode.group && episode.group !== "正片" ? String(episode.title || "").trim().slice(0, 300) || null : null
       }];
@@ -376,9 +325,10 @@
       }
       $("[data-naming-episode-label]").hidden = !enabled || !batch || !select.value;
       $("[data-naming-kind-label]").hidden = !enabled || batch || allPartsSelected();
-      $("[data-naming-number-label]").hidden = !enabled || (batch ? !select.value : allPartsSelected());
+      const movie = batch && result.naming_items?.[select.value]?.movie;
+      $("[data-naming-number-label]").hidden = !enabled || movie || (batch ? !select.value : allPartsSelected());
       $("[data-naming-name]").disabled = !enabled;
-      $("[data-naming-number]").disabled = !enabled || (batch ? !select.value : allPartsSelected());
+      $("[data-naming-number]").disabled = !enabled || movie || (batch ? !select.value : allPartsSelected());
       queueNamingPreview();
     }
     function updateNamingHint(result, preferences) {
@@ -387,7 +337,7 @@
       const picked = batch ? result.naming_items?.[id] : result.naming_video;
       const edited = batch ? preferences.episode_numbers[id] : preferences.number;
       const unit = !batch && preferences.number_kind === "part" ? "P" : "集";
-      const inferred = edited ? `手动编号 · 第 ${edited} ${unit}` :
+      const inferred = picked?.movie ? "电影 · 按片名命名" : edited ? `手动编号 · 第 ${edited} ${unit}` :
         picked?.extra_title ? `按标题命名 · ${picked.extra_title}` :
         picked?.number_kind === "part" ? `分 P · 第 ${picked.number} P` :
         picked?.number_kind === "episode" ? `连续第 ${picked.number} 集` : picked?.identifier ? `平台 ID ${picked.identifier}` : "未确认集号，保留可用平台标识";
@@ -580,7 +530,8 @@
       const tiers = batchCatalogue([id], null);
       select.replaceChildren(new Option("跟随统一画质", ""), ...tiers.map(tier => {
         const label = batchTrackLabel(tier.track, tier, bitrateRange(tier.rates));
-        const size = formatResourceSize(tier.track.size_with_audio) || "体积待确认";
+        const known = formatResourceSize(tier.track.size_with_audio);
+        const size = known ? (tier.track.size_estimated ? "约 " : "") + known : "体积待确认";
         return new Option(label + " · " + size, tier.track.selector);
       }));
       select.value = state.episodeChoices.get(id) || "";
@@ -636,7 +587,7 @@
     }
 
     function renderFormats(formats) {
-      formatField.replaceChildren(new Option("最高可用视频 · 最佳音轨", DEFAULT_FORMAT));
+      formatField.replaceChildren();
       const ordered = [...(formats || [])].filter((item) => item.selector).sort((a, b) => (Number(b.height) || 0) - (Number(a.height) || 0) || (Number(b.fps) || 0) - (Number(a.fps) || 0));
       const groups = new Map();
       for (const item of ordered) {
@@ -644,6 +595,7 @@
         if (!groups.has(group)) groups.set(group, []);
         groups.get(group).push(item);
       }
+      if (!groups.size) formatField.add(new Option("未读取到具体档位", DEFAULT_FORMAT));
       for (const [label, items] of groups) {
         const optgroup = document.createElement("optgroup");
         optgroup.label = label;
@@ -652,33 +604,10 @@
       }
       formatField.dataset.formats = JSON.stringify(ordered);
       summary();
-      formatHint.textContent = ordered.length ? `列出 ${ordered.length} 种可用格式；音视频编码与音轨信息来自解析结果。` : "当前没有额外格式信息，将使用最高可用画质。";
+      formatHint.textContent = ordered.length ? `列出 ${ordered.length} 种可用格式；音视频编码与音轨信息来自解析结果。` : "当前没有额外格式信息。";
     }
     function batchCatalogue(ids, target = state.batchTarget) {
-      const tiers = new Map();
-      for (const id of ids) {
-        for (const track of state.batchTracks.get(id) || []) {
-          const key = trackTier(track);
-          if (!tiers.has(key)) tiers.set(key, {key, track, rates: []});
-          tiers.get(key).rates.push(track.tbr);
-        }
-      }
-      if (target && !tiers.has(target.key)) {
-        tiers.set(target.key, {...target, rates: []});
-      }
-      const highest = tier => Math.max(0, Number(tier.track.tbr) || 0, ...tier.rates.map(Number).filter(Number.isFinite));
-      const ordered = [...tiers.values()].sort((a, b) =>
-        (Number(b.track.height) || 0) - (Number(a.track.height) || 0) || highest(b) - highest(a)
-      );
-      for (const tier of ordered) {
-        const track = tier.track;
-        const group = ordered.filter(other => other.track.height === track.height && trackFamily(other.track) === trackFamily(track));
-        if (group.length > 1) {
-          const rank = group.indexOf(tier);
-          tier.label = rank === 0 ? "高码" : rank === 1 ? "标准" : "档位 " + (rank + 1);
-        }
-      }
-      return ordered;
+      return tierCatalogue(ids.flatMap(id => state.batchTracks.get(id) || []), target);
     }
 
     function batchRows(ids, selectedTier, catalogue, {useOverrides = true} = {}) {
@@ -699,16 +628,6 @@
         return {id, track, reason: !track ? "目标档位缺失" : lower ? "缺档降一档" :
           override && track.locked_selector !== baseline?.locked_selector ? "单集指定" : ""};
       });
-    }
-
-    function batchTrackLabel(track, tier, rate) {
-      const video = track.height && track.vcodec !== "none";
-      return [
-        video ? track.height + "P" : "仅音频",
-        video && track.fps ? track.fps + "fps" : null,
-        codecName(video ? track.vcodec : track.acodec), tier?.label,
-        video ? track.dynamic_range : null, rate
-      ].filter(Boolean).join(" · ");
     }
 
     function renderBatchWindow() {
@@ -798,7 +717,8 @@
       const mode = sources.values().next().value || requested;
       if (mixed || (state.batchPlan && mode !== state.batchPlan.mode)) state.batchTarget = null;
       const catalogue = mixed ? [] : batchCatalogue(ids);
-      const selectedTier = catalogue.find(tier => tier.key === state.batchTarget?.key);
+      const selectedTier = catalogue.find(tier => tier.key === state.batchTarget?.key)
+        || preferredTier(catalogue, ids.map(id => state.batchTracks.get(id) || []));
       const rows = batchRows(ids, selectedTier, catalogue);
       if (mixed) for (const row of rows) {
         if (state.batchSources.get(row.id) === "web") row.reason = "无 TV 片源，已检测 Web";
@@ -807,20 +727,19 @@
       const knownSize = formatResourceSize(total.bytes);
       const override = ids.length === 1 && state.episodeChoices.has(ids[0]) && rows[0].track;
       const displayedTier = override ? catalogue.find(tier => tier.key === trackTier(override)) : selectedTier;
-      const title = displayedTier ? batchTrackLabel(displayedTier.track, displayedTier, bitrateRange(displayedTier.rates)) : "最高可用 · 最佳音轨";
+      const title = displayedTier ? batchTrackLabel(displayedTier.track, displayedTier, bitrateRange(displayedTier.rates)) : "等待确认档位";
       const singleError = multiple ? null : state.batchErrors.get(ids[0]);
-      const useDefaultOnError = singleError && modeField.value === "web"
-        && !selectedTier && !state.episodeChoices.has(ids[0]);
-      const ready = !mixed && (Boolean(useDefaultOnError) || rows.every(row => row.track));
+      const ready = !mixed && rows.every(row => row.track);
       state.batchPlan = {ready, title, mode, mixed, selectors: Object.fromEntries(rows.filter(row => row.track).map(row => [row.id, row.track.locked_selector]))};
       const optionText = tier => {
         const size = combinedSize(batchRows(ids, tier, catalogue, {useOverrides: multiple}));
         const estimated = formatResourceSize(size.bytes);
-        const label = tier ? batchTrackLabel(tier.track, tier, bitrateRange(tier.rates)) : "最高可用 · 最佳音轨";
-        return label + " · " + (size.complete ? estimated : estimated ? "已知 " + estimated : "体积待确认");
+        const label = tier ? batchTrackLabel(tier.track, tier, bitrateRange(tier.rates)) : "等待确认档位";
+        return label + " · " + (size.complete ? (size.estimated ? "约 " : "") + estimated : estimated ? "已知 " + estimated : "体积待确认");
       };
-      batchFormat.replaceChildren(new Option(mixed ? "请先选择同一片源" : optionText(null), ""),
-        ...catalogue.map(tier => new Option(optionText(tier), tier.key)));
+      batchFormat.replaceChildren(...(catalogue.length
+        ? catalogue.map(tier => new Option(optionText(tier), tier.key))
+        : [new Option(mixed ? "请先选择同一片源" : "等待确认档位", "")]));
       batchFormat.value = displayedTier?.key || "";
       batchFormat.disabled = !catalogue.length;
       state.batchCatalogue = catalogue;
@@ -831,16 +750,16 @@
           ? "所选内容没有云视听小电视片源，已切换到 Web 档位。"
           : (requested === "tv" && sources.has("tv") ? "" : state.resolved.warning || "");
       $("[data-source-actions]").hidden = !mixed || ids.some(id => !state.batchSources.has(id) && !state.batchErrors.has(id));
-      $("[data-batch-size]").textContent = total.complete ? knownSize : knownSize ? "已知 " + knownSize : "待确认";
+      $("[data-batch-size]").textContent = total.complete ? (total.estimated ? "约 " : "") + knownSize : knownSize ? "已知 " + knownSize : "待确认";
       $("[data-batch-totals]").textContent = "已选 " + ids.length + " 集 · 每集按自己的档位和大小算 · " +
-        (total.complete ? "本档合计 " + knownSize + " · 每集约 " + formatResourceSize(total.bytes / rows.length)
+        (total.complete ? "本档合计 " + (total.estimated ? "约 " : "") + knownSize + " · 每集约 " + formatResourceSize(total.bytes / rows.length)
           : knownSize ? "已知部分 " + knownSize + " · 总体积待确认" : "总体积待确认");
       const failed = ids.filter(id => state.batchErrors.has(id)).length;
       const pending = ids.filter(id => !state.batchTracks.has(id) && !state.batchErrors.has(id)).length;
       let status = "";
       if (pending) status = multiple ? "正在检测画质 · 剩余 " + pending + " 集" : "正在检测画质…";
       else if (singleError) {
-        status = "画质检测失败 · " + singleError + (useDefaultOnError ? "。可重新检测或按最高可用下载。" : "");
+        status = "画质检测失败 · " + singleError;
       } else if (failed) status = failed + " 集检测失败，可重新检测";
       else if (!ready && !mixed) status = multiple ? "有剧集缺档，请调整画质或启用同编码降档。" : "所选档位在当前视频中缺失，请选择可用档位。";
       $("[data-batch-status]").textContent = status;

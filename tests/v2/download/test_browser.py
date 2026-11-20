@@ -98,6 +98,7 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         js = ROOT / "bili_remote/static/v2/download/workbench.js"
         page.set_content(f'<meta name="csrf-token" content="test"><main id="mount">{fragment}</main>')
         page.add_style_tag(content=css)
+        page.add_script_tag(path=str(js.parent / "assistant/quality-format.js"))
         page.add_script_tag(path=str(js))
         page.evaluate("""() => {
           window.calls = [];
@@ -184,7 +185,7 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
             "仅音频 · AAC · 标准 · 码率未知 · 体积待确认",
         ]
         quality = page.locator("[data-batch-format]")
-        expect(quality.locator("option")).to_have_text(["最高可用 · 最佳音轨 · 2.32 GB", *single_labels])
+        expect(quality.locator("option")).to_have_text(single_labels)
         expect(page.locator(".dv2-episode-quality option")).to_have_text(["跟随统一画质", *single_labels])
         quality.select_option(label=single_labels[0])
         confirmed_single = quality.input_value()
@@ -201,8 +202,8 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.get_by_role("button", name="检测所选画质").click()
         page.wait_for_function("window.calls.some(call => call.url === '/api/episodes/formats/batch')")
         quality = page.locator("[data-batch-format]")
-        expect(quality.locator("option").nth(1)).to_contain_text("15.84 Mbps")
-        quality.select_option(label=quality.locator("option").nth(1).inner_text())
+        expect(quality.locator("option").first).to_contain_text("15.84 Mbps")
+        quality.select_option(label=quality.locator("option").first.inner_text())
         confirmed_tier = quality.input_value()
         expect(page.locator("[data-download-form] button[type=submit]")).to_be_disabled()
         page.locator("[data-batch-fallback]").check()
@@ -242,7 +243,7 @@ def test_download_workbench_browser_interactions_and_responsive_widths():
         page.locator("[data-log-close]").click()
         page.locator("#dv2-url").fill("https://www.bilibili.com/video/BV1TEST")
         page.get_by_role("button", name="解析链接").click()
-        expect(quality.locator("option")).to_have_text(["最高可用 · 最佳音轨 · 2.32 GB", *single_labels])
+        expect(quality.locator("option")).to_have_text(single_labels)
         quality.select_option(label=single_labels[1])
         expect(page.locator("[data-batch-size]")).to_have_text("1.50 GB")
         page.locator("[data-download-form] button[type=submit]").click()
@@ -383,6 +384,7 @@ def test_download_workbench_stability_and_log_controls():
             f'<main id="mount">{fragment}</main>'
         )
         page.add_style_tag(content=css)
+        page.add_script_tag(path=str(js.parent / "assistant/quality-format.js"))
         page.add_script_tag(path=str(js))
         page.evaluate(
             """() => {
