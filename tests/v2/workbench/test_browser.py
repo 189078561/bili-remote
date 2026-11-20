@@ -1405,3 +1405,48 @@ def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server)
     finally:
         browser.close()
         playwright.stop()
+
+
+def test_screenshot_preset_applies_saved_square_design(live_server):
+    from PIL import Image
+
+    base_url, app = live_server
+    settings = app.state.services.settings
+    source = settings.download_root / "Media" / "episode01.mp4"
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+         "testsrc2=size=320x180:rate=24", "-t", "3", "-c:v", "libx264",
+         "-pix_fmt", "yuv420p", "-y", str(source)],
+        check=True,
+    )
+    app.state.services.database.update_settings({
+        "collage_default_width": "240", "collage_default_gap": "1",
+        "collage_ratio": "square", "collage_fit": "cover", "collage_info_enabled": "false",
+    })
+    playwright, browser, page, errors = browser_session(base_url, legacy=False)
+    try:
+        page.locator('.app-tabs [data-view="publish"]').click()
+        page.wait_for_function("window.V2Workbench")
+        page.locator('[data-workbench] .file-row[data-path="Media"]').dblclick()
+        page.locator('[data-workbench] .file-row[data-path="Media/episode01.mp4"] .file-check').check()
+        page.get_by_role("button", name="使用所选资源", exact=True).click()
+        page.locator(".wb-screenshot-presets summary").click()
+        page.locator('[data-wb="screenshot-preset"]').select_option("vertical")
+        page.locator('[data-wb="screenshot-trim"]').select_option("full")
+        with page.expect_request(lambda request: request.method == "POST" and request.url.endswith("/api/files/screenshots")) as pending:
+            page.locator('[data-action="screenshots"]').click()
+        sent = pending.value.post_data_json
+        assert (sent["columns"], sent["rows"]) == (1, 4)
+        assert sent["skip_start_seconds"] == sent["skip_end_seconds"] == 0
+        try:
+            expect(page.locator('[data-wb="images"] img')).to_have_count(1, timeout=15000)
+        except AssertionError:
+            pytest.fail(page.locator('[data-wb="tool-progress-images"]').inner_text()
+                        + page.locator('[data-wb="notices"]').inner_text())
+        path = page.evaluate("V2Workbench.images[0].path")
+        with Image.open(settings.images_root / path) as image:
+            assert image.size == (254, 1136)
+        assert not errors
+    finally:
+        browser.close()
+        playwright.stop()

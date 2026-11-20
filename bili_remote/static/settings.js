@@ -26,6 +26,8 @@
   let loaded = false;
   let loadingPromise = null;
   let saving = false;
+  let screenshotPreview = null;
+  let screenshotTab = "layout";
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -157,7 +159,7 @@
 
     if(group.key === "collage" && section.key === "layout") {
       const presets=element("div","button-row layout-presets");
-      for(const [label,columns,rows] of [["九宫格 3×3",3,3],["5×4",5,4],["1×4",1,4],["自动排布",null,null]]) {
+      for(const [label,columns,rows] of [["九宫格 3×3",3,3],["5 列 × 4 行",5,4],["1 列 × 4 行",1,4],["自动排布",null,null]]) {
         const preset=element("button","button secondary small",label);preset.type="button";
         preset.addEventListener("click",()=>{
           draftValues.collage_default_layout_mode=columns ? "grid" : "count";
@@ -188,7 +190,9 @@
         },
         onError: message => setStatus(message, "error")
       };
-      grid.append(window.SettingsFields.renderField(field, draftValues[field.key], context));
+      grid.append(field.key === "collage_info_fields" && window.ScreenshotLayoutSettings
+        ? window.ScreenshotLayoutSettings.fields(draftValues[field.key] || [], context.onChange)
+        : window.SettingsFields.renderField(field, draftValues[field.key], context));
     }
     if (section.advanced) {
       const details = document.createElement("details");
@@ -212,13 +216,21 @@
       collage_default_layout_mode:collage,collage_default_columns:collage,collage_default_rows:grid,
       collage_default_width:collage,collage_default_gap:collage,collage_default_total:!grid && !timestamps,
       screenshot_default_timestamps:timestamps,screenshot_default_style:!collage,
-      screenshot_upload_variant:!collage,
+      screenshot_upload_variant:!collage && draftValues.screenshot_auto_upload,
+      screenshot_default_width:!collage,
+      collage_ratio:collage,collage_fit:collage && draftValues.collage_ratio !== "original",
+      collage_default_content_type:!timestamps,
+      collage_custom_skip_start:!timestamps && draftValues.collage_default_content_type === "custom",
+      collage_custom_skip_end:!timestamps && draftValues.collage_default_content_type === "custom",
+      ...Object.fromEntries(["font", "size", "rows", "percent", "fields"].map(key =>
+        ["collage_info_" + key, draftValues.collage_info_enabled])),
     };
     for(const [key,visible] of Object.entries(visibility)) {
       const field=els.content.querySelector(`[data-setting-key="${key}"]`);
       if(field)field.hidden=!visible;
     }
     els.content.querySelectorAll(".layout-presets").forEach(n=>n.hidden=!collage);
+    screenshotPreview?.update();
   }
   function renderGroup() {
     const group = schema.groups.find(item => item.key === activeGroup) || schema.groups[0];
@@ -241,7 +253,15 @@
       sourceValues.append(option);
     }
     els.content.append(sourceValues);
-    for (const section of group.sections) els.content.append(renderSection(group, section));
+    screenshotPreview = null;
+    const sections = group.sections.map(section => renderSection(group, section));
+    if (group.key === "collage" && window.ScreenshotLayoutSettings) {
+      screenshotPreview = window.ScreenshotLayoutSettings.mount(sections, () => draftValues,
+        tab => { screenshotTab = tab; }, screenshotTab);
+      els.content.append(screenshotPreview.root);
+    } else {
+      els.content.append(...sections);
+    }
     if(window.BILI_V2){const foot=element('div','settings-inspector-footer');foot.append(els.status,els.reset);els.content.append(foot);}
     updateMediaFields();
     renderNavigation();
@@ -393,7 +413,12 @@
       for(const group of schema?.groups||[])for(const field of fieldsForGroup(group)){
         if(!query||![field.label,field.title,field.key,field.description].filter(Boolean).join(' ').toLocaleLowerCase().includes(query))continue;
         const item=element('button','settings-search-result',`${group.title} · ${field.label||field.title||field.key}`);item.type='button';
-        item.onclick=()=>{selectGroup(group.key);dialog.close();const row=[...els.content.querySelectorAll('[data-setting-key]')].find(n=>n.dataset.settingKey===field.key);if(row){for(let p=row.parentElement;p&&p!==els.content;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;row.scrollIntoView({block:'center'});row.querySelector('input,select,textarea,summary,button')?.focus();}};
+        item.onclick=()=>{selectGroup(group.key);dialog.close();
+          if (screenshotPreview) {
+            const section = group.sections.find(item => item.fields?.includes(field));
+            screenshotPreview.select(["rendering", "output"].includes(section?.key) ? "output" : section?.key);
+          }
+          const row=[...els.content.querySelectorAll('[data-setting-key]')].find(n=>n.dataset.settingKey===field.key);if(row){for(let p=row.parentElement;p&&p!==els.content;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;row.scrollIntoView({block:'center'});row.querySelector('input,select,textarea,summary,button')?.focus();}};
         results.append(item);
       }
       if(!results.children.length)results.append(element('p','home-state',query?'没有匹配设置':'输入关键词查找真实配置项'));
@@ -419,5 +444,5 @@
     }
   });
 
-  window.SettingsPage = {load, hasUnsavedChanges, confirmLeave};
+  window.SettingsPage = {load, hasUnsavedChanges, confirmLeave, async openGroup(key) { await load(); if (schema?.groups.some(group => group.key === key)) selectGroup(key); }};
 })();

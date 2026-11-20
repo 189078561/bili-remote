@@ -259,6 +259,9 @@
     }
     listen() {
       const opts = {signal: this.abort.signal};
+      this.el("screenshot-preset").addEventListener("change", event => {
+        this.el("screenshot-count-field").hidden = event.target.value !== "single";
+      }, opts);
       for (const dialog of [this.el("image-dialog"), this.el("task-log-dialog")]) {
         let onBackdrop = false;
         dialog.addEventListener("pointerdown", event => { onBackdrop = event.target === dialog; }, opts);
@@ -271,7 +274,11 @@
       this.host.addEventListener("click", event => {
         if (event.target.closest("[data-tool-settings]")) {
           const entry = document.getElementById("settings-entry");
-          if (entry) { event.preventDefault(); entry.click(); }
+          if (entry) {
+            event.preventDefault();
+            entry.click();
+            window.SettingsPage?.openGroup("collage");
+          }
           return;
         }
         const collapse = event.target.closest("[data-collapse]");
@@ -858,16 +865,35 @@
     }
     async search() {
       const query = this.el("query").value.trim(); if (!query) throw new Error("请输入作品名称"); const current = this.stamp("search"), text = query;
-      const result = await this.api.search(query, this.el("media-type").value); if (!current() || text !== this.el("query").value.trim()) return;
+      const tmdbQuery = /^\d{1,12}$/.test(query) ? `tmdb:${query}` : query;
+      const direct = /^tmdb[:\s]/i.test(tmdbQuery);
+      const batches = await Promise.allSettled([
+        this.api.search(tmdbQuery, "movie", "tmdb"),
+        this.api.search(tmdbQuery, "series", direct ? "tmdb" : "tmdb,bangumi")
+      ]);
+      if (!current() || text !== this.el("query").value.trim()) return;
+      if (batches.every(batch => batch.status === "rejected")) throw batches[0].reason;
+      const results = batches.filter(batch => batch.status === "fulfilled").map(batch => batch.value);
+      const seen = new Set();
+      const items = results.flatMap(result => result.items).filter(candidate => {
+        const id = [candidate.provider, candidate.media_type, candidate.id].join(":");
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+      const exact = candidate => [candidate.title, candidate.original_title].some(name => name?.trim().toLowerCase() === query.toLowerCase());
+      items.sort((left, right) => Number(exact(right)) - Number(exact(left)));
+      const warnings = new Set(results.flatMap(result => (result.warnings || []).map(warning => warning.message)));
+      if (batches.some(batch => batch.status === "rejected")) warnings.add("部分资料来源未能完成搜索");
       const container = this.el("candidates");
       container.replaceChildren();
-      if (result.items.length) {
+      if (items.length) {
         this.setCollapse("naming", false);
         this.setCollapse("overview", false);
       }
-      if(result.warnings?.length) container.append(node('p',result.warnings.map(x=>x.message).join('；'),'wb-note'));
-      if (!result.items.length) container.append(node("p", "未找到候选，可以调整名称后重试。", "wb-note"));
-      result.items.forEach(candidate => {
+      if (warnings.size) container.append(node('p', [...warnings].join('；'), 'wb-note'));
+      if (!items.length) container.append(node("p", "未找到候选，可以调整名称后重试。", "wb-note"));
+      items.forEach(candidate => {
         const button = node("button", null, 'wb-candidate');
         const info=node('span',null,'wb-candidate-copy');info.append(node('strong',candidate.title||candidate.name||candidate.id),node('small',[candidate.original_title,candidate.year,({movie:'电影',series:'剧集',anime:'动画'})[candidate.media_type],candidate.provider?`${candidate.provider.toUpperCase()} #${candidate.id}`:null].filter(Boolean).join(' · ')));button.append(info);
         const poster=safeURL(candidate.poster_url);if(candidate.poster_url&&poster){const image=node('img');image.alt='';image.src=poster;image.referrerPolicy='no-referrer';image.onerror=()=>image.remove();button.prepend(image);}
@@ -1123,8 +1149,27 @@
       if (!scope) return;
       const {values} = await this.api.request("/api/settings");
       if (this.epoch !== scope.epoch || this.destroyed) return;
-      const output_mode = values?.screenshot_output_mode === "collage" ? "collage" : "single";
-      const result = await this.api.request("/api/files/screenshots", {sources: this.sources(), output_mode, auto_upload: false});
+      const preset = this.el("screenshot-preset").value;
+      const trim = this.el("screenshot-trim").value;
+      const count = this.el("screenshot-count");
+      const payload = {sources: this.sources(), output_mode: values?.screenshot_output_mode || "single"};
+      if (preset === "single") {
+        payload.output_mode = "single";
+        if (count.value) {
+          if (!count.reportValidity()) return;
+          payload.total = count.valueAsNumber;
+          if (values?.screenshot_default_sampling === "timestamps") payload.sampling_mode = "random";
+        }
+      } else if (preset === "vertical" || preset === "sheet") {
+        Object.assign(payload, {output_mode: "collage", columns: preset === "vertical" ? 1 : 5, rows: 4});
+        if (values?.screenshot_default_sampling === "timestamps") payload.sampling_mode = "random";
+      }
+      if (trim === "full") {
+        Object.assign(payload, {content_type: "custom", skip_start_seconds: 0, skip_end_seconds: 0});
+      } else if (trim) {
+        payload.content_type = trim;
+      }
+      const result = await this.api.request("/api/files/screenshots", payload);
       this.track(result.task, {type: "screenshot", session: result.session_id, ...scope});
     }
     async report(type = "report") {
@@ -1419,6 +1464,10 @@
       }
       if (job.type === "screenshot") {
         const session = await this.api.request(`/api/files/screenshots/${encodeURIComponent(job.session)}`); if (!latest()) return;
+        const uploadResult = session.params?.auto_upload && !detail.result
+          ? await this.api.request(`/api/tasks/${task.id}`)
+          : detail;
+        if (!latest()) return;
         const outputs = Object.values(session.final_outputs || {});
         const selected = outputs.length ? outputs : (session.videos || []).flatMap(v => v.items || []);
         const images = selected.filter(x => x.status === "completed" && x.available !== false).map(x => ({id: String(x.id || x.video_id), path: x.output_relative_path || x.relative_path, kind: session.params?.output_mode === "collage" ? "collage" : "screenshot"})).filter(x => x.path);
@@ -1427,7 +1476,11 @@
         if (this.jobs.get(this.toolTasks.get("upload"))?.screenshot !== this.imageTask) this.toolTasks.delete("upload");
         this.toolErrors.delete("upload");
         this.excludedPublishImages.clear();
-        this.artifacts = this.artifacts.filter(x => !["screenshot", "collage", "upload"].includes(x.kind)); this.links = []; this.renderUploadLinks();
+        this.artifacts = this.artifacts.filter(x => !["screenshot", "collage", "upload"].includes(x.kind));
+        const uploads = ((uploadResult.task || uploadResult).result?.uploads || []).filter(x => x.status === "completed" && safeURL(x.remote_url));
+        this.links = [...new Set(uploads.map(x => x.remote_url))];
+        this.artifacts.push(...uploads.map(x => ({kind: "upload", id: String(x.id), resource: null, url: x.remote_url})));
+        this.renderUploadLinks();
         this.renderImages();
       }
       if (job.type === "upload") {

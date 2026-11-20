@@ -1,0 +1,49 @@
+.screenshot-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  align-items: start;
+  gap: 22px;
+}
+.screenshot-settings [hidden] { display: none !important; }
+.screenshot-settings-tabs { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 12px; }
+.screenshot-settings-tabs [aria-pressed=true] { color: var(--ws-accent, #306b55); font-weight: 600; }
+.screenshot-settings .settings-field-grid { grid-template-columns: minmax(0, 1fr); }
+.screenshot-settings .settings-field { min-width: 0; }
+.screenshot-settings .settings-field input, .screenshot-settings .settings-field select { max-width: 100%; }
+.screenshot-settings [data-setting-key="collage_info_fields"] { display: block; }
+.screenshot-fields { margin-top: 6px; }
+.screenshot-fields > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  border-bottom: 1px solid var(--ws-line, #d6e0d8);
+}
+.screenshot-fields label { display: flex; align-items: center; gap: 8px; }
+.screenshot-fields input[type=checkbox] { width: auto; margin: 0; }
+.screenshot-fields > div > span { display: flex; gap: 4px; }
+.screenshot-preview { min-width: 0; }
+.screenshot-preview-head, .screenshot-preview-meta, .screenshot-preview-nav, .screenshot-preview-size {
+  display: flex; align-items: center; flex-wrap: wrap; column-gap: 16px; row-gap: 6px;
+}
+.screenshot-preview-head { justify-content: space-between; }
+.screenshot-preview h3, .screenshot-preview h4, .screenshot-preview p { margin: 0; }
+.screenshot-preview-figure {
+  display: grid; place-items: center; margin: 10px 0;
+  padding: 8px; border-radius: 6px; background: var(--ws-surface-2, #e9ede8);
+}
+.screenshot-preview-figure canvas { display: block; max-width: 100%; max-height: 370px; object-fit: contain; }
+.screenshot-preview-figure.is-native {
+  display: block; overflow: auto; max-height: 360px;
+}
+.screenshot-preview-figure.is-native canvas { max-width: none; max-height: none; width: var(--canvas-width); }
+.screenshot-preview-size { margin: 8px 0; }
+.screenshot-preview-nav { margin-top: 6px; }
+.screenshot-info-sample { margin-top: 14px; }
+.screenshot-info-sample > div {
+  background: white; color: #263229; padding: 8px;
+  overflow-x: auto; white-space: pre; border-radius: 5px;
+}
+@media (max-width: 950px) {
+  .screenshot-settings { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}

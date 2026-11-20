@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from .screenshot_layout import COLLAGE_DESIGN_DEFAULTS
 from .config import Settings
 from .validation import ValidationError, validate_output_directory, validate_output_template
 
@@ -130,6 +131,15 @@ def _text(value: Any, definition: SettingDefinition) -> str:
     if any(ord(char) < 32 and char not in "\t\r\n" for char in text):
         raise ValidationError(f"{definition.label}包含非法字符")
     return text
+
+
+def _collage_fields(value):
+    if not isinstance(value, (list, tuple)):
+        raise ValidationError("拼图信息栏字段必须为列表")
+    allowed = COLLAGE_DESIGN_DEFAULTS["info_fields"]
+    if any(not isinstance(item, str) or item not in allowed for item in value):
+        raise ValidationError("拼图信息栏包含未知字段")
+    return list(dict.fromkeys(value))
 
 
 def _screenshot_times(value):
@@ -751,6 +761,10 @@ COLLAGE_GROUP = SettingGroup(
                     step=1,
                     unit="像素",
                 ),
+                SettingDefinition("collage_ratio", "画面比例", "select", "original",
+                                  choices=(("original", "跟随原片"), ("wide", "16∶9"), ("classic", "4∶3"), ("square", "1∶1"))),
+                SettingDefinition("collage_fit", "画面适配", "select", "contain",
+                                  choices=(("contain", "完整画面 · 补黑边"), ("cover", "居中裁切"))),
                 SettingDefinition(
                     "screenshot_default_width",
                     "独立截图宽度",
@@ -762,6 +776,24 @@ COLLAGE_GROUP = SettingGroup(
                     step=20,
                     unit="像素",
                 ),
+            ),
+        ),
+        SettingSection(
+            "information",
+            "拼图信息栏",
+            "只用于拼图。开启后可选择字段、调整排列顺序和文字布局。",
+            (
+                SettingDefinition("collage_info_enabled", "显示信息栏", "switch", True),
+                SettingDefinition("collage_info_font", "信息栏字体", "select", "sans",
+                                  choices=(("sans", "黑体"), ("serif", "宋体"), ("mono", "等宽"))),
+                SettingDefinition("collage_info_size", "信息栏字号", "number", 15,
+                                  minimum=12, maximum=32, step=1, unit="px"),
+                SettingDefinition("collage_info_rows", "信息栏行数", "number", 4,
+                                  minimum=1, maximum=8, step=1),
+                SettingDefinition("collage_info_percent", "目标高度占比", "number", 9,
+                                  minimum=2, maximum=25, step=1, unit="%"),
+                SettingDefinition("collage_info_fields", "字段与顺序", "list",
+                                  COLLAGE_DESIGN_DEFAULTS["info_fields"], validator=lambda value, _: _collage_fields(value)),
             ),
         ),
         SettingSection(

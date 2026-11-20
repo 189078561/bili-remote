@@ -42,6 +42,7 @@ from .media_probe import (
     video_details_from_payload,
 )
 from .media_tools import defaults, disc_root, optical_input
+from .screenshot_layout import COLLAGE_DESIGN_SETTINGS, MAX_CANVAS_PIXELS, MAX_CANVAS_SIDE
 from .workspace import normalize_relative_path
 
 MAX_SOURCES = 100
@@ -55,8 +56,6 @@ MIN_COLLAGE_WIDTH = 240
 MAX_COLLAGE_WIDTH = 1920
 MIN_GAP = 0
 MAX_GAP = 40
-MAX_CANVAS_PIXELS = 150_000_000
-MAX_CANVAS_SIDE = 20_000
 FFMPEG_TIMEOUT_SECONDS = 60
 FFPROBE_TIMEOUT_SECONDS = 30
 TEMP_MAX_AGE_SECONDS = 24 * 60 * 60
@@ -317,6 +316,7 @@ class ScreenshotService:
                     "columns": "collage_default_columns",
                     "rows": "collage_default_rows",
                     "thumbnail_width": "collage_default_width",
+                    **COLLAGE_DESIGN_SETTINGS,
                     "gap": "collage_default_gap",
                     "output_relative_path": "collage_output_relative_path",
                     "timestamps": "screenshot_default_timestamps",
@@ -1172,6 +1172,7 @@ class ScreenshotService:
                 "columns": "collage_default_columns",
                 "rows": "collage_default_rows",
                 "thumbnail_width": "collage_default_width",
+                **COLLAGE_DESIGN_SETTINGS,
                 "gap": "collage_default_gap",
                 "output_relative_path": "collage_output_relative_path",
             },
@@ -1311,6 +1312,7 @@ class ScreenshotService:
                         output_path=rendered,
                         font_path=font,
                         gap=int(layout["gap"]),
+                        design={key: layout[key] for key in COLLAGE_DESIGN_SETTINGS if key in layout},
                     )
                     self._validate_rendered_collage(rendered)
                     self._commit_file(rendered, target, overwrite=overwrite)
@@ -1498,6 +1500,7 @@ class ScreenshotService:
             "rows": rows,
             "thumbnail_width": thumbnail_width,
             "gap": gap,
+            **{key: data[key] for key in COLLAGE_DESIGN_SETTINGS if key in data},
         }
 
     def _parse_selections(self, manifest: Mapping[str, Any], raw: Any) -> list[dict[str, Any]]:

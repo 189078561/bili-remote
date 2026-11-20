@@ -25,7 +25,7 @@ def movie_context():
 def test_movie_official_sample():
     result = render(movie_context(), {"template_id": "movie"})
     assert result["text"] == (
-        "星际回声 Echoes Beyond (2025) | 类型：剧情 科幻"
+        "星际回声 Echoes Beyond | 类型：剧情 科幻"
         " | 导演：导演甲 | 主演：演员甲 演员乙"
     )
     assert result["missing_fields"] == []
@@ -37,7 +37,7 @@ def test_movie_director_can_be_hidden_and_missing_year_is_not_guessed():
     context["metadata"]["year"] = None
     result = render(context, {"template_id": "movie", "show_director": False})
     assert result["text"] == "星际回声 Echoes Beyond | 类型：剧情 科幻 | 主演：演员甲 演员乙"
-    assert result["missing_fields"] == ["year"]
+    assert result["missing_fields"] == []
 
 
 def test_config_can_reorder_or_hide_all_fields_without_dangling_separators():
@@ -49,6 +49,6 @@ def test_config_can_reorder_or_hide_all_fields_without_dangling_separators():
         "labels": {"cast": "演员"},
         "section_separator": " / ",
     })
-    assert result["text"] == "演员：演员甲 演员乙 / 星际回声 Echoes Beyond (2025)"
+    assert result["text"] == "演员：演员甲 演员乙 / 星际回声 Echoes Beyond"
     assert "导演：" not in result["text"]
     assert "类型：" not in result["text"]

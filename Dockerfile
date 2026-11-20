@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        aria2 ca-certificates ffmpeg fonts-wqy-microhei tini mediainfo \
+        aria2 ca-certificates ffmpeg fonts-wqy-microhei fonts-arphic-uming tini mediainfo \
         mesa-vulkan-drivers libvulkan1 libssl3t64 libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 

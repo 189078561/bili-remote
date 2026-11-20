@@ -31,7 +31,7 @@
     }
     resolve(body) { return this.request("/api/v2/resources/resolve", body); }
     probe(body) { return this.request("/api/v2/resources/probe", body); }
-    search(query, media_type) { return this.request("/api/v2/metadata/search?" + new URLSearchParams({query, media_type, providers: "tmdb,bangumi", page: "1"})); }
+    search(query, media_type, providers = "tmdb,bangumi") { return this.request("/api/v2/metadata/search?" + new URLSearchParams({query, media_type, providers, page: "1"})); }
     naming(context, overrides = {}, rules = {}) { return this.request("/api/v2/naming/preview", {context, overrides, rules}); }
     apply(preview, key) { return this.request("/api/v2/naming/apply", {preview_token: preview.preview_token, expected_revision: preview.context_revision, confirm: true, idempotency_key: key}); }
     undoPreview(batchId) { return this.request("/api/v2/naming/undo/preview", {batch_id: batchId}); }

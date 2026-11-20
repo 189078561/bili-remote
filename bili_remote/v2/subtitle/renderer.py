@@ -154,8 +154,6 @@ def render(context, subtitle_rule=None):
         missing.append("season")
     if template == "tv_season" and season_count is None and "season_episode_count" in requested:
         missing.append("season_episode_count")
-    if template == "movie" and year is None and "year" in requested:
-        missing.append("year")
 
     genres = _list_value(metadata.get("genres"))
     if not genres and template != "custom" and "genres" in requested:
@@ -180,7 +178,6 @@ def render(context, subtitle_rule=None):
         sections["episode"] = f"第{episode_number:02d}集" if episode_number is not None else ""
     elif template == "tv_episode":
         sections["episode"] = f"第{episode_number:02d}集" if episode_number is not None else ""
-    sections["year"] = f"({year})" if year is not None else ""
     sections["genres"] = _labeled(rule, "genres", genres_text)
     sections["cast"] = _labeled(rule, "cast", rule["list_separator"].join(cast))
     sections["voice_cast"] = _labeled(rule, "voice_cast", rule["list_separator"].join(voices))
@@ -211,7 +208,7 @@ def render(context, subtitle_rule=None):
         # Identity components form one compact heading. Metadata lists and
         # credits remain separate labelled sections.
         output, heading_parts = [], []
-        heading_fields = {"title", "season", "episode", "season_episode_count", "year"}
+        heading_fields = {"title", "season", "episode", "season_episode_count"}
         def flush_heading():
             if heading_parts:
                 output.append(" ".join(heading_parts))

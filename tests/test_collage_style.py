@@ -136,3 +136,36 @@ def test_render_collage_rejects_too_many_frames(tmp_path: Path) -> None:
             output_path=tmp_path / "bad.jpg",
             font_path=font,
         )
+
+
+def test_info_rows_preserve_all_fields_and_order():
+    from bili_remote.screenshot_layout import info_lines
+
+    fields = ["文件名：测试", "大小：1 GB", "分辨率：1920 × 1080", "画面比例：16:9",
+              "FPS：24", "视频：H264", "音频：AAC", "时长：02:00:00"]
+    for count in range(1, 9):
+        lines = info_lines(fields, count, 240, len)
+        assert len(lines) == count and all(lines)
+        assert "    ".join(lines).split("    ") == fields
+    assert info_lines(fields[:2], 8, 240, len) == fields[:2]
+
+
+@pytest.mark.parametrize("enabled, expected_height", [(False, 284), (True, 316)])
+def test_render_square_collage_with_optional_compact_header(tmp_path, enabled, expected_height):
+    font = find_cjk_font()
+    if font is None:
+        pytest.skip("系统没有中文字体")
+    frame = make_frame(tmp_path / "wide.png", (220, 30, 30))
+    info = CollageMediaInfo("sample.mp4", 1024, 320, 180, "16:9", 24, "H264", "AAC", 12)
+    target = tmp_path / "preview.png"
+    result = render_collage(
+        [CollageFrame(frame, 1)], info, columns=1, rows=1, thumbnail_width=240,
+        gap=1, output_path=target, font_path=font,
+        design={"ratio": "square", "fit": "contain", "info_enabled": enabled,
+                "info_fields": ["size"], "info_percent": 10},
+    )
+    assert (result["width"], result["height"]) == (254, expected_height)
+    with Image.open(target) as image:
+        offset = expected_height - 284
+        assert image.getpixel((120, offset + 6)) == (0, 0, 0)
+        assert image.getpixel((120, offset + 122)) == (220, 30, 30)
