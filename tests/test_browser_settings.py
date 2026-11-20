@@ -131,3 +131,42 @@ def test_settings_center_desktop_and_mobile_browser_flow(live_server) -> None:
     finally:
         browser.close()
         playwright.stop()
+
+
+def test_collage_preview_and_persisted_settings(live_server):
+    from playwright.sync_api import expect
+    from test_browser_modules import browser_session
+
+    base_url, app = live_server
+    playwright, browser, page, errors = browser_session(base_url, legacy=False)
+    try:
+        page.locator("#settings-entry").click()
+        page.locator('.settings-group-button[data-group="collage"]').click()
+        page.locator("#setting-screenshot_output_mode").select_option("collage")
+        preview = page.locator(".screenshot-preview")
+        expect(preview.locator("[data-tile]")).to_contain_text("480 × 201 px")
+        page.locator("#setting-collage_default_width").fill("960")
+        expect(preview.locator("[data-tile]")).to_contain_text("960 × 402 px")
+        page.locator("#setting-collage_ratio").select_option("square")
+        expect(preview.locator("[data-tile]")).to_contain_text("960 × 960 px")
+        page.get_by_role("button", name="信息栏", exact=True).click()
+        for rows in (4, 5, 6, 7, 8):
+            page.locator("#setting-collage_info_rows").fill(str(rows))
+            expect(preview.locator(".screenshot-info-sample > div > div")).to_have_count(rows)
+        page.get_by_role("button", name="下移文件名").click()
+        expect(preview.locator(".screenshot-info-sample > div > div").first).to_contain_text("大小")
+        page.locator("#settings-save").click()
+        expect(page.locator("#settings-save-status")).to_contain_text("设置已保存")
+        stored = app.state.services.database.get_settings()
+        assert stored["collage_info_rows"] == "8"
+        assert json.loads(stored["collage_info_fields"])[:2] == ["size", "filename"]
+        assert stored["collage_ratio"] == "square"
+        page.set_viewport_size({"width": 390, "height": 844})
+        expect(preview).to_be_visible()
+        page.locator('.app-tabs [data-view="publish"]').click()
+        expect(page.locator(".wb-screenshot-presets")).to_be_visible()
+        expect(preview).not_to_be_visible()
+        assert not errors
+    finally:
+        browser.close()
+        playwright.stop()

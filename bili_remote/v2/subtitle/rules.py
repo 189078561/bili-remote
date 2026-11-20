@@ -37,8 +37,8 @@ DEFAULTS = {
         "visible_fields": ["title", "season", "episode", "genres", "voice_cast"],
     },
     "movie": {
-        "field_order": ["title", "year", "genres", "director", "cast"],
-        "visible_fields": ["title", "year", "genres", "director", "cast"],
+        "field_order": ["title", "genres", "director", "cast"],
+        "visible_fields": ["title", "genres", "director", "cast"],
     },
     "custom": {"field_order": ["title", "genres", "cast"], "visible_fields": ["title", "genres", "cast"]},
 }

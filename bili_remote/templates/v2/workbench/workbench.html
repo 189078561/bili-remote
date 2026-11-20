@@ -23,8 +23,23 @@
           <button type="button" data-action="bdinfo" disabled><span data-button-label>生成 BDInfo</span></button>
           <button type="button" data-action="screenshots" disabled><span data-button-label>生成截图</span></button>
           <button type="button" data-action="upload" disabled><span data-button-label>生成图床链接</span></button>
-          <a href="/" data-tool-settings class="wb-tool-settings">工具参数在设置中调整</a>
         </div>
+        <details class="wb-screenshot-presets">
+          <summary>截图预设</summary>
+          <div class="wb-preset-options">
+            <label>截图布局<select data-wb="screenshot-preset">
+              <option value="">使用设置</option><option value="single">独立单图</option>
+              <option value="vertical">1 列 × 4 行</option><option value="sheet">5 列 × 4 行</option>
+            </select></label>
+            <label data-wb="screenshot-count-field" hidden>截图张数<input type="number" data-wb="screenshot-count" min="1" max="120" placeholder="沿用设置"></label>
+            <label>跳过片头片尾<select data-wb="screenshot-trim">
+              <option value="">使用设置</option><option value="movie">电影 · 90 / 120 秒</option>
+              <option value="series">剧集 · 90 / 180 秒</option><option value="anime">动画 · 90 / 90 秒</option>
+              <option value="full">全片</option>
+            </select></label>
+            <a href="/settings?group=collage" data-tool-settings class="wb-tool-settings">截图设置</a>
+          </div>
+        </details>
       </section>
       <section class="wb-output-summary" id="wb-tool-output" aria-label="输出">
         <div class="wb-collapse-heading"><button type="button" class="wb-collapse-toggle" data-collapse="output" aria-controls="wb-collapse-output" aria-expanded="true"><svg class="ws-icon wb-chevron" aria-hidden="true"><use href="/static/v2/shared/icons.svg#chevron"></use></svg><strong>输出</strong><small data-wb="output-status"></small></button></div>
@@ -45,7 +60,6 @@
         <div class="wb-section-heading"><h2>作品匹配与发布标题</h2><span class="wb-match-status" data-wb="match-status">待匹配</span></div>
         <div class="wb-identity-controls">
           <label>TMDB 作品搜索<input data-wb="query" placeholder="输入作品名称或 TMDB ID" maxlength="200"></label>
-          <label>影视类型<select data-wb="media-type"><option value="series">电视剧</option><option value="anime">动画</option><option value="movie">电影</option></select></label>
           <button type="button" data-action="search">搜索资料</button>
         </div>
         <div data-wb="candidates" class="wb-candidates"></div>
