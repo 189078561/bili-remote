@@ -1,16 +1,30 @@
 .screenshot-settings {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
-  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 22px;
 }
+.screenshot-settings > div,
+.screenshot-settings > .screenshot-preview {
+  flex: 1 1 min(100%, 360px);
+  min-inline-size: 0;
+}
+.screenshot-settings > div { container: screenshot-form / inline-size; }
+.screenshot-settings > .screenshot-preview { flex-grow: 1.35; }
 .screenshot-settings [hidden] { display: none !important; }
 .screenshot-settings-tabs { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 12px; }
 .screenshot-settings-tabs [aria-pressed=true] { color: var(--ws-accent, #306b55); font-weight: 600; }
-.screenshot-settings .settings-field-grid { grid-template-columns: minmax(0, 1fr); }
-.screenshot-settings .settings-field { min-width: 0; }
-.screenshot-settings .settings-field input, .screenshot-settings .settings-field select { max-width: 100%; }
-.screenshot-settings [data-setting-key="collage_info_fields"] { display: block; }
+.settings-content .screenshot-settings .settings-field {
+  min-inline-size: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 42%);
+  gap: 12px;
+}
+.screenshot-settings :is(.settings-field-copy, .settings-switch-copy) { min-inline-size: 0; }
+.settings-content .screenshot-settings .settings-field > :is(select, textarea, input) { max-inline-size: 100%; }
+.settings-content .screenshot-settings .settings-field:has(.settings-value-editor[open]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.settings-content .screenshot-settings [data-setting-key="collage_info_fields"] { display: block; }
 .screenshot-fields { margin-top: 6px; }
 .screenshot-fields > div {
   display: flex;
@@ -22,14 +36,13 @@
 .screenshot-fields label { display: flex; align-items: center; gap: 8px; }
 .screenshot-fields input[type=checkbox] { width: auto; margin: 0; }
 .screenshot-fields > div > span { display: flex; gap: 4px; }
-.screenshot-preview { min-width: 0; }
 .screenshot-preview-head, .screenshot-preview-meta, .screenshot-preview-nav, .screenshot-preview-size {
   display: flex; align-items: center; flex-wrap: wrap; column-gap: 16px; row-gap: 6px;
 }
 .screenshot-preview-head { justify-content: space-between; }
 .screenshot-preview h3, .screenshot-preview h4, .screenshot-preview p { margin: 0; }
 .screenshot-preview-figure {
-  display: grid; place-items: center; margin: 10px 0;
+  display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; margin: 10px 0;
   padding: 8px; border-radius: 6px; background: var(--ws-surface-2, #e9ede8);
 }
 .screenshot-preview-figure canvas { display: block; max-width: 100%; max-height: 370px; object-fit: contain; }
@@ -44,6 +57,12 @@
   background: white; color: #263229; padding: 8px;
   overflow-x: auto; white-space: pre; border-radius: 5px;
 }
-@media (max-width: 950px) {
-  .screenshot-settings { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@container screenshot-form (width < 340px) {
+  .settings-content .screenshot-settings .settings-field:not(.settings-switch-field) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .settings-content .screenshot-settings .settings-field > :is(select, input:not([type=checkbox])) {
+    justify-self: start;
+  }
 }

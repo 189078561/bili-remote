@@ -170,3 +170,49 @@ def test_collage_preview_and_persisted_settings(live_server):
     finally:
         browser.close()
         playwright.stop()
+
+
+def test_screenshot_settings_keep_labels_and_preview_inside_available_width(live_server):
+    from playwright.sync_api import expect
+    from test_browser_modules import browser_session
+
+    base_url, _ = live_server
+    playwright, browser, page, errors = browser_session(base_url, legacy=False)
+    try:
+        page.locator("#settings-entry").click()
+        page.locator('.settings-group-button[data-group="collage"]').click()
+        page.locator("#setting-screenshot_output_mode").select_option("collage")
+        page.locator("#setting-collage_default_width").fill("960")
+        page.get_by_role("button", name="5 列 × 4 行", exact=True).click()
+
+        layout = page.locator(".screenshot-settings")
+        figure = layout.locator(".screenshot-preview-figure")
+        canvas = figure.locator("canvas")
+        expect(canvas).to_be_visible()
+        for width in (1440, 1097, 768, 390, 320):
+            page.set_viewport_size({"width": width, "height": 900})
+            measurements = layout.evaluate("""panel => {
+                const copy = panel.querySelector('[data-setting-key="screenshot_output_mode"] .settings-field-copy');
+                const control = panel.querySelector('#setting-screenshot_output_mode');
+                const figure = panel.querySelector('figure');
+                const bounds = panel.getBoundingClientRect();
+                return {
+                    labelWidth: copy.clientWidth,
+                    formOverflow: control.getBoundingClientRect().right - bounds.right,
+                    figureOverflow: figure.scrollWidth - figure.clientWidth,
+                    canvasOverflow: panel.querySelector('canvas').getBoundingClientRect().right - bounds.right,
+                };
+            }""")
+            assert measurements["labelWidth"] >= 120, (width, measurements)
+            assert measurements["formOverflow"] <= 1, (width, measurements)
+            assert measurements["figureOverflow"] <= 1, (width, measurements)
+            assert measurements["canvasOverflow"] <= 1, (width, measurements)
+
+        layout.get_by_role("button", name="查看原寸").click()
+        assert figure.evaluate("element => element.scrollWidth > element.clientWidth")
+        layout.get_by_role("button", name="适应预览").click()
+        assert figure.evaluate("element => element.scrollWidth <= element.clientWidth + 1")
+        assert not errors
+    finally:
+        browser.close()
+        playwright.stop()
