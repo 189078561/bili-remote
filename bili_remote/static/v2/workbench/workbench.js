@@ -222,6 +222,7 @@
       this.toolTasks = new Map(); this.toolErrors = new Map(); this.resultErrors = new Map();
       this.introVersion = 0;
       this.introApplied = null; this.introPending = null;
+      this.excludedPublishImages = new Set();
       this.buttonLabels = new WeakMap(); this.copyFeedback = new WeakMap(); this.dialogState = new WeakMap(); this.torrentIds = new Set();
       this.listen();
     }
@@ -571,7 +572,8 @@
       this.controls();
     }
     invalidateContent() {
-      this.content = ""; this.el("output").textContent = ""; this.el("rich-preview").replaceChildren(); this.el("local-images-preview").replaceChildren(); this.el("local-images-preview").hidden = true; this.el("html-preview").hidden = true; this.el("html-preview").removeAttribute("srcdoc");
+      this.stamp("compose");
+      this.content = ""; this.el("output").textContent = ""; this.el("rich-preview").replaceChildren(); this.el("html-preview").hidden = true; this.el("html-preview").removeAttribute("srcdoc");
       this.el("validation").textContent = this.context ? "正在更新预览…" : "等待识别服务返回上下文"; this.controls();
     }
     stageSelection(items, hint = "") {
@@ -609,6 +611,7 @@
         : "当前媒体正在处理。切换后任务仍会运行，结果不会显示在新资源下。确定切换？")) return false;
       const epoch = ++this.epoch;
       this.toolTasks.clear(); this.toolErrors.clear(); this.torrentIds.clear(); this.linkSignature = null;
+      this.excludedPublishImages.clear();
       this.closeDialog(this.el("image-dialog"), false);
       this.closeDialog(this.el("task-log-dialog"), false);
       this.nameEdits = new Set(); this.manualNaming = false; this.namesIdentity = null; this.namesInitialized = false;
@@ -725,6 +728,7 @@
       if (this.localNamingRule?.epoch === this.epoch) this.context.effective_rules = {...this.context.effective_rules, naming_rule:this.localNamingRule.rule, ...(this.localNamingRule.subtitle ? {subtitle_rule:this.localNamingRule.subtitle} : {})};
       this.pendingAdjustmentEpoch = null;
       this.resources = response.context.resources; this.contextChanged();
+      this.scheduleCompose();
       for (const name of ["release_title", "subtitle"]) if (!this.dirty.has(name)) this.setField(name, "");
       this.renderContext();
       const candidates = this.el("candidates");
@@ -985,26 +989,17 @@
       if (!this.context) return; const current = this.stamp("compose"), edit = this.editVersion, revision = this.context.revision;
       try {
         const format = this.el("format").value;
-        const cover = this.context.metadata?.poster_url;
         const result = await this.api.compose({
           context: this.context,
           ...this.fields,
           overview_is_introduction: true,
-          introduction_poster: cover?.source === "tmdb" ? safeURL(val(cover)) || null : null,
           reports: this.artifacts.filter(item => item.kind === "report"),
           screenshots: this.artifacts.filter(item => ["screenshot", "collage", "upload"].includes(item.kind)
-            && /^https?:\/\//i.test(item.url || "") && safeURL(item.url)),
-          links: this.links,
+            && /^https?:\/\//i.test(item.url || "") && safeURL(item.url) && !this.excludedPublishImages.has(item.url)),
           format,
         });
         if (!current() || edit !== this.editVersion || revision !== this.context?.revision || result.context_revision !== revision) return;
-        const localImages=this.el('local-images-preview');localImages.replaceChildren();
         const unpublished=this.images.length && !this.artifacts.some(x=>x.kind==='upload' && safeURL(x.url));
-        localImages.hidden=!unpublished;
-        if(unpublished){
-          localImages.append(node('p','缩略图仅本地可见。生成图床链接后才会加入可复制的发布内容。','wb-note'));
-          for(const image of this.images){const img=node('img');img.src='/api/files/image?'+new URLSearchParams({root_key:'images',path:image.path});img.alt=image.path;localImages.append(img);}
-        }
         this.content = result.content; this.el("output").textContent = result.content;
         this.el("rich-preview").hidden = format === "html";
         if (format !== "html") global.BiliWorkbenchPreview?.render(this.el("rich-preview"), result.content, format);
@@ -1424,6 +1419,7 @@
         this.images = images; this.imageTask = key(task);
         if (this.jobs.get(this.toolTasks.get("upload"))?.screenshot !== this.imageTask) this.toolTasks.delete("upload");
         this.toolErrors.delete("upload");
+        this.excludedPublishImages.clear();
         this.artifacts = this.artifacts.filter(x => !["screenshot", "collage", "upload"].includes(x.kind)); this.links = []; this.renderUploadLinks();
         this.renderImages();
       }
@@ -1506,7 +1502,15 @@
         link.href = safeURL(url); link.target = "_blank"; link.rel = "noopener noreferrer";
         const copyUrl = node("button", "复制链接"); copyUrl.type = "button"; copyUrl.onclick = () => this.copyValue(url, copyUrl);
         const copyBBCode = node("button", "复制 BBCode"); copyBBCode.type = "button"; copyBBCode.onclick = () => this.copyValue(`[img]${url}[/img]`, copyBBCode);
-        row.append(preview, link, node("code", `[img]${url}[/img]`), copyUrl, copyBBCode); this.el("upload-links").append(row);
+        const label = node("label"), publish = node("input");
+        publish.type = "checkbox"; publish.checked = !this.excludedPublishImages.has(url);
+        publish.onchange = () => {
+          if (publish.checked) this.excludedPublishImages.delete(url);
+          else this.excludedPublishImages.add(url);
+          this.scheduleCompose();
+        };
+        label.append(publish, " 加入发布正文");
+        row.append(preview, link, node("code", `[img]${url}[/img]`), label, copyUrl, copyBBCode); this.el("upload-links").append(row);
       });
       if (this.links.length) for (const [label, text] of [["复制全部链接", this.links.join("\n")], ["复制全部 BBCode", this.links.map(url => `[img]${url}[/img]`).join("\n")]]) {
         const button = node("button", label);

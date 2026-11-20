@@ -799,7 +799,7 @@ def test_v2_task_artifact_refs_feed_upload_links_and_composition(live_server):
         page.route('**/api/tasks/31', lambda route: route.fulfill(json=tasks[0]))
         mount(page)
         page.evaluate("wb.select([{root_key:'downloads',relative_path:'Media/episode01.mp4',kind:'video',fingerprint:'fixture'}])")
-        expect(page.locator('[data-wb="output"]')).to_contain_text('合成简介')
+        expect(page.locator('[data-wb="output"]')).to_contain_text('Generated title')
         queued = {'kind': 'processing', 'id': 31, 'task_type': 'image_upload', 'status': 'queued', 'progress': None, 'artifact_refs': []}
         tasks.append(queued)
         page.evaluate('(task) => wb.track(task, {type:"upload", epoch:wb.epoch})', queued)
@@ -809,7 +809,13 @@ def test_v2_task_artifact_refs_feed_upload_links_and_composition(live_server):
         page.wait_for_timeout(350)
         compositions = [payload for path, payload in requests if path == 'publishing/preview']
         assert artifact in compositions[-1]['screenshots']
-        assert artifact['url'] in compositions[-1]['links']
+        assert not compositions[-1].get('links')
+        with page.expect_request('**/api/v2/publishing/preview') as pending:
+            page.get_by_role("checkbox", name="加入发布正文").uncheck()
+        assert not pending.value.post_data_json["screenshots"]
+        with page.expect_request('**/api/v2/publishing/preview') as pending:
+            page.get_by_role("checkbox", name="加入发布正文").check()
+        assert pending.value.post_data_json["screenshots"] == [artifact]
         assert not errors, errors
     finally:
         browser.close()
@@ -1302,7 +1308,8 @@ def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server)
         from bili_remote.v2.workbench.publishing import PublishingService
 
         v2_fixture(page, requests, {"media_type": "anime", "tmdb_id": "8"})
-        intro = "◎片　　名　凡人修仙传 年番4\n◎年　　代　2026"
+        cover = "https://image.tmdb.org/t/p/original/fixture.jpg"
+        intro = "◎译　　名　慕兰之战\n◎片　　名　凡人修仙传 年番4\n◎年　　代　2026\n◎编　　剧　篇章编剧\n\n◎简　　介\n\n　　篇章剧情"
         failed_reference = "12345"
 
         def introduction(route):
@@ -1318,6 +1325,7 @@ def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server)
             assert payload["overview_is_introduction"] is True
             context = payload["context"]
             context["metadata"]["year"] = {"value": 2020, "source": "tmdb"}
+            context["metadata"]["poster_url"] = {"value": cover, "source": "tmdb"}
             route.fulfill(json=PublishingService().compose(
                 context, payload["release_title"], payload["subtitle"], payload["overview"],
                 format=payload["format"], overview_is_introduction=payload["overview_is_introduction"],
@@ -1339,11 +1347,23 @@ def test_workbench_douban_chapter_has_no_tmdb_introduction_fallback(live_server)
         query.fill("https://movie.douban.com/subject/37457082/")
         fetch.click()
         expect(editor).to_have_value(intro)
-        expect(page.locator("[data-wb=output]")).to_have_text(intro)
+        expect(page.locator("[data-wb=output]")).to_have_text(f"[img]{cover}[/img]\n\n{intro}")
         query.fill(failed_reference)
         fetch.click()
         expect(page.locator("[data-wb=intro-status]")).to_contain_text("PT-Gen 鉴权失败")
         expect(editor).to_have_value(intro)
+        edited = intro + "\n\n　　人工补充。"
+        editor.fill(f"[img]{cover}[/img]\n\n{edited}")
+        expected = f"[img]{cover}[/img]\n\n{edited}"
+        expect(page.locator("[data-wb=output]")).to_have_text(expected)
+        page.evaluate("navigator.clipboard.writeText = async text => {window.copied = text}")
+        for mode in ("effect", "source"):
+            page.locator(f"[data-preview-mode={mode}]").click()
+            if mode == "effect":
+                expect(page.locator("[data-wb=rich-preview] img")).to_have_count(1)
+                expect(page.locator("[data-wb=rich-preview]")).to_contain_text("人工补充。")
+            page.locator("[data-copy=content]").click()
+            assert page.evaluate("window.copied") == page.locator("[data-wb=output]").text_content() == expected
         assert [payload for name, payload in requests if name == "publishing/introduction"] == [
             {"source": "ptgen", "reference": "https://movie.douban.com/subject/37457082/"},
             {"source": "ptgen", "reference": failed_reference},

@@ -9,6 +9,14 @@ from ..naming.errors import NamingError
 from .markup import format_description
 
 
+TMDB_POSTER = re.compile(r"https://image\.tmdb\.org/t/p/(?:original|w\d+)/([\w.-]+)")
+INTRO_IMAGES = re.compile(
+    r"\[code\][\s\S]*?\[/code\]|"
+    r"(\[center\]\s*)?\[img\]([^\[\]\r\n]+)\[/img\](?(1)\s*\[/center\])",
+    re.I,
+)
+
+
 INTRO_LABELS = (
     ("译　　名", "title_zh"),
     ("片　　名", "original_title"),
@@ -68,10 +76,15 @@ def image_block(url, output, alt="媒体图片"):
 
 
 def report_block(text, output):
+    text = re.sub(
+        r"(?im)^([ \t]*Complete name[ \t]*:[ \t]*)([^\r\n]+)",
+        lambda match: match[1] + re.split(r"[/\\]", match[2].strip().rstrip("/\\"))[-1],
+        text,
+    )
     if output == "html":
         return "<pre>" + html.escape(text) + "</pre>"
     if output == "bbcode":
-        return "[code]" + text.replace("[", "&#91;").replace("]", "&#93;") + "[/code]"
+        return "[code]\n" + escape_text(text.rstrip("\r\n"), output) + "\n[/code]"
     fence = "````"
     return f"{fence}text\n{text}\n{fence}"
 
@@ -142,13 +155,25 @@ class PublishingService:
                 blocks.append("### ◎简　　介\n\n" + indent_overview(body))
         return "\n\n".join(blocks), poster
 
-    def _edited_introduction(self, overview, poster, output):
-        # The editor supplies the entire block. Leave it intact and avoid
-        # injecting the naming identity's fields or a second cover.
+    def _edited_introduction(self, overview, poster, output, seen_images):
+        # Count the TMDB thumbnail and full-size versions as the same cover.
+        cover_match = TMDB_POSTER.fullmatch(poster or "")
+
+        def remove_duplicate_cover(match):
+            url = (match[2] or "").strip()
+            if not safe_url(url):
+                return match[0]
+            poster_match = TMDB_POSTER.fullmatch(url)
+            seen_images.add(url)
+            if cover_match and poster_match and poster_match[1] == cover_match[1]:
+                return ""
+            return match[0]
+
+        overview = INTRO_IMAGES.sub(remove_duplicate_cover, overview).strip("\r\n")
         blocks = []
-        if (poster and re.fullmatch(r"https://image\.tmdb\.org/t/p/(?:original|w\d+)/[\w.-]+", poster)
-                and not re.match(r"^\s*(?:\[center\]\s*)?\[img\]", overview, re.I)):
+        if cover_match:
             blocks.append(image_block(poster, output, "主封面"))
+            seen_images.add(poster)
         if overview.strip():
             blocks.append(format_description(overview, output, safe_url))
         return "\n\n".join(blocks)
@@ -186,11 +211,14 @@ class PublishingService:
                 {"code": "missing_overview", "field": "overview", "message": "简介正文尚未生成"}
             )
 
-        blocks = []
+        blocks, seen_images = [], set()
         if overview_is_introduction:
-            introduction = self._edited_introduction(overview, introduction_poster, format)
+            poster = self._tmdb_poster(context, warnings) or introduction_poster
+            introduction = self._edited_introduction(overview, poster, format, seen_images)
         else:
-            introduction, _ = self._introduction(context, overview, format, warnings)
+            introduction, poster = self._introduction(context, overview, format, warnings)
+            if poster:
+                seen_images.add(poster)
         if introduction:
             blocks.append(introduction)
         elif not overview.strip():
@@ -200,12 +228,11 @@ class PublishingService:
 
         reports = list(report_texts or [])
         if reports:
-            blocks.extend(report_block(text, format) for text in reports if text)
+            blocks.extend(report_block(text, format) for text in reports if text.strip())
 
-        images = []
         for artifact in artifacts or []:
             url = artifact.get("url")
-            if not url:
+            if not url or url in seen_images:
                 continue
             if not safe_url(url):
                 warnings.append(
@@ -214,10 +241,12 @@ class PublishingService:
                 continue
             if artifact.get("kind") not in {"screenshot", "collage", "upload"}:
                 continue
-            images.append(image_block(url, format))
-        blocks.extend(images)
+            blocks.append(image_block(url, format))
+            seen_images.add(url)
 
-        for url in links or []:
+        for url in dict.fromkeys(links or []):
+            if url in seen_images:
+                continue
             if not safe_url(url):
                 warnings.append(
                     {"code": "invalid_url", "message": "已忽略不安全的链接"}

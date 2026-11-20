@@ -21,7 +21,7 @@ FileBrowser 交接（真实 fingerprint 来自 browse，不在前端计算）：
 - 主标题：`POST /api/v2/release-title/render`，`{context,rule}`。
 - 副标题：`POST /api/v2/subtitles/render`，`{context,rule}`。
 - 命名预览：`POST /api/v2/naming/preview`，`{context,overrides:{file_values:{},episode_overrides:{},manual_names:{}},rules}`。
-- 合成：`POST /api/v2/publishing/preview`，传 context、三个当前编辑字符串、真实 ArtifactRef/null、links 及格式；不传 project_id/session_id。
+- 合成：`POST /api/v2/publishing/preview`，使用 `overview_is_introduction: true`，传 context、当前编辑字段以及当前资源的报告和已勾选发布的图片引用。例如 `{"overview_is_introduction":true,"overview":"◎片　　名　独立篇章","reports":[],"screenshots":[{"kind":"upload","id":"example","url":"https://example.test/preview.jpg"}],"format":"bbcode"}`。正文依次组合 TMDB 封面、原编辑资料、报告、图片。主副标题独立复制，图片直链不另写入正文。复制完整正文与当前源码视图使用同一份响应。
 
 确认改名仅传已预览 token：
 
