@@ -10,13 +10,14 @@ from typing import Literal
 
 from ..contracts import ResourceContext
 from .douban_references import USER_SUPPLIED_DOUBAN
+from .imdb_ratings import official_ratings
 from .providers import ProviderError, identifier
 
 _FIELDS = (
     ("译　　名", "aliases"), ("片　　名", "title"), ("年　　代", "year"),
     ("产　　地", "region"), ("类　　别", "genres"), ("语　　言", "languages"),
-    ("上映日期", "date"), ("豆瓣评分", "douban_rating"), ("豆瓣链接", "douban_url"),
-    ("IMDb评分", "imdb_rating"), ("IMDb链接", "imdb_url"),
+    ("上映日期", "date"), ("IMDb评分", "imdb_rating"), ("IMDb链接", "imdb_url"),
+    ("豆瓣评分", "douban_rating"), ("豆瓣链接", "douban_url"),
     ("Bangumi评分", "bangumi_rating"), ("Bangumi链接", "bangumi_url"),
     ("季　　数", "season_count"), ("季　　号", "season"), ("集　　数", "episode_count"),
     ("片　　长", "runtime"), ("导　　演", "directors"), ("编　　剧", "writers"),
@@ -27,6 +28,7 @@ _MULTILINE = {"cast", "voice"}
 _LIST_FIELDS = {"aliases", "region", "genres", "languages", "production", "original_work", "music", "directors", "writers", *_MULTILINE}
 _EMPTY = {"", "-", "—", "暂无", "暂无评分", "未知", "未评分", "n/a", "none", "null"}
 _LEADING_COVER = re.compile(r"^\s*(?:\[center\]\s*)?\[img\][^\r\n\[]+\[/img\](?:\s*\[/center\])?\s*", re.I)
+_CHAPTER = re.compile(r"第\s*[0-9一二三四五六七八九十百]+\s*[季部篇章]|年番|season\s*\d+", re.I)
 Source = Literal["current", "tmdb_season", "ptgen", "bangumi"]
 
 
@@ -125,10 +127,22 @@ def tmdb_poster(path):
     return "https://image.tmdb.org/t/p/original" + path if isinstance(path, str) and re.fullmatch(r"/[\w.-]+", path) else None
 
 
-def imdb_score(value):
+def publication_score(value, votes=None):
+    if isinstance(value, dict):
+        votes = value.get("votes", value.get("count", value.get("ratingCount", votes)))
+        for key in ("formatted", "average", "ratingValue", "score", "value"):
+            if result := publication_score(value.get(key), votes):
+                return result
+        return ""
     raw = rating(value)
-    votes = re.search(r"(?:from\s+|\()([1-9][\d,]*)\s*(?:users?|votes?|人评价|人评分|票)", raw, re.I)
-    return raw if votes else ""
+    if not raw or re.search(r"(?<![\d,])0\s*(?:users?|votes?)\b", raw, re.I):
+        return ""
+    if votes not in (None, "") and not count(text(votes).replace(",", "")):
+        return ""
+    if re.fullmatch(r"\d+(?:\.\d+)?(?:/10|分)?", raw):
+        score = re.match(r"[\d.]+", raw)[0] + "/10"
+        return f"{score} ({votes} 人评价)" if votes not in (None, "") else score
+    return raw
 
 
 def render_introduction(fields):
@@ -178,11 +192,11 @@ def clean_ptgen_format(formatted):
     return "\n".join(lines).strip()
 
 
-def complete_ptgen_format(formatted, fields):
+def merge_ptgen_fields(formatted, fields):
     """Render one PT-Gen entry, retaining unrecognized fields and full lists."""
     headers = list(re.finditer(r"(?m)^[^\S\r\n]*◎[^\S\r\n]*([^\r\n]*)", formatted))
     if not headers:
-        return render_introduction({**fields, "overview": fields.get("overview") or formatted})
+        return {**fields, "overview": fields.get("overview") or formatted}, [], []
 
     matched = {key: re.compile(_heading_pattern(label) + r"(?=$|[\s:：])", re.I) for label, key in _FIELDS}
     combined = dict(fields)
@@ -218,14 +232,22 @@ def complete_ptgen_format(formatted, fields):
                     combined[key] = names([*names(raw), *structured])
             elif key == "imdb_url":
                 combined[key] = imdb_link(raw) or combined.get(key)
-            elif key == "imdb_rating":
-                combined[key] = imdb_score(raw) or combined.get(key)
+            elif key in {"imdb_rating", "douban_rating"}:
+                score = publication_score(raw)
+                structured = fields.get(key) or ""
+                if score and not (score.endswith("/10") and structured.startswith(score + " ")):
+                    combined[key] = score
             elif raw:
                 combined[key] = raw
             break
         else:
             (after_overview if seen_overview else extra).append(block)
 
+    return combined, extra, after_overview
+
+
+def render_ptgen(combined, extra, after_overview):
+    combined = dict(combined)
     overview = render_introduction({"overview": combined.pop("overview", None)})
     working = render_introduction(combined)
     meta = "\n".join(block for block in [working, *extra] if block)
@@ -311,35 +333,11 @@ def tmdb_fields(row, *, season=False):
 
 
 def ptgen_rating(row, site):
-    structured = (row.get("ratings") or {}).get(site)
-    if isinstance(structured, dict):
-        if structured.get("votes") is not None and not count(structured["votes"]):
-            return ""
-        valid = rating(structured.get("formatted")) or rating({**structured, "score": structured.get("average")})
-        if valid:
-            return valid
-    raw = rating(row.get(site + "_rating") or row.get(site + "_score"))
-    if raw:
-        return raw
-    average, votes = row.get(site + "_rating_average"), row.get(site + "_votes")
-    return rating(f"{average}/10 from {votes} users") if count(votes) else ""
-
-
-def structured_imdb_score(row):
-    for item in ((row.get("ratings") or {}).get("imdb"), row.get("imdb"), {
-        "formatted": row.get("imdb_rating") or row.get("imdb_score"),
-        "average": row.get("imdb_rating_average"), "votes": row.get("imdb_votes"),
-    }):
-        if not isinstance(item, dict):
-            continue
-        votes = item.get("votes", item.get("count"))
-        if votes is not None and not count(str(votes).replace(",", "")):
-            continue
-        if formatted := imdb_score(item.get("formatted")):
-            return formatted
-        average = item.get("average") or item.get("score") or item.get("value") or item.get("formatted")
-        if votes and re.fullmatch(r"(?:10(?:\.0+)?|[0-9](?:\.\d+)?)", text(average)) and rating(average):
-            return f"{average}/10 ({votes} 人评价)"
+    votes = row.get(site + "_votes")
+    for value in ((row.get("ratings") or {}).get(site), row.get(site + "_rating"),
+                  row.get(site + "_score"), row.get(site + "_rating_average"), row.get(site) if isinstance(row.get(site), dict) else None):
+        if result := publication_score(value, votes):
+            return result
     return ""
 
 
@@ -365,7 +363,7 @@ def ptgen_fields(row, reference):
         "douban_url": "https://movie.douban.com/subject/" + reference + "/",
         "douban_rating": ptgen_rating(row, "douban"),
         "imdb_url": next((link for entry in candidates if (link := imdb_link(entry))), ""),
-        "imdb_rating": structured_imdb_score(row),
+        "imdb_rating": ptgen_rating(row, "imdb"),
         "season_count": count(row.get("seasons")), "episode_count": count(row.get("episodes") or row.get("episode_count")),
         "runtime": runtimes(row.get("runtime") or row.get("duration") or row.get("length")),
         "directors": row.get("director") or row.get("directors"), "writers": row.get("writer") or row.get("writers") or row.get("screenwriter"),
@@ -376,9 +374,53 @@ def ptgen_fields(row, reference):
     }
 
 
+def matched_imdb(fields, ctx):
+    identity = ctx.get("identity") or {}
+    ref = identity.get("tmdb_id")
+    if not ref or not identity.get("confirmed"):
+        return "", ""
+    work = context_fields(ctx, ref)
+    link = work["imdb_url"]
+    if not link:
+        return "", ""
+
+    def normalized(value):
+        return re.sub(r"\s+", "", text(value)).casefold()
+
+    title = normalized(fields.get("title"))
+    work_titles = {normalized(name) for name in [work["title"], *work["aliases"]] if text(name)}
+    exact = title in work_titles
+    suffixes = [title[len(name):] for name in work_titles if title.startswith(name)]
+    chapter = any(_CHAPTER.match(suffix) or suffix.startswith(("：", ":")) for suffix in suffixes)
+    genres = set(names(fields.get("genres")))
+    work_genres = set(names(work.get("genres")))
+    movie = identity["media_type"] == "movie"
+    if not (exact or chapter) or (movie and (fields.get("episode_count") or chapter)):
+        return "", ""
+    if genres and work_genres and (("动画" in genres) != ("动画" in work_genres)):
+        return "", ""
+    same_year = bool(text(fields.get("year"))) and text(fields["year"]) == text(work["year"])
+    if movie and not same_year:
+        return "", ""
+    if not movie and not (chapter or fields.get("episode_count") or fields.get("season")):
+        return "", ""
+    # Compare credits in the same role, allowing localized bilingual names.
+    for role in ("directors", "cast"):
+        credits = names(fields.get(role))
+        for person in names(work[role]):
+            if any(person == name or name.startswith(person + " ") or name.startswith(person + "（") for name in credits):
+                if movie:
+                    return link, "电影"
+                # A season entry can also have the exact series title. The
+                # link is valid, but whole-series votes do not describe it.
+                return link, "动画系列" if "动画" in work_genres else "剧集系列"
+    return "", ""
+
+
 class IntroductionService:
-    def __init__(self, providers):
+    def __init__(self, providers, ratings=official_ratings):
         self.providers = providers
+        self.ratings = ratings
 
     def provider(self, name):
         provider = self.providers.get(name)
@@ -462,7 +504,7 @@ class IntroductionService:
             poster = tmdb_poster(row.get("poster_path"))
             label = f"TMDB · 第 {request.season} 季 · {text(fields['title'])}"
         elif source == "ptgen":
-            return await self.douban(canonical_reference(request.reference, source), request.matched_movie_id)
+            return await self.douban(canonical_reference(request.reference, source), request.matched_movie_id, ctx)
         else:
             ref = canonical_reference(request.reference, source)
             fields, warnings = await self.bangumi(ref)
@@ -506,50 +548,63 @@ class IntroductionService:
             return link
         return ""
 
-    async def douban(self, reference, matched_movie=None):
+    async def douban(self, reference, matched_movie=None, ctx=None):
         supplied = USER_SUPPLIED_DOUBAN.get(reference, {})
         url = "https://movie.douban.com/subject/" + reference + "/"
         label = "PT-Gen · 豆瓣 " + reference
+        warnings = []
         try:
             data = await self.ptgen_call("get", {"url": url, "format": "bbcode"})
         except ProviderError as exc:
             if not supplied:
                 raise
-            return {
-                "text": render_introduction(supplied), "poster": None,
-                "label": "用户提供的资料 · 豆瓣 " + reference,
-                "warnings": [str(exc) + " 本次采用该条目的用户提供资料。"],
-            }
+            data = {}
+            label = "用户提供的资料 · 豆瓣 " + reference
+            warnings.append(str(exc) + " 本次采用该条目的用户提供资料。")
         row = data.get("data") if isinstance(data.get("data"), dict) else data
         remote_id = row.get("id") or row.get("sid")
         if row.get("site") not in (None, "", "douban") or (remote_id and str(remote_id) != reference):
             raise ProviderError("invalid_schema", "PT-Gen 返回的豆瓣条目与所填 ID 不一致。")
         formatted = clean_ptgen_format((row.get("formats") or {}).get("bbcode") or row.get("format") or data.get("format"))
-        fields = ptgen_fields(row, reference)
-        content = complete_ptgen_format(formatted, fields)
-        if content == "◎豆瓣链接　" + url and not supplied:
+        fields, extra, tail = merge_ptgen_fields(formatted, ptgen_fields(row, reference))
+        if not supplied and render_ptgen(fields, extra, tail) == "◎豆瓣链接　" + url:
             raise ProviderError("empty_introduction", "PT-Gen 未返回可用资料，可尝试其他条目或直接粘贴")
 
-        labels = {**{key: name for name, key in _FIELDS}, "overview": "简　　介"}
-        def missing(key):
-            return not re.search(r"(?m)^◎" + _heading_pattern(labels[key]) + r"(?:$|[^\S\r\n])", content)
+        labels = {key: name.replace("　", "") for name, key in _FIELDS}
+        labels["overview"] = "简介"
+        supplement = {key: value for key, value in supplied.items() if not fields.get(key)}
+        fields.update(supplement)
+        if supplement and data:
+            warnings.append("已用该条目的用户提供资料补充：" + "、".join(labels[key] for key in supplement) + "。")
 
-        supplement = {key: value for key, value in supplied.items() if missing(key)}
-        warnings = []
-        if supplement:
-            content = complete_ptgen_format(formatted, {**fields, **supplement})
-            warnings.append("已用该条目的用户提供资料补充：" +
-                            "、".join(labels[key].replace("　", "") for key in supplement) + "。")
-        if missing("imdb_url"):
-            link = await self.linked_imdb(row, reference, matched_movie)
-            if link:
-                content = complete_ptgen_format(content, {"imdb_url": link})
-        missing_labels = [labels[key].replace("　", "") for key in
-                          ("aliases", "languages", "directors", "writers", "cast")
-                          if key not in supplement and missing(key)]
-        if missing_labels:
-            warnings.append("PT-Gen 本次未提供：" + "、".join(missing_labels) + "。")
-        return {"text": content, "poster": None, "label": label, "warnings": warnings}
+        explicit_link = fields.get("imdb_url")
+        matched_link, scope = matched_imdb(fields, ctx or {})
+        crosslink = row.get("tmdb_url") or row.get("tmdb_link") or row.get("tmdb") or row.get("tmdb_id")
+        if not fields.get("imdb_url"):
+            context_tmdb = ((ctx or {}).get("metadata", {}).get("links") or {}).get("tmdb")
+            if matched_link and (not crosslink or str(crosslink).rstrip("/") == context_tmdb):
+                fields["imdb_url"] = matched_link
+                warnings.append(f"IMDb 链接取自已匹配的{scope}。")
+            elif crosslink or matched_movie:
+                fields["imdb_url"] = await self.linked_imdb(row, reference, matched_movie)
+        # An explicit title link on a seasonal Douban page may point to the
+        # parent series. Only fetch additional votes for an identified title.
+        seasonal = fields.get("season") or any(_CHAPTER.search(name) for name in
+                                              [text(fields.get("title")), *names(fields.get("aliases"))])
+        parent_link = scope in {"动画系列", "剧集系列"} and explicit_link == matched_link
+        exact_link = explicit_link if not seasonal and not parent_link else ""
+        if scope == "电影" and fields.get("imdb_url") == matched_link:
+            exact_link = matched_link
+        if exact_link and not fields.get("imdb_rating"):
+            try:
+                record = await asyncio.to_thread(self.ratings.lookup, exact_link.rstrip("/").split("/")[-1])
+                fields["imdb_rating"] = publication_score(record)
+            except ValueError as exc:
+                warnings.append(str(exc))
+        missing = [labels[key] for key in ("aliases", "languages", "directors", "writers", "cast") if not fields.get(key)]
+        if missing:
+            warnings.append("PT-Gen 本次未提供：" + "、".join(missing) + "。")
+        return {"text": render_ptgen(fields, extra, tail), "poster": None, "label": label, "warnings": warnings}
 
     async def bangumi(self, ref):
         provider = self.provider("bangumi")

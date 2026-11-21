@@ -1480,3 +1480,49 @@ def test_screenshot_preset_applies_saved_square_design(live_server):
     finally:
         browser.close()
         playwright.stop()
+
+
+def test_confirmed_work_imdb_and_both_chapter_scores_reach_clipboard(live_server):
+    from bili_remote.v2.workbench.publishing import PublishingService
+
+    base_url, app = live_server
+    playwright, browser, page, errors = browser_session(base_url)
+    try:
+        class PTGen:
+            async def get(self, params):
+                assert params["url"].endswith("/subject/9234/")
+                return {"title": "云山 年番4", "episodes": 52, "genre": ["动画"], "cast": ["演员甲"],
+                        "douban_rating": "8.1/10 from 231 users", "imdb_rating": 7.5, "summary": "当季剧情"}
+        app.state.services.v2.resolver.providers["ptgen"] = PTGen()
+        v2_fixture(page, [])
+        page.route("**/api/v2/publishing/introduction", lambda route: route.fulfill(response=route.fetch()))
+        def preview(route):
+            payload = route.request.post_data_json
+            route.fulfill(json=PublishingService().compose(
+                payload["context"], "", "", payload["overview"],
+                overview_is_introduction=payload["overview_is_introduction"]))
+        page.route("**/api/v2/publishing/preview", preview)
+        mount(page)
+        ctx = context()
+        ctx["identity"].update(tmdb_id="567", confirmed=True)
+        def field(value):
+            return {"source": "tmdb", "source_ref": "567", "value": value}
+        ctx["metadata"] = {"title_zh": field("云山"), "genres": field(["动画"]),
+                           "cast": [{"name": field("演员甲"), "role": "actor"}],
+                           "links": {"tmdb": "https://www.themoviedb.org/tv/567", "imdb": "tt1234567"}}
+        page.evaluate("ctx => wb.select(ctx.resources, {context: ctx})", ctx)
+        query = page.locator("[data-wb=intro-query]")
+        query.fill("9234")
+        page.locator("[data-wb=intro-fetch]").click()
+        expect(page.locator("[data-wb=intro-status]")).to_contain_text("已匹配的动画系列")
+        body = page.locator("[data-edit=overview]").input_value()
+        assert "◎IMDb评分　7.5/10" in body and "◎IMDb链接　https://www.imdb.com/title/tt1234567/" in body
+        assert "◎豆瓣评分　8.1/10 from 231 users" in body and "◎豆瓣链接" in body
+        expect(page.locator("[data-wb=output]")).to_have_text(body)
+        page.evaluate("navigator.clipboard.writeText = async text => {window.copied = text}")
+        page.locator("[data-copy=content]").click()
+        assert page.evaluate("window.copied") == body
+        assert not errors, errors
+    finally:
+        browser.close()
+        playwright.stop()

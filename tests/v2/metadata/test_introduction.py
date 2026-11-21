@@ -4,14 +4,20 @@ import httpx
 import pytest
 
 from bili_remote.v2.metadata.introduction import IntroductionOptions, IntroductionRequest, IntroductionService
+from bili_remote.v2.metadata.imdb_ratings import IMDbRatings, official_ratings
 from bili_remote.v2.metadata.providers import BangumiProvider, PTGenProvider, ProviderError, TMDBProvider
 from bili_remote.v2.workbench.publishing import PublishingService
+
+
+@pytest.fixture(autouse=True)
+def offline_ratings(monkeypatch):
+    monkeypatch.setattr(official_ratings, "lookup", lambda title_id: None)
 
 
 @pytest.mark.parametrize("source,expected_rating", [
     ({"imdb_id": "tt38775487"}, ""),
     ({"imdb": {"id": "tt38775487"}, "ratings": {"imdb": {"average": 7.1, "votes": 335}}}, "7.1/10 (335 人评价)"),
-    ({"imdb_link": "https://m.imdb.com/title/tt38775487/?ref_=test", "imdb_score": 7.1}, ""),
+    ({"imdb_link": "https://m.imdb.com/title/tt38775487/?ref_=test", "imdb_score": 7.1}, "7.1/10"),
     ({"format": "◎IMDb链接　[url=https://www.imdb.com/title/tt38775487/?ref_=test]IMDb[/url]"}, ""),
 ])
 def test_douban_normalizes_same_subject_imdb(source, expected_rating):
@@ -306,3 +312,84 @@ def test_intro_api_and_preview_preserve_chosen_block_without_naming_data(setting
         content = result.json()["content"]
         assert "2026" in content and "用户补充" in content and content.count("◎简　　介") == 1
         assert "2020" not in content and "整部作品剧情" not in content and "<script>" not in content
+
+
+@pytest.mark.parametrize("kind,child_genres,linked", [
+    ("series", ["动画"], True), ("series", ["剧情"], False), ("movie", ["动画"], False),
+])
+def test_confirmed_parent_only_contributes_its_link(kind, child_genres, linked):
+    class PTGen:
+        async def get(self, params):
+            return {"site": "douban", "id": "234", "title": "云山 年番4", "year": "2026",
+                    "genre": child_genres, "episodes": 52, "cast": ["演员甲"],
+                    "format": "◎豆瓣评分　8.2/10 (120 人评价)\n◎简　　介\n\n　　篇章独有剧情"}
+    def field(value):
+        return {"source": "tmdb", "source_ref": "567", "value": value}
+    ns = "movie" if kind == "movie" else "tv"
+    ctx = {"context_id": "selection", "revision": 1, "identity": {"media_type": kind, "tmdb_id": "567", "confirmed": True},
+           "metadata": {"title_zh": field("云山"), "year": field("2020"), "genres": field(["动画"]),
+                        "cast": [{"name": field("演员甲"), "role": "actor"}],
+                        "links": {"tmdb": f"https://www.themoviedb.org/{ns}/567", "imdb": "tt1234567"}}}
+    class Ratings:
+        def lookup(self, title_id):
+            pytest.fail("Series votes must not be looked up for a chapter")
+    result = asyncio.run(IntroductionService({"ptgen": PTGen()}, Ratings()).build(
+        IntroductionRequest(source="ptgen", reference="234", context=ctx)))
+    assert ("◎IMDb链接　https://www.imdb.com/title/tt1234567/" in result["text"]) == linked
+    assert "◎IMDb评分" not in result["text"]
+    assert "◎豆瓣评分　8.2/10 (120 人评价)" in result["text"] and "篇章独有剧情" in result["text"]
+
+
+@pytest.mark.parametrize("imdb,douban,expected", [
+    ({"average": 8.1, "votes": "2,030"}, "7.1/10", ["IMDb评分", "IMDb链接", "豆瓣评分", "豆瓣链接"]),
+    ({"average": 8.1}, "/10 from 0 users", ["IMDb评分", "IMDb链接", "豆瓣链接"]),
+    ({"average": 0, "votes": 0}, 7.1, ["IMDb链接", "豆瓣评分", "豆瓣链接"]),
+    ({}, "", ["IMDb链接", "豆瓣链接"]),
+])
+def test_scores_are_independent_and_survive_editor_and_preview(imdb, douban, expected):
+    class PTGen:
+        async def get(self, params):
+            return {"title": "样本", "ratings": {"imdb": imdb}, "imdb_id": "tt1234567",
+                    "douban_rating": douban, "format": "◎自定字段　保留文本"}
+    result = asyncio.run(IntroductionService({"ptgen": PTGen()}).build(
+        IntroductionRequest(source="ptgen", reference="234")))
+    content = result["text"]
+    assert [line[1:].split("　")[0] for line in content.splitlines() if line.startswith(("◎IMDb", "◎豆瓣"))] == expected
+    if imdb.get("votes"):
+        assert "8.1/10 (2,030 人评价)" in content
+    assert "◎自定字段　保留文本" in content
+    assert PublishingService().compose({"revision": 1}, "", "", content, overview_is_introduction=True)["content"] == content
+
+
+def test_official_rating_matches_exact_identifier_and_caches(monkeypatch):
+    ratings = IMDbRatings()
+    downloads = []
+    def download():
+        downloads.append(1)
+        return b"tconst\taverageRating\tnumVotes\ntt12345678\t9.9\t25\ntt1234567\t7.9\t250\n"
+    monkeypatch.setattr(ratings, "download", download)
+    assert ratings.lookup("tt1234567") == {"average": "7.9", "votes": "250"}
+    assert ratings.lookup("tt3456789") is None
+    assert downloads == [1]
+
+
+@pytest.mark.parametrize("source_link,lookup_id", [(None, "tt1234567"), ("tt9999999", "tt9999999")])
+def test_film_rating_lookup_uses_final_subject_and_preserves_douban(source_link, lookup_id):
+    class PTGen:
+        async def get(self, params):
+            return {"title": "样本", "year": 2026, "director": ["甲"], "imdb_id": source_link,
+                    "douban_rating": {"ratingValue": 7.7, "ratingCount": 500}}
+    class Ratings:
+        def lookup(self, title_id):
+            assert title_id == lookup_id
+            return {"average": "7.2", "votes": 40}
+    def field(value):
+        return {"source": "tmdb", "source_ref": "12", "value": value}
+    ctx = {"context_id": "film", "revision": 1, "identity": {"media_type": "movie", "tmdb_id": "12", "confirmed": True},
+           "metadata": {"title_zh": field("样本"), "year": field(2026), "directors": [{"name": field("甲"), "role": "director"}],
+                        "links": {"tmdb": "https://www.themoviedb.org/movie/12", "imdb": "tt1234567"}}}
+    result = asyncio.run(IntroductionService({"ptgen": PTGen()}, Ratings()).build(
+        IntroductionRequest(source="ptgen", reference="301", context=ctx)))
+    assert f"◎IMDb链接　https://www.imdb.com/title/{lookup_id}/" in result["text"]
+    assert "◎IMDb评分　7.2/10 (40 人评价)" in result["text"]
+    assert "◎豆瓣评分　7.7/10 (500 人评价)" in result["text"]

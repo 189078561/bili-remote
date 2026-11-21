@@ -727,6 +727,8 @@
       if (!this.resources.length) throw new Error("请先选择资源");
       if (this.pendingAdjustmentEpoch === this.epoch) { manual_overrides = {...this.overrides(), ...manual_overrides}; this.rememberRules(); }
       this.invalidateRename(); this.invalidateContent(); const current = this.stamp("context");
+      if (selection?.provider === "tmdb" && (this.context?.identity?.tmdb_id !== selection.id ||
+          this.context?.identity?.media_type !== selection.media_type)) this.resetIntroductionLookup();
       const payload = {resources: this.resources, origins: this.origins, selection, context: this.context, manual_overrides};
       const previous = this.resolveRequest, epoch = this.epoch;
       const request = async () => {
@@ -747,6 +749,9 @@
       const response = await pending.promise;
       if (!current()) return;
       if (!response.context || !Number.isInteger(response.context.revision)) throw new Error("识别服务未返回有效上下文");
+      const priorIdentity = this.context?.identity, nextIdentity = response.context.identity;
+      if (priorIdentity?.tmdb_id !== nextIdentity?.tmdb_id || priorIdentity?.media_type !== nextIdentity?.media_type ||
+          priorIdentity?.confirmed !== nextIdentity?.confirmed) this.resetIntroductionLookup();
       this.context = response.context;
       if (selection?.provider === "tmdb" && response.context.identity?.tmdb_id === selection.id && response.context.identity.confirmed && candidatePoster) {
         this.matchedPoster = {id: selection.id, url: candidatePoster};
@@ -965,10 +970,16 @@
       this.clearIntroductionProposal();
       status.textContent = "正在通过 PT-Gen 读取豆瓣简介…";
       try {
-        const identity = this.context?.identity;
-        const matchedMovie = identity?.confirmed && identity.media_type === "movie" && identity.tmdb_id;
-        const data = await this.api.introduction({source: "ptgen", reference,
-          ...(matchedMovie ? {matched_movie_id: identity.tmdb_id} : {})});
+        const {identity, metadata, context_id, revision} = this.context || {};
+        const request = {source: "ptgen", reference};
+        if (identity?.confirmed && identity.tmdb_id) {
+          const namespace = identity.media_type === "movie" ? "movie" : "tv";
+          if (metadata?.links?.imdb && metadata.links.tmdb === `https://www.themoviedb.org/${namespace}/${identity.tmdb_id}`) {
+            const {links, title_zh, original_title, year, genres, directors, cast} = metadata;
+            request.context = {context_id, revision, identity, metadata: {links, title_zh, original_title, year, genres, directors, cast}};
+          } else if (namespace === "movie") request.matched_movie_id = identity.tmdb_id;
+        }
+        const data = await this.api.introduction(request);
         if (!current()) return;
         const edited = this.dirty.has("overview") || version !== (this.fieldVersions.overview || 0);
         if (!data.text) {
