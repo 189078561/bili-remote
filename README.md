@@ -4,6 +4,20 @@
 
 本次重构的功能映射、参考许可证与验收记录见 [WebUI 重构验收](docs/webui-refactor.md)。
 
+## Docker 部署
+
+在 Linux x86_64 设备上保存一份 [docker-compose.yml](deploy/docker-compose.yml)，直接使用已发布的私有镜像 `ghcr.io/189078561/bili-remote:v2.0.0-rc.2`。PT-Gen 会随应用启动。
+
+1. 在 YAML 的 `environment` 中填写 `ADMIN_PASSWORD` 和 `APP_SECRET`。后者可用 `openssl rand -hex 32` 生成，升级时保留原值。
+2. 第一次在该设备执行 `docker login ghcr.io -u 你的GitHub用户名`，密码处输入有此镜像读取权限的 `read:packages` classic token。
+3. 在 YAML 所在目录启动。
+
+```sh
+docker compose up -d
+```
+
+默认应用端口为 8111。时区、下载连接数和 Cookie 设置可直接改 `environment`，宿主机端口和媒体目录分别改 `ports` 与 `volumes`。改完再次执行同一条启动命令。更多说明见 [安装与升级](deploy/install.md)。
+
 ## 能力与边界
 
 - 使用登录账号实际拥有的权限获取普通视频、分 P、番剧和影视内容。
@@ -18,12 +32,6 @@
 - 下载阶段不下载字幕、弹幕、封面或 NFO。剧集批量重命名只修改原目录内的文件名；文件管理器中的复制、移动和删除是独立的手动操作。
 - 旧资源项目工作台的界面入口已从主界面隐藏，后端接口与数据库结构暂时保留，不影响下载、文件浏览和新发布工具。
 - 图床上传会把用户明确选择的图片发送到 Catbox、ImgBB 或 Pixhost；种子制作、发布资料和发布辅助默认在本地完成，不会自动向 PT 站点提交。
-
-## 私有镜像部署
-
-新服务器从私有 GitHub Release 下载 `bili-remote-compose.tar.gz`。发布包自带已锁定版本的应用和 PT-Gen 镜像引用，首次安装与更新步骤见 [部署说明](deploy/install.md)。PT-Gen 通过内部端口 23333 提供资料，工作台支持留空使用随附服务，已有自定义地址优先。
-
-维护者推送形如 `v2.0.0-rc.1` 的 Git 标签后，GitHub Actions 会构建 amd64 镜像，在空存储上验证两个服务，推送私有 GHCR 包，并在私有 Release 附上对应的部署文件。仓库需要允许 Actions 运行并写入 Packages 与 Releases。
 
 ## 从源码部署
 

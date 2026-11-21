@@ -1,0 +1,63 @@
+# Bili Remote · Linux amd64
+# 首次填写下面两项，保存为 docker-compose.yml，然后执行 docker compose up -d。
+services:
+  bili-remote:
+    image: ghcr.io/189078561/bili-remote:v2.0.0-rc.2
+    restart: unless-stopped
+    depends_on:
+      - pt-gen
+    ports:
+      - "8111:8080"  # 左侧是设备上的访问端口
+    environment:
+      ADMIN_USERNAME: "admin"
+      ADMIN_PASSWORD: ""  # 首次填写强密码
+      APP_SECRET: ""      # 首次填写 openssl rand -hex 32 的输出，升级时保留
+      SECURE_COOKIES: "true"  # HTTPS 用 true；可信局域网直接用 HTTP 登录时改为 false
+      TZ: "Asia/Shanghai"
+      LOG_RETENTION_DAYS: "30"
+      ARIA2_ENABLED: "true"
+      ARIA2_CONNECTIONS: "8"
+      ARIA2_MIN_SPLIT_SIZE: "4M"
+      ARIA2_PIECE_SIZE: "4M"
+      ARIA2_RESUME_RETRIES: "2"
+      TV_CDN_PROBE: "true"
+      PTGEN_BASE_URL: "http://pt-gen:23333/api/v1/info"
+    volumes:
+      - data:/data
+      - downloads:/downloads  # 可将左侧换成宿主机的媒体目录，如 /srv/media
+      - imports:/imports
+      - staging:/staging
+      - releases:/releases
+      - torrents:/torrents
+      - images:/images
+      - release-info:/release-info
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 20s
+
+  pt-gen:
+    image: ghcr.io/sanzuwu/pt-gen@sha256:518b903aecfc19b71d5fa1f94894dac9042f204dc777ca460921663da6204fc9
+    restart: unless-stopped
+    environment:
+      PORT: "23333"
+      DISABLE_SEARCH: "false"
+      DOUBAN_COOKIE: ""
+      TMDB_API_KEY: ""
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:23333/api/v1/info').then(async r => process.exit(r.status === 400 && (await r.json()).error ? 0 : 1)).catch(() => process.exit(1))"]
+      start_period: 30s
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  data: {}
+  downloads: {}
+  imports: {}
+  staging: {}
+  releases: {}
+  torrents: {}
+  images: {}
+  release-info: {}

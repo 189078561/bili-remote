@@ -34,7 +34,9 @@ jobs:
             --tag "$image:$GITHUB_REF_NAME" .
 
       - name: Test the two services with empty storage
-        run: bash scripts/smoke_release.sh "$IMAGE:$GITHUB_REF_NAME"
+        run: |
+          bash scripts/smoke_release.sh "$IMAGE:$GITHUB_REF_NAME" standalone
+          bash scripts/smoke_release.sh "$IMAGE:$GITHUB_REF_NAME"
 
       - name: Publish the private image and Compose bundle
         shell: bash
@@ -61,7 +63,10 @@ jobs:
           echo "BILI_REMOTE_IMAGE=$ref" >> "$bundle/.env.example"
           cp deploy/install.md "$bundle/README.md"
           tar czf bili-remote-compose.tar.gz -C "$bundle" compose.yaml .env.example README.md
+          sed -E "s|^    image: ghcr.io/[^ ]+/bili-remote:.*|    image: $ref|" \
+            deploy/docker-compose.yml > "$bundle/docker-compose.yml"
+          grep -Fxq "    image: $ref" "$bundle/docker-compose.yml"
           flags=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" bili-remote-compose.tar.gz --verify-tag \
+          gh release create "$GITHUB_REF_NAME" bili-remote-compose.tar.gz "$bundle/docker-compose.yml" --verify-tag \
             --title "$GITHUB_REF_NAME" --notes "Linux amd64 · $ref" "${flags[@]}"

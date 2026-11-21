@@ -6,15 +6,25 @@ test_dir=$(mktemp -d)
 project="bili-release-test-${test_dir##*.}"
 project=${project,,}
 cd "$test_dir"
-cp "$source_dir/docker-compose.yml" compose.yaml
-export BILI_REMOTE_IMAGE="$image" BILI_REMOTE_BIND=127.0.0.1 BILI_REMOTE_PORT=0
-# Named volumes are unique to this Compose project and start with the app UID's permissions.
-for name in data downloads imports staging releases torrents images release-info; do
-  volume=${name//-/_}
-  if [[ "$name" = downloads ]]; then variable=DOWNLOAD; else variable=${volume^^}; fi
-  printf '%s_ROOT_HOST=%s\n' "$variable" "$volume" >> .env
-done
-cat >> compose.yaml <<'YAML'
+if [[ "${2:-bundle}" == standalone ]]; then
+  # Apply the same inline edits an installer makes, using an isolated host port.
+  sed -E \
+    -e "s|^    image: ghcr.io/[^ ]+/bili-remote:.*|    image: $image|" \
+    -e "s|ADMIN_PASSWORD: \"\"|ADMIN_PASSWORD: \"$(openssl rand -hex 20)\"|" \
+    -e "s|APP_SECRET: \"\"|APP_SECRET: \"$(openssl rand -hex 32)\"|" \
+    -e 's|"8111:8080"|"127.0.0.1:0:8080"|' \
+    "$source_dir/deploy/docker-compose.yml" > compose.yaml
+  test ! -e .env
+else
+  cp "$source_dir/docker-compose.yml" compose.yaml
+  export BILI_REMOTE_IMAGE="$image" BILI_REMOTE_BIND=127.0.0.1 BILI_REMOTE_PORT=0
+  # Named volumes are unique to this Compose project and start with the app UID's permissions.
+  for name in data downloads imports staging releases torrents images release-info; do
+    volume=${name//-/_}
+    if [[ "$name" = downloads ]]; then variable=DOWNLOAD; else variable=${volume^^}; fi
+    printf '%s_ROOT_HOST=%s\n' "$variable" "$volume" >> .env
+  done
+  cat >> compose.yaml <<'YAML'
 
 volumes:
   data: {}
@@ -26,8 +36,9 @@ volumes:
   images: {}
   release_info: {}
 YAML
-printf 'APP_SECRET=%s\nADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 20)" >> .env
-chmod 600 .env
+  printf 'APP_SECRET=%s\nADMIN_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 20)" >> .env
+  chmod 600 .env
+fi
 compose=(docker compose -p "$project" -f compose.yaml)
 cleanup() {
   "${compose[@]}" down --volumes >/dev/null
@@ -35,6 +46,7 @@ cleanup() {
   rmdir "$test_dir"
 }
 trap cleanup EXIT
+"${compose[@]}" config --images | grep -Fxq "$image"
 "${compose[@]}" up -d --no-build --wait --wait-timeout 150
 "${compose[@]}" exec -T bili-remote python - <<'PY'
 import json
@@ -58,3 +70,18 @@ for route in ("info", "search"):
         raise AssertionError("PT-Gen should require an input for " + route)
 print("Fresh install OK: application, PT-Gen detail and search endpoints")
 PY
+
+if [[ "${2:-bundle}" == standalone ]]; then
+  "${compose[@]}" exec -T bili-remote sh -c 'echo saved > /data/compose-smoke'
+  sed -i 's/ARIA2_CONNECTIONS: "8"/ARIA2_CONNECTIONS: "6"/' compose.yaml
+  "${compose[@]}" up -d --no-build --wait --wait-timeout 150
+  "${compose[@]}" exec -T bili-remote python - <<'PY'
+from pathlib import Path
+
+from bili_remote.config import Settings
+
+assert Settings.from_env().aria2_connections == 6
+assert Path("/data/compose-smoke").read_text().strip() == "saved"
+print("Inline environment updated; original data volume retained")
+PY
+fi
