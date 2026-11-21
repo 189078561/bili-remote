@@ -1440,10 +1440,10 @@ def test_screenshot_preset_applies_saved_square_design(live_server):
         expect(presets).not_to_be_visible()
         toggle.click()
         expect(presets.get_by_role("group", name="截图布局").get_by_role("button")).to_have_text(
-            ["独立单图", "1 列 × 4 行", "5 列 × 4 行"]
+            ["使用设置", "独立单图", "1 列 × 4 行", "5 列 × 4 行"]
         )
         expect(presets.get_by_role("group", name="跳过首尾").get_by_role("button")).to_have_text(
-            ["电影", "剧集", "动画", "全片"]
+            ["使用设置", "电影", "剧集", "动画", "全片"]
         )
         presets.get_by_role("button", name="1 列 × 4 行").click()
         presets.get_by_role("button", name="全片").click()
@@ -1465,7 +1465,30 @@ def test_screenshot_preset_applies_saved_square_design(live_server):
         with Image.open(settings.images_root / path) as image:
             assert image.size == (254, 1136)
 
+        app.state.services.database.update_settings({
+            "screenshot_output_mode": "collage", "collage_default_layout_mode": "count",
+            "collage_default_columns": "2", "collage_default_rows": "4", "collage_default_total": "6",
+            "screenshot_default_sampling": "uniform", "collage_default_content_type": "custom",
+            "collage_custom_skip_start": "1", "collage_custom_skip_end": "0",
+        })
         toggle.click()
+        for group in ("截图布局", "跳过首尾"):
+            presets.get_by_role("group", name=group).get_by_role("button", name="使用设置").click()
+        expect(toggle).to_have_text("截图预设 · 使用设置")
+        with page.expect_response(lambda response: response.request.method == "POST"
+                                  and response.url.endswith("/api/files/screenshots")) as saved:
+            screenshots.click()
+        assert saved.value.status == 202
+        assert saved.value.request.post_data_json == {"sources": sent["sources"], "output_mode": "collage"}
+        session = app.state.services.screenshots.get_session(saved.value.json()["session_id"])
+        params = session["params"]
+        assert params["collage_options"]["layout_mode"] == "count"
+        assert params["collage_options"]["columns"] == 2
+        assert params["total"] == 6 and params["sampling_mode"] == "uniform"
+        assert (params["skip_start_seconds"], params["skip_end_seconds"]) == (1, 0)
+        page.wait_for_function("(previous) => V2Workbench.images[0]?.path && V2Workbench.images[0].path !== previous",
+                               arg=path, timeout=15000)
+
         presets.get_by_role("button", name="独立单图").click()
         expect(toggle).to_have_text("截图预设 · 独立单图")
         expect(presets.get_by_role("button", name="1 列 × 4 行")).to_have_attribute("aria-pressed", "false")

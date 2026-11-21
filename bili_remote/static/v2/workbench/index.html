@@ -43,13 +43,14 @@
             <button type="button" data-action="upload" disabled><span data-button-label>生成图床链接</span></button>
           </div>
           <button type="button" class="wb-screenshot-toggle" data-wb="screenshot-presets-toggle" aria-expanded="false" aria-controls="wb-screenshot-presets">
-            <span data-wb="screenshot-preset-summary">截图预设</span>
+            <span data-wb="screenshot-preset-summary">截图预设 · 使用设置</span>
           </button>
         </div>
         <div class="wb-screenshot-presets" id="wb-screenshot-presets" data-wb="screenshot-presets" hidden>
           <div class="wb-preset-row" role="group" aria-labelledby="wb-screenshot-layout-label">
             <span id="wb-screenshot-layout-label">截图布局</span>
             <div class="wb-preset-buttons">
+              <button type="button" data-screenshot-layout="settings" aria-pressed="true">使用设置</button>
               <button type="button" data-screenshot-layout="single" aria-pressed="false">独立单图</button>
               <button type="button" data-screenshot-layout="vertical" aria-pressed="false">1 列 × 4 行</button>
               <button type="button" data-screenshot-layout="sheet" aria-pressed="false">5 列 × 4 行</button>
@@ -58,6 +59,7 @@
           <div class="wb-preset-row" role="group" aria-labelledby="wb-screenshot-trim-label">
             <span id="wb-screenshot-trim-label">跳过首尾</span>
             <div class="wb-preset-buttons">
+              <button type="button" data-screenshot-trim="settings" aria-pressed="true">使用设置</button>
               <button type="button" data-screenshot-trim="movie" aria-pressed="false">电影</button>
               <button type="button" data-screenshot-trim="series" aria-pressed="false">剧集</button>
               <button type="button" data-screenshot-trim="anime" aria-pressed="false">动画</button>

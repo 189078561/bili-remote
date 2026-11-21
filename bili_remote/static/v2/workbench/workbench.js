@@ -1185,17 +1185,17 @@
       const {values} = await this.api.request("/api/settings");
       if (this.epoch !== scope.epoch || this.destroyed) return;
       const payload = {sources: this.sources(), output_mode: values?.screenshot_output_mode || "single"};
-      const fixedTimestamps = values?.screenshot_default_sampling === "timestamps";
       if (preset === "single") {
-        payload.output_mode = "single";
+        Object.assign(payload, {output_mode: "single", total: 4});
       } else if (preset === "vertical" || preset === "sheet") {
         Object.assign(payload, {output_mode: "collage", columns: preset === "vertical" ? 1 : 5, rows: 4});
       }
-      if (preset && fixedTimestamps) payload.sampling_mode = "random";
-      if (payload.output_mode === "single" && (preset || !fixedTimestamps)) payload.total = 4;
+      if (preset && preset !== "settings" && values?.screenshot_default_sampling === "timestamps") {
+        payload.sampling_mode = "random";
+      }
       if (trim === "full") {
         Object.assign(payload, {content_type: "custom", skip_start_seconds: 0, skip_end_seconds: 0});
-      } else if (trim) {
+      } else if (trim && trim !== "settings") {
         payload.content_type = trim;
       }
       const result = await this.api.request("/api/files/screenshots", payload);
