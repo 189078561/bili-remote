@@ -372,6 +372,15 @@ body:has(.br-workbench :is(.wb-image-dialog,.wb-task-log-dialog)[open]) {overflo
 }
 .wb-preset-row > span { color: var(--ws-muted); font-size: 12px; }
 .wb-preset-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb-screenshot-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.br-workbench .wb-screenshot-count input { width: 5em; }
+.wb-screenshot-count[hidden],
+.br-workbench [data-screenshot-reset][hidden] { display: none; }
 .br-workbench .wb-preset-buttons button[aria-pressed=true] {
   background: var(--ws-selected);
   border-color: var(--ws-accent);

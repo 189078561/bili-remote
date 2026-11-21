@@ -1439,12 +1439,16 @@ def test_screenshot_preset_applies_saved_square_design(live_server):
         assert abs(toggle.bounding_box()["y"] - screenshots.bounding_box()["y"]) < 8
         expect(presets).not_to_be_visible()
         toggle.click()
-        expect(presets.get_by_role("group", name="截图布局").get_by_role("button")).to_have_text(
-            ["使用设置", "独立单图", "1 列 × 4 行", "5 列 × 4 行"]
+        layout = presets.get_by_role("group", name="截图布局")
+        trim = presets.get_by_role("group", name="跳过首尾")
+        expect(layout.get_by_role("button")).to_have_text(["独立单图", "1 列 × 4 行", "5 列 × 4 行"])
+        expect(trim.get_by_role("button")).to_have_text(
+            ["电影", "剧集", "动画", "全片"]
         )
-        expect(presets.get_by_role("group", name="跳过首尾").get_by_role("button")).to_have_text(
-            ["使用设置", "电影", "剧集", "动画", "全片"]
-        )
+        expect(toggle).to_have_text("截图预设 · 使用系统设置")
+        expect(presets.locator('[aria-pressed="true"]')).to_have_count(0)
+        count = layout.get_by_role("spinbutton", name="截图张数")
+        expect(count).not_to_be_visible()
         presets.get_by_role("button", name="1 列 × 4 行").click()
         presets.get_by_role("button", name="全片").click()
         expect(toggle).to_have_text("截图预设 · 1 列 × 4 行")
@@ -1472,9 +1476,16 @@ def test_screenshot_preset_applies_saved_square_design(live_server):
             "collage_custom_skip_start": "1", "collage_custom_skip_end": "0",
         })
         toggle.click()
-        for group in ("截图布局", "跳过首尾"):
-            presets.get_by_role("group", name=group).get_by_role("button", name="使用设置").click()
-        expect(toggle).to_have_text("截图预设 · 使用设置")
+        layout.get_by_role("button", name="1 列 × 4 行").dblclick()
+        expect(layout.locator('[aria-pressed="true"]')).to_have_count(0)
+        expect(trim.get_by_role("button", name="全片")).to_have_attribute("aria-pressed", "true")
+        expect(toggle).to_have_text("截图预设 · 使用系统设置")
+        reset_trim = trim.get_by_role("button", name="恢复系统设置")
+        reset_trim.press("Enter")
+        expect(reset_trim).not_to_be_visible()
+        expect(trim.get_by_role("button", name="全片")).to_be_focused()
+        trim.get_by_role("button", name="电影").dblclick()
+        expect(trim.locator('[aria-pressed="true"]')).to_have_count(0)
         with page.expect_response(lambda response: response.request.method == "POST"
                                   and response.url.endswith("/api/files/screenshots")) as saved:
             screenshots.click()
@@ -1494,11 +1505,19 @@ def test_screenshot_preset_applies_saved_square_design(live_server):
         expect(presets.get_by_role("button", name="1 列 × 4 行")).to_have_attribute("aria-pressed", "false")
         page.set_viewport_size({"width": 390, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        expect(count).to_have_value("4")
+        count.fill("0")
+        screenshots.click()
+        expect(page.locator('[data-wb="tool-progress-images"]')).to_contain_text("截图张数须为 1 到 120 之间的整数")
+        count.fill("7")
         with page.expect_request(lambda request: request.method == "POST" and request.url.endswith("/api/files/screenshots")) as pending:
             screenshots.click()
         assert pending.value.post_data_json["output_mode"] == "single"
-        assert pending.value.post_data_json["total"] == 4
-        expect(page.locator('[data-wb="images"] img')).to_have_count(4, timeout=15000)
+        assert pending.value.post_data_json["total"] == 7
+        expect(page.locator('[data-wb="images"] img')).to_have_count(7, timeout=15000)
+        layout.get_by_role("button", name="恢复系统设置").click()
+        expect(count).not_to_be_visible()
+        expect(toggle).to_have_text("截图预设 · 使用系统设置")
         assert not errors
     finally:
         browser.close()

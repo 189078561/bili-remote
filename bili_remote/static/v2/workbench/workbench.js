@@ -266,15 +266,23 @@
         presets.hidden = !open;
         presetsToggle.setAttribute("aria-expanded", String(open));
       }, opts);
+      const presetSelector = "[data-screenshot-layout], [data-screenshot-trim]";
       presets.addEventListener("click", event => {
-        const choice = event.target.closest("[data-screenshot-layout], [data-screenshot-trim]");
-        if (!choice) return;
-        const layout = choice.hasAttribute("data-screenshot-layout");
-        const row = layout ? "[data-screenshot-layout]" : "[data-screenshot-trim]";
-        for (const button of presets.querySelectorAll(row)) {
-          button.setAttribute("aria-pressed", String(button === choice));
+        const choice = event.target.closest(presetSelector);
+        if (choice) {
+          this.setScreenshotPreset(choice.closest(".wb-preset-row"), choice);
+          return;
         }
-        if (layout) this.el("screenshot-preset-summary").textContent = "截图预设 · " + choice.textContent.trim();
+        const reset = event.target.closest("[data-screenshot-reset]");
+        if (reset) {
+          const row = reset.closest(".wb-preset-row");
+          row.querySelector('[aria-pressed="true"]')?.focus({preventScroll: true});
+          this.setScreenshotPreset(row, null);
+        }
+      }, opts);
+      presets.addEventListener("dblclick", event => {
+        const choice = event.target.closest(presetSelector);
+        if (choice) this.setScreenshotPreset(choice.closest(".wb-preset-row"), null);
       }, opts);
       for (const dialog of [this.el("image-dialog"), this.el("task-log-dialog")]) {
         let onBackdrop = false;
@@ -1176,26 +1184,45 @@
       if (this.epoch !== epoch || this.destroyed) return null;
       return {epoch, scope: signature(canonical)};
     }
+    setScreenshotPreset(row, choice) {
+      for (const button of row.querySelectorAll("[aria-pressed]")) {
+        button.setAttribute("aria-pressed", String(button === choice));
+      }
+      row.querySelector("[data-screenshot-reset]").hidden = !choice;
+      const countField = row.querySelector('[data-wb="screenshot-count-field"]');
+      if (countField) {
+        countField.hidden = choice?.dataset.screenshotLayout !== "single";
+        const label = choice?.textContent.trim() || "使用系统设置";
+        this.el("screenshot-preset-summary").textContent = "截图预设 · " + label;
+      }
+    }
     async screenshots() {
       const presets = this.el("screenshot-presets");
       const preset = presets.querySelector('[data-screenshot-layout][aria-pressed="true"]')?.dataset.screenshotLayout;
       const trim = presets.querySelector('[data-screenshot-trim][aria-pressed="true"]')?.dataset.screenshotTrim;
+      const count = this.el("screenshot-count");
+      if (preset === "single" && !count.validity.valid) {
+        if (presets.hidden) this.el("screenshot-presets-toggle").click();
+        count.focus();
+        throw new Error("截图张数须为 1 到 120 之间的整数");
+      }
+      const total = count.valueAsNumber;
       const scope = await this.toolScope();
       if (!scope) return;
       const {values} = await this.api.request("/api/settings");
       if (this.epoch !== scope.epoch || this.destroyed) return;
       const payload = {sources: this.sources(), output_mode: values?.screenshot_output_mode || "single"};
       if (preset === "single") {
-        Object.assign(payload, {output_mode: "single", total: 4});
+        Object.assign(payload, {output_mode: "single", total});
       } else if (preset === "vertical" || preset === "sheet") {
         Object.assign(payload, {output_mode: "collage", columns: preset === "vertical" ? 1 : 5, rows: 4});
       }
-      if (preset && preset !== "settings" && values?.screenshot_default_sampling === "timestamps") {
+      if (preset && values?.screenshot_default_sampling === "timestamps") {
         payload.sampling_mode = "random";
       }
       if (trim === "full") {
         Object.assign(payload, {content_type: "custom", skip_start_seconds: 0, skip_end_seconds: 0});
-      } else if (trim && trim !== "settings") {
+      } else if (trim) {
         payload.content_type = trim;
       }
       const result = await this.api.request("/api/files/screenshots", payload);
