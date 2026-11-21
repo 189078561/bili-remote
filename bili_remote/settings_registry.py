@@ -1155,7 +1155,7 @@ RELEASE_GROUP = replace(
                     "PT-Gen 服务地址",
                     "text",
                     "",
-                    "填写返回 JSON 的接口完整地址；pt-gen-universal 通常为 http://主机:端口/api/v1/info。",
+                    "Compose 部署可留空，自动使用随项目启动的 PT-Gen。使用自有服务时填写完整的 JSON 接口地址。",
                 ),
                 SettingDefinition(
                     "ptgen_api_key",

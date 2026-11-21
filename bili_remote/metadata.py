@@ -17,7 +17,8 @@ class MetadataError(FileServiceError):
 
 
 class MetadataService:
-    def __init__(self, database, secrets, *, transport=None):
+    def __init__(self, database, secrets, *, transport=None, default_ptgen_url=""):
+        self.default_ptgen_url = default_ptgen_url
         self.database, self.secrets, self.transport = database, secrets, transport
 
     def _secret(self, key):
@@ -142,9 +143,11 @@ class MetadataService:
             data["imdb_url"] = f"https://www.imdb.com/title/{imdb}/"
         return {"proposal": data, "raw": {"zh": zh, "en": en}}
 
+    def ptgen_endpoint(self, stored):
+        return stored.get("ptgen_url", "").strip() or self.default_ptgen_url
+
     def _ptgen_request(self, params, *, search=False):
-        stored = self.database.get_settings()
-        endpoint = stored.get("ptgen_url", "").strip()
+        endpoint = self.ptgen_endpoint(self.database.get_settings())
         parsed = urlsplit(endpoint)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username:
             raise MetadataError("请先设置有效的 PT-Gen 服务地址")

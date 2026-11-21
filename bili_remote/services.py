@@ -97,7 +97,7 @@ class Services:
             settings, database, previews, files, collage, screenshots
         )
         processing.tool_jobs = ToolJobs(database, release_info, torrents, image_hosts, screenshots)
-        metadata = MetadataService(database, secret_box)
+        metadata = MetadataService(database, secret_box, default_ptgen_url=settings.ptgen_base_url)
         runtime_settings = RuntimeSettingsManager(settings, database)
         result = cls(
             settings=settings,

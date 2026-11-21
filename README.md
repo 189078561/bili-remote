@@ -19,9 +19,15 @@
 - 旧资源项目工作台的界面入口已从主界面隐藏，后端接口与数据库结构暂时保留，不影响下载、文件浏览和新发布工具。
 - 图床上传会把用户明确选择的图片发送到 Catbox、ImgBB 或 Pixhost；种子制作、发布资料和发布辅助默认在本地完成，不会自动向 PT 站点提交。
 
-## Docker 部署
+## 私有镜像部署
 
-要求 Linux x86_64 或 arm64、Docker Engine、Docker Compose 插件，以及可访问 B 站和 PyPI 的网络。
+新服务器从私有 GitHub Release 下载 `bili-remote-compose.tar.gz`。发布包自带已锁定版本的应用和 PT-Gen 镜像引用，首次安装与更新步骤见 [部署说明](deploy/install.md)。PT-Gen 通过内部端口 23333 提供资料，工作台支持留空使用随附服务，已有自定义地址优先。
+
+维护者推送形如 `v2.0.0-rc.1` 的 Git 标签后，GitHub Actions 会构建 amd64 镜像，在空存储上验证两个服务，推送私有 GHCR 包，并在私有 Release 附上对应的部署文件。仓库需要允许 Actions 运行并写入 Packages 与 Releases。
+
+## 从源码部署
+
+含随附 PT-Gen 的部署要求 Linux x86_64、Docker Engine、Docker Compose 插件，以及可访问 B 站和 PyPI 的网络。
 
 1. 准备配置：
 
@@ -47,10 +53,10 @@
    ```bash
    docker compose up -d --build
    docker compose ps
-   curl http://127.0.0.1:8080/healthz
+   curl http://127.0.0.1:8111/healthz
    ```
 
-4. 按 [deploy/nginx.conf.example](deploy/nginx.conf.example) 将域名转发到 `127.0.0.1:8080`，替换域名和证书路径，然后检查并重载 Nginx：
+4. 按 [deploy/nginx.conf.example](deploy/nginx.conf.example) 将域名转发到 `127.0.0.1:8111`，替换域名和证书路径，然后检查并重载 Nginx：
 
    ```bash
    sudo nginx -t

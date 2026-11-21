@@ -12,7 +12,7 @@ def integration_status(settings: Settings) -> dict[str, Any]:
     )
     result: dict[str, Any] = {}
     for name, base_url, token in services:
-        configured = bool(base_url and token)
+        configured = bool(base_url and (name == "ptgen" or token))
         result[name] = {
             "configured": configured,
             "connected": False,

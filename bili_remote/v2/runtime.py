@@ -52,7 +52,7 @@ class V2Runtime:
         stored=self.services.database.get_settings()
         metadata=self.services.metadata
         token=os.environ.get('V2_TMDB_TOKEN','') or metadata._secret('tmdb_api_key')
-        ptgen=os.environ.get('V2_PTGEN_URL','') or stored.get('ptgen_url','')
+        ptgen=os.environ.get('V2_PTGEN_URL','') or metadata.ptgen_endpoint(stored)
         key=os.environ.get('V2_PTGEN_API_KEY','') or metadata._secret('ptgen_api_key')
         providers={'tmdb':TMDBProvider(token),'ptgen':PTGenProvider(ptgen,key)}
         enabled=os.environ.get('V2_BANGUMI_ENABLED','false').lower()=='true' or stored.get('v2_bangumi_enabled')=='true'

@@ -1,12 +1,13 @@
 services:
   bili-remote:
-    build:
-      context: .
-    image: bili-remote:1.0.0
+    image: ${BILI_REMOTE_IMAGE:-bili-remote:1.0.0}
+    depends_on:
+      - pt-gen
     restart: unless-stopped
     env_file:
       - .env
     environment:
+      PTGEN_BASE_URL: ${PTGEN_BASE_URL:-http://pt-gen:23333/api/v1/info}
       DATA_DIR: /data
       DOWNLOAD_ROOT_CONTAINER: /downloads
       IMPORTS_ROOT: /imports
@@ -28,7 +29,7 @@ services:
       CDN_PROBE_CONNECTIONS: ${CDN_PROBE_CONNECTIONS:-8}
       LINE_COMPARE: ${LINE_COMPARE:-true}
     ports:
-      - "8111:8080"
+      - "${BILI_REMOTE_BIND:-0.0.0.0}:${BILI_REMOTE_PORT:-8111}:8080"
     volumes:
       - "${DATA_ROOT_HOST:-./data}:/data"
       - "${DOWNLOAD_ROOT_HOST:-./downloads}:/downloads"
@@ -43,3 +44,18 @@ services:
     cap_drop:
       - ALL
     stop_grace_period: 20s
+
+  pt-gen:
+    image: ghcr.io/sanzuwu/pt-gen@sha256:518b903aecfc19b71d5fa1f94894dac9042f204dc777ca460921663da6204fc9
+    restart: unless-stopped
+    environment:
+      PORT: "23333"
+      DISABLE_SEARCH: "false"
+      DOUBAN_COOKIE: ${PTGEN_DOUBAN_COOKIE:-}
+      TMDB_API_KEY: ${PTGEN_TMDB_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:23333/api/v1/info').then(async r => process.exit(r.status === 400 && (await r.json()).error ? 0 : 1)).catch(() => process.exit(1))"]
+      start_period: 30s
+      interval: 30s
+      timeout: 5s
+      retries: 3
