@@ -228,6 +228,17 @@ class TMDBProvider(Provider):
         imdb = (zh.get("external_ids") or {}).get("imdb_id") or zh.get("imdb_id")
         if re.fullmatch(r"tt\d+", str(imdb or "")):
             metadata["links"]["imdb"] = "https://www.imdb.com/title/" + imdb + "/"
+        season_rows = zh.get("seasons") if namespace == "tv" and str(zh.get("id")) == ref else []
+        seasons = {item["season_number"]: item.get("episode_count") for item in (season_rows or [])
+                   if type(item.get("season_number")) is int and item["season_number"] > 0}
+        last = zh.get("last_episode_to_air") or {}
+        aired_season = last.get("season_number")
+        complete = {season: total for season, total in seasons.items() if type(total) is int and total > 0
+                    and (zh.get("status") == "Ended" or type(aired_season) is int and
+                         (season < aired_season or season == aired_season and
+                          last.get("episode_type") == "finale" and last.get("episode_number") == total))}
+        if len(seasons) == 1 and 1 in complete:
+            complete[None] = complete[1]
         episodes = []
         episodes_verified = False
         season = selection.get("season")
@@ -245,6 +256,7 @@ class TMDBProvider(Provider):
                 warnings.append({"code": "season_unavailable", "message": "所选季集列表不可用，请人工指定映射与总集数"})
         return {"identity": {"media_type": media_type, "tmdb_id": ref, "bangumi_id": None, "selected_by": "manual", "confidence": None, "confirmed": True},
                 "titles": titles, "metadata": metadata, "episodes": episodes, "episodes_verified": episodes_verified, "season": season, "warnings": warnings,
+                "complete_season_counts": complete,
                 "supported_features": ["search", "multilingual_titles", "alternative_titles", "credits", "external_ids"] + (["season_episodes"] if episodes_verified else [])}
 
 

@@ -719,7 +719,7 @@
         if (!this.context || this.destroyed || this.timers.has(this.adjustmentTimer)) return;
         try {
           if (this.pendingAdjustmentEpoch === this.epoch) await this.resolve(null, this.overrides());
-          else { await this.naming(); await this.generate("release_title"); }
+          else { await this.naming(); await this.generateAll(); }
         } catch(error) { this.notice(error.message, true); }
       }, 320);
     }
@@ -965,7 +965,10 @@
       this.clearIntroductionProposal();
       status.textContent = "正在通过 PT-Gen 读取豆瓣简介…";
       try {
-        const data = await this.api.introduction({source: "ptgen", reference});
+        const identity = this.context?.identity;
+        const matchedMovie = identity?.confirmed && identity.media_type === "movie" && identity.tmdb_id;
+        const data = await this.api.introduction({source: "ptgen", reference,
+          ...(matchedMovie ? {matched_movie_id: identity.tmdb_id} : {})});
         if (!current()) return;
         const edited = this.dirty.has("overview") || version !== (this.fieldVersions.overview || 0);
         if (!data.text) {
@@ -1115,7 +1118,11 @@
       const rule = this.readRule("naming-rule", this.context.effective_rules?.naming_rule || {});
       const preview = await this.api.naming(this.context, this.namingOverrides(), rule);
       if (!current() || this.context?.revision !== revision || preview.context_revision < revision) return;
+      const byRef = new Map((preview.selected_file_episodes || []).map(item =>
+        [JSON.stringify([item.ref.root_key, item.ref.relative_path]), item.episode]));
       this.context = {...this.context, revision: preview.context_revision,
+        files: this.context.files.map(file => ({...file,
+          episode: byRef.get(JSON.stringify([file.ref.root_key, file.ref.relative_path])) || file.episode})),
         episode: preview.episode || this.context.episode,
         effective_rules: {...this.context.effective_rules, naming_rule: rule}};
       this.contextChanged();

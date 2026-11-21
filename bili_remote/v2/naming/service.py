@@ -83,6 +83,7 @@ class NamingService:
         self.ttl, self.max_entries = ttl_seconds, max_entries
         self.contexts, self.previews, self.requests = {}, {}, {}
         self.plan_signatures, self.episode_evidence = {}, {}
+        self.complete_seasons = {}
         self.manual_rules, self.analyzed_episodes, self.latest_previews = {}, {}, {}
         self.lock = threading.RLock()
 
@@ -91,6 +92,7 @@ class NamingService:
         while len(self.contexts) > self.max_entries:
             key = next(iter(self.contexts))
             self.contexts.pop(key)
+            self.complete_seasons.pop(key, None)
             self.analyzed_episodes.pop(key, None)
             self.latest_previews.pop(key, None)
 
@@ -165,6 +167,9 @@ class NamingService:
             proposal = resolved.get("proposal") or {}
             if proposal.get("episodes") is not None:
                 self.episode_evidence[result["context_id"]] = deepcopy(proposal["episodes"])
+            if proposal.get("identity"):
+                self.complete_seasons[result["context_id"]] = (
+                    proposal["identity"].get("tmdb_id"), proposal.get("complete_season_counts", {}))
         episode_override = (manual_overrides or {}).get("episode")
         if episode_override is not None:
             if not isinstance(episode_override, dict) or set(episode_override) - {"season", "episode", "scope"}:
@@ -272,6 +277,7 @@ class NamingService:
         scope = (episode_override or {}).get("scope")
         if not scope:
             scope = "season" if len(result["files"]) > 1 or any(ref.get("kind") == "directory" for ref in resources) else "single"
+        self._apply_complete_seasons(result, effective)
         result["episode"] = episode_summary(result["files"], scope, effective)
         self.analyzed_episodes[result["context_id"]] = {
             (item["ref"]["root_key"], item["ref"]["relative_path"]): deepcopy(item["episode"])
@@ -320,6 +326,25 @@ class NamingService:
         self._remember_context(result)
         self.last_changes, self.last_capabilities = changes, capabilities
         return deepcopy(result)
+
+    def _apply_complete_seasons(self, context, rules):
+        from .episodes import field
+        identity = context.get("identity") or {}
+        ref, counts = self.complete_seasons.get(context["context_id"], (None, {}))
+        for item in context["files"]:
+            episode = item["episode"]
+            current = episode.get("season_episode_count") or {}
+            if current.get("manual"):
+                continue
+            season = _value(episode.get("season"))
+            total = counts.get(season)
+            if (total and identity.get("confirmed") and ref == identity.get("tmdb_id")
+                    and rules.get("episode_numbering") != "continuous"):
+                # Unlike a season's currently listed episodes, this count is final.
+                season_ref = f"tv/{ref}/season/{season if season is not None else 1}"
+                episode["season_episode_count"] = field(total, "tmdb", season_ref, True)
+            elif str(current.get("source_ref") or "").startswith("tv/"):
+                episode["season_episode_count"] = field(None, "tmdb")
 
     def _context(self, context):
         if not isinstance(context, dict):
@@ -466,6 +491,7 @@ class NamingService:
             changed_operations = [x for x in operations if x["source"]["relative_path"] != x["target_relative_path"]]
             conflicts.extend(self.files.validate_operations(changed_operations))
             current["files"] = updated_files
+            self._apply_complete_seasons(current, chosen_rules)
             current["episode"] = episode_summary(updated_files, current["episode"]["scope"], chosen_rules)
             self._accept_plan(current, chosen_rules, signature, plan_changed)
             self.manual_rules.setdefault(current["context_id"], {}).update(deepcopy(rules or {}))
@@ -580,6 +606,9 @@ class NamingService:
         }
         if "episode" in context:
             public["episode"] = deepcopy(context["episode"])
+            public["selected_file_episodes"] = [
+                {"ref": item["ref"], "episode": item["episode"]} for item in context.get("files", [])
+            ]
             public["file_episodes"] = {
                 item["ref"]["relative_path"]: {key: _value(item["episode"].get(key)) for key in ("season", "episode")}
                 for item in context.get("files", [])

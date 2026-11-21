@@ -52,6 +52,53 @@ def analyze(service, resources, **kwargs):
     return asyncio.run(service.analyze(resources, **kwargs))
 
 
+@pytest.mark.parametrize("ended,selection,expected", [
+    (True, [1, 2, 3], "全3集"), (False, [1, 2, 3], "第1-3集"),
+    (True, [1, 3], "第1、3集"), (True, [201], "第201集"),
+])
+def test_subtitle_from_selected_files(setup, ended, selection, expected):
+    from bili_remote.v2.metadata.providers import TMDBProvider
+    from bili_remote.v2.subtitle import render
+
+    class Series(TMDBProvider):
+        async def get(self, path, **kwargs):
+            assert path == "tv/12"
+            return {"id": 12, "name": "剧名", "original_name": "剧名", "original_language": "zh",
+                    "status": "Ended" if ended else "Returning Series",
+                    "seasons": [{"season_number": 1, "episode_count": 3}]}
+
+    service, root, _ = setup
+    service.resolver = MetadataResolver({"tmdb": Series()})
+    directory = root / "series"
+    directory.mkdir()
+    for number in selection:
+        (directory / f"剧名.E{number:02d}.mkv").touch()
+    (directory / f"剧名.E{selection[0]:02d}.1080p.mkv").touch()
+    context = analyze(service, [service.files.reference("downloads", "series")],
+                      selection={"provider": "tmdb", "id": "12", "media_type": "series"})
+    rule = context["effective_rules"]["subtitle_rule"]
+    assert render(context, rule)["text"] == "剧名 " + expected
+    first = context["files"][0]["ref"]["relative_path"]
+    preview = service.preview(context, {"episode_overrides": {first: {"season": 2, "episode": 99}}})
+    for item, updated in zip(context["files"], preview["selected_file_episodes"], strict=True):
+        assert updated["ref"] == item["ref"]
+        item["episode"] = updated["episode"]
+    assert "第二季 第99集" in render(context, rule)["text"]
+
+
+def test_selected_subtitle_leaves_platform_id_and_part_unassigned(setup):
+    from bili_remote.v2.subtitle import render
+    service, root, _ = setup
+    refs = []
+    for name in ("剧名.E38.mp4", "剧名.Biliep3065290.mp4", "剧名.P03.mp4"):
+        (root / name).touch()
+        refs.append(service.files.reference("downloads", name))
+    context = analyze(service, refs, manual_overrides={"selected_title": "剧名"})
+    result = render(context, {"template_id": "tv_season"})
+    assert result["text"] == "剧名 第38集"
+    assert all(name in result["warnings"][-1]["message"] for name in ("Biliep3065290", "P03"))
+
+
 def test_preview_zero_writes_technical_overrides_sidecars_apply_and_undo(setup, monkeypatch):
     service, root, database = setup
     for name in ("a.mkv", "a.chs.forced.srt", "a.cht.ass", "a.eng.SDH.srt", "sound.flac"):

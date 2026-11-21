@@ -8,6 +8,41 @@ from bili_remote.v2.metadata.providers import BangumiProvider, PTGenProvider, Pr
 from bili_remote.v2.workbench.publishing import PublishingService
 
 
+@pytest.mark.parametrize("source,expected_rating", [
+    ({"imdb_id": "tt38775487"}, ""),
+    ({"imdb": {"id": "tt38775487"}, "ratings": {"imdb": {"average": 7.1, "votes": 335}}}, "7.1/10 (335 人评价)"),
+    ({"imdb_link": "https://m.imdb.com/title/tt38775487/?ref_=test", "imdb_score": 7.1}, ""),
+    ({"format": "◎IMDb链接　[url=https://www.imdb.com/title/tt38775487/?ref_=test]IMDb[/url]"}, ""),
+])
+def test_douban_normalizes_same_subject_imdb(source, expected_rating):
+    class PTGen:
+        async def get(self, params):
+            assert params["url"].endswith("/subject/37508847/")
+            return {"site": "douban", "id": "37508847", "title": "合成测试", **source}
+    result = asyncio.run(IntroductionService({"ptgen": PTGen()}).build(
+        IntroductionRequest(source="ptgen", reference="37508847", matched_movie_id="12")))
+    assert result["text"].count("◎IMDb链接　https://www.imdb.com/title/tt38775487/") == 1
+    assert [line for line in result["text"].splitlines() if line.startswith("◎IMDb评分")] == (
+        ["◎IMDb评分　" + expected_rating] if expected_rating else [])
+
+
+@pytest.mark.parametrize("reverse_douban,valid", [("777", True), ("888", False)])
+def test_imdb_supplement_requires_exact_reverse_subject(reverse_douban, valid):
+    class PTGen:
+        async def get(self, params):
+            if "imdb.com" in params["url"]:
+                return {"site": "imdb", "sid": "tt1234567", "douban_id": reverse_douban}
+            return {"site": "douban", "id": "777", "title": "同名作品", "summary": "所选条目剧情"}
+    class TMDB:
+        async def get(self, path, **kwargs):
+            assert path == "movie/12"
+            return {"id": 12, "external_ids": {"imdb_id": "tt1234567"}}
+    result = asyncio.run(IntroductionService({"ptgen": PTGen(), "tmdb": TMDB()}).build(
+        IntroductionRequest(source="ptgen", reference="777", matched_movie_id="12")))
+    assert ("◎IMDb链接　https://www.imdb.com/title/tt1234567/" in result["text"]) is valid
+    assert "所选条目剧情" in result["text"]
+
+
 def test_ptgen_preserves_extended_fields_cast_and_aliases_without_placeholder_scores():
     cast = "\n".join(f"　　　　　演員 {i:02}" for i in range(2, 31))
     formatted = (

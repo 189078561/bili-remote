@@ -76,6 +76,46 @@ def _integer(field):
     return number if number >= 0 else None
 
 
+def _episode_ranges(numbers):
+    ranges = []
+    for number in sorted(numbers):
+        if ranges and number == ranges[-1][1] + 1:
+            ranges[-1][1] = number
+        else:
+            ranges.append([number, number])
+    return "、".join(str(start) if start == end else f"{start}-{end}" for start, end in ranges)
+
+
+def _selected_episode_text(ctx):
+    groups, totals, unknown = {}, {}, []
+    continuous = (ctx.get("effective_rules", {}).get("naming_rule") or {}).get("episode_numbering") == "continuous"
+    identity = _mapping(ctx.get("identity"))
+    for item in ctx["files"]:
+        item = _mapping(item)
+        episode = _mapping(item.get("episode"))
+        number = _integer(episode.get("episode"))
+        if not number:
+            unknown.append(_mapping(item.get("ref")).get("relative_path") or "未命名文件")
+            continue
+        season = None if continuous else _integer(episode.get("season"))
+        groups.setdefault(season, set()).add(number)
+        count = _mapping(episode.get("season_episode_count"))
+        season_ref = f"tv/{identity.get('tmdb_id')}/season/{season if season is not None else 1}"
+        final = count.get("manual") or (identity.get("confirmed") and count.get("source") == "tmdb"
+                                        and count.get("source_ref") == season_ref and count.get("confirmed"))
+        totals.setdefault(season, set()).add(_integer(count) if final and not continuous else None)
+    labels = []
+    for season in sorted(groups, key=lambda n: (n is None, n or 0)):
+        numbers = groups[season]
+        full = not unknown and min(numbers) == 1 and max(numbers) == len(numbers) and totals[season] == {len(numbers)}
+        label = f"全{len(numbers)}集" if full else f"第{_episode_ranges(numbers)}集"
+        if len(groups) > 1:
+            prefix = f"第{_season_cn(season)}季" if season is not None else "季号待确认"
+            label = f"{prefix} {label}"
+        labels.append(label)
+    return " / ".join(labels), unknown
+
+
 class SubtitleService:
     """Render PT subtitle text from shared context; never fetch or persist data."""
     def render(self, context, subtitle_rule=None):
@@ -178,6 +218,19 @@ def render(context, subtitle_rule=None):
         sections["episode"] = f"第{episode_number:02d}集" if episode_number is not None else ""
     elif template == "tv_episode":
         sections["episode"] = f"第{episode_number:02d}集" if episode_number is not None else ""
+    if ctx.get("files") and template in {"tv_episode", "tv_season", "anime"} and media_type != "movie":
+        slots = [key for key in rule["field_order"] if key in requested and key in {"episode", "season_episode_count"}]
+        if slots:
+            label, unknown = _selected_episode_text(ctx)
+            for key in ("season", "episode", "season_episode_count"):
+                sections.pop(key, None)
+                if key in missing:
+                    missing.remove(key)
+            sections[slots[0]] = label
+            if unknown:
+                missing.append("episode")
+                warnings.append({"code": "unknown_selected_episodes",
+                                 "message": "请确认所选文件的集号：" + "、".join(unknown)})
     sections["genres"] = _labeled(rule, "genres", genres_text)
     sections["cast"] = _labeled(rule, "cast", rule["list_separator"].join(cast))
     sections["voice_cast"] = _labeled(rule, "voice_cast", rule["list_separator"].join(voices))
