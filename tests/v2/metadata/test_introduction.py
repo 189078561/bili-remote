@@ -393,3 +393,45 @@ def test_film_rating_lookup_uses_final_subject_and_preserves_douban(source_link,
     assert f"◎IMDb链接　https://www.imdb.com/title/{lookup_id}/" in result["text"]
     assert "◎IMDb评分　7.2/10 (40 人评价)" in result["text"]
     assert "◎豆瓣评分　7.7/10 (500 人评价)" in result["text"]
+
+
+@pytest.mark.parametrize("case", ["director", "cast", "wrong_credits", "same_title_films", "chapter"])
+def test_douban_film_can_find_imdb_without_a_workbench_match(case):
+    class PTGen:
+        async def get(self, params):
+            assert params["url"] == "https://movie.douban.com/subject/301/"
+            return {"title": "样本", "year": 2026, "director": ["甲 A"],
+                    "episodes": 8 if case == "chapter" else None,
+                    "cast": ["乙 (饰 主角)", "丙 Bing"], "douban_rating": "7.7/10"}
+
+    class TMDB:
+        async def search(self, title, kind, *, year):
+            assert case != "chapter"
+            assert (title, kind, year) == ("样本", "movie", 2026)
+            items = [{"id": "12", "title": title, "year": "2026"}]
+            if case == "same_title_films":
+                items.append({"id": "13", "title": title, "year": "2026"})
+            return {"items": items, "total_pages": 1}
+
+        async def get(self, path, **params):
+            assert case != "same_title_films" and path == "movie/12"
+            return {"id": 12, "title": "样本", "release_date": "2026-08-19",
+                    "credits": {"crew": [{"job": "Director", "name": "甲" if case == "director" else "丁"}],
+                                "cast": [{"name": "乙"}, {"name": "丙"}] if case == "cast" else [{"name": "乙"}]},
+                    "external_ids": {"imdb_id": "tt1234567"}}
+
+    class Ratings:
+        def lookup(self, title_id):
+            assert title_id == "tt1234567"
+            return {"average": 6.9, "votes": 569}
+
+    result = asyncio.run(IntroductionService({"ptgen": PTGen(), "tmdb": TMDB()}, Ratings()).build(
+        IntroductionRequest(source="ptgen", reference="301")))
+    body = result["text"]
+    if case in {"director", "cast"}:
+        assert "◎IMDb链接　https://www.imdb.com/title/tt1234567/" in body
+        assert "◎IMDb评分　6.9/10 (569 人评价)" in body
+    else:
+        assert "◎IMDb" not in body
+    assert "◎豆瓣评分　7.7/10" in body
+    assert PublishingService().compose({"revision": 1}, "", "", body, overview_is_introduction=True)["content"] == body

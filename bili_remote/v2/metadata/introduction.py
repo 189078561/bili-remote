@@ -374,6 +374,13 @@ def ptgen_fields(row, reference):
     }
 
 
+def matching_credits(source, candidate):
+    source_names = [name.casefold() for name in names(source)]
+    return {person.casefold() for person in names(candidate)
+            if any(re.match(r"^" + re.escape(person.casefold()) + r"(?:$|\s|[（(])", name)
+                   for name in source_names)}
+
+
 def matched_imdb(fields, ctx):
     identity = ctx.get("identity") or {}
     ref = identity.get("tmdb_id")
@@ -404,16 +411,12 @@ def matched_imdb(fields, ctx):
         return "", ""
     if not movie and not (chapter or fields.get("episode_count") or fields.get("season")):
         return "", ""
-    # Compare credits in the same role, allowing localized bilingual names.
-    for role in ("directors", "cast"):
-        credits = names(fields.get(role))
-        for person in names(work[role]):
-            if any(person == name or name.startswith(person + " ") or name.startswith(person + "（") for name in credits):
-                if movie:
-                    return link, "电影"
-                # A season entry can also have the exact series title. The
-                # link is valid, but whole-series votes do not describe it.
-                return link, "动画系列" if "动画" in work_genres else "剧集系列"
+    if any(matching_credits(fields.get(role), work[role]) for role in ("directors", "cast")):
+        if movie:
+            return link, "电影"
+        # A season entry can also have the exact series title. Its parent
+        # link can be used, while the parent's votes describe another scope.
+        return link, "动画系列" if "动画" in work_genres else "剧集系列"
     return "", ""
 
 
@@ -548,6 +551,41 @@ class IntroductionService:
             return link
         return ""
 
+    async def imdb_from_douban_film(self, fields):
+        title = text(fields.get("title"))
+        year = text(fields.get("year"))
+        if (fields.get("episode_count") or fields.get("season_count") or fields.get("season")
+                or _CHAPTER.search(title) or not title or not re.fullmatch(r"[1-9][0-9]{3}", year)):
+            return ""
+        if not names(fields.get("directors")) and len(names(fields.get("cast"))) < 2:
+            return ""
+
+        def same_title(*values):
+            return any(text(value).casefold() == title.casefold() for value in values)
+
+        try:
+            provider = self.provider("tmdb")
+            page = await provider.search(title, "movie", year=int(year))
+            if page.get("total_pages") != 1:
+                return ""
+            candidates = [item for item in page.get("items", [])
+                          if text(item.get("year")) == year and same_title(item.get("title"), item.get("original_title"))]
+            if len(candidates) != 1:
+                return ""
+            ref = identifier(candidates[0]["id"])
+            row = await provider.get("movie/" + ref, language="zh-CN", append_to_response="credits,external_ids")
+        except ProviderError:
+            return ""
+        movie = tmdb_fields(row)
+        if str(row.get("id")) != ref or movie["year"] != year or not same_title(row.get("title"), movie["title"]):
+            return ""
+        genres, movie_genres = names(fields.get("genres")), movie["genres"]
+        if genres and movie_genres and (("动画" in genres) != ("动画" in movie_genres)):
+            return ""
+        directors = matching_credits(fields.get("directors"), movie["directors"])
+        cast = matching_credits(fields.get("cast"), movie["cast"])
+        return movie["imdb_url"] if directors or len(cast) >= 2 else ""
+
     async def douban(self, reference, matched_movie=None, ctx=None):
         supplied = USER_SUPPLIED_DOUBAN.get(reference, {})
         url = "https://movie.douban.com/subject/" + reference + "/"
@@ -587,12 +625,18 @@ class IntroductionService:
                 warnings.append(f"IMDb 链接取自已匹配的{scope}。")
             elif crosslink or matched_movie:
                 fields["imdb_url"] = await self.linked_imdb(row, reference, matched_movie)
+        film_link = ""
+        if not fields.get("imdb_url") and not crosslink:
+            film_link = await self.imdb_from_douban_film(fields)
+            if film_link:
+                fields["imdb_url"] = film_link
+                warnings.append("IMDb 链接已通过豆瓣片名、年份及演职员与 TMDB 电影核对。")
         # An explicit title link on a seasonal Douban page may point to the
         # parent series. Only fetch additional votes for an identified title.
         seasonal = fields.get("season") or any(_CHAPTER.search(name) for name in
                                               [text(fields.get("title")), *names(fields.get("aliases"))])
         parent_link = scope in {"动画系列", "剧集系列"} and explicit_link == matched_link
-        exact_link = explicit_link if not seasonal and not parent_link else ""
+        exact_link = film_link or (explicit_link if not seasonal and not parent_link else "")
         if scope == "电影" and fields.get("imdb_url") == matched_link:
             exact_link = matched_link
         if exact_link and not fields.get("imdb_rating"):
